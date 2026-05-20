@@ -15,7 +15,6 @@ Current target snapshot:
 - Decode RT7 models
 - Extract audio (`jaga` + embedded `ogg`, direct `ogg`)
 - Run full unpack flow with top-level exports (`worldmap`, `maps`, `vfx`, `animator`, `cutscene2d`, defaults, `areas.png`, `ttf`, `fontmetrics`, `binary`)
-- Keep feature parity checks against Java `rs3-cache`
 
 ## Requirements
 
@@ -121,12 +120,3 @@ Real-cache tests support env overrides:
 - `RS3_CACHE_DIR`
 - `RS3_CACHE_TAR`
 - `RS3_DATA_DIR`
-
-## Parity audit
-
-Compare against Java repo:
-
-```bash
-python3 tools/parity_audit.py --java-root ../rs3-cache --rust-root .
-```
-
