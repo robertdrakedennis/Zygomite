@@ -43,6 +43,8 @@ Main options:
 - `--cache-dir <PATH>` flat cache root
 - `--cache-tar <PATH>` tar used to backfill missing archive/group files
 - `--data-dir <PATH>` data files for names/opcodes
+- `--build <N>` cache build for versioned decoding/opcodes (default `947`)
+- `--subbuild <N>` cache subbuild for opcodebook lookup (default `1`)
 
 ### Full unpack (recommended)
 
@@ -58,6 +60,18 @@ Fast model sample run:
 
 ```bash
 cargo run -- unpack --out-dir /tmp/rs3-cache-rs-out --sample-models --skip-audio
+```
+
+RS3 build `910` example:
+
+```bash
+cargo run -- \
+  --cache-dir /tmp/rs3-cache-rs-910/cache \
+  --cache-tar /Users/robert/projects/ignis/static/cache-runescape-live-en-b910-2019-12-11-00-00-00-openrs2#1730.tar \
+  --data-dir ../rs3-cache/data \
+  --build 910 \
+  --subbuild 0 \
+  unpack --out-dir /tmp/rs3-cache-rs-910-out-audio --sample-models --max-audio-files 500
 ```
 
 ### Individual commands

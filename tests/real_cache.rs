@@ -505,7 +505,7 @@ fn parses_additional_config_groups() -> Result<()> {
     };
     let bas_count =
         parse_optional_config_group(&cache, &config_index, CONFIG_GROUP_BAS, |id, data| {
-            let parsed = parse_bas(id, data)?;
+            let parsed = parse_bas(id, data, BUILD)?;
             assert_eq!(id, parsed.id);
             Ok(parsed)
         })?;
@@ -1036,6 +1036,8 @@ fn cli_smoke_unpack_and_audio_write_expected_artifacts() -> Result<()> {
         cache_dir: Some(cache_root.clone()),
         cache_tar: Some(tar.clone()),
         data_dir: data_dir(),
+        build: BUILD,
+        subbuild: SUBBUILD,
         command: Command::Unpack {
             out_dir: unpack_out.clone(),
             sample_models: true,
@@ -1073,6 +1075,8 @@ fn cli_smoke_unpack_and_audio_write_expected_artifacts() -> Result<()> {
         cache_dir: Some(cache_root),
         cache_tar: Some(tar),
         data_dir: data_dir(),
+        build: BUILD,
+        subbuild: SUBBUILD,
         command: Command::Audio {
             out_dir: Some(audio_out.clone()),
             max_files: Some(256),

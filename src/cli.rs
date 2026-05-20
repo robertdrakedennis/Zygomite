@@ -52,7 +52,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use image::{ImageBuffer, Rgb};
 use rayon::prelude::*;
 use serde::Serialize;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Write;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -67,6 +67,10 @@ pub struct Cli {
     pub cache_tar: Option<PathBuf>,
     #[arg(long, default_value = "../rs3-cache/data")]
     pub data_dir: PathBuf,
+    #[arg(long, default_value_t = BUILD)]
+    pub build: u32,
+    #[arg(long, default_value_t = SUBBUILD)]
+    pub subbuild: u32,
     #[command(subcommand)]
     pub command: Command,
 }
@@ -284,23 +288,45 @@ struct AudioManifestEntry {
     extracted_ogg: bool,
 }
 
+#[derive(Clone, Copy, Debug)]
+struct RuntimeVersion {
+    build: u32,
+    subbuild: u32,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct UnpackRunOptions {
+    sample_models: bool,
+    skip_audio: bool,
+    max_audio_files: Option<usize>,
+}
+
 pub fn run(cli: Cli) -> Result<()> {
     let tar_path = cli.cache_tar.unwrap_or_else(default_tar_path);
     let cache = open_cache(cli.cache_dir.as_deref())?;
+    let version = RuntimeVersion {
+        build: cli.build,
+        subbuild: cli.subbuild,
+    };
 
     match cli.command {
-        Command::Interfaces { out_dir } => run_interfaces(&cache, &tar_path, out_dir.as_deref()),
+        Command::Interfaces { out_dir } => {
+            run_interfaces(&cache, &tar_path, out_dir.as_deref(), version.build)
+        }
         Command::Varps { out_file, domain } => {
             run_varps(&cache, &tar_path, out_file.as_deref(), domain)
         }
         Command::Varbits { out_file } => run_varbits(&cache, &tar_path, out_file.as_deref()),
-        Command::Configs { out_dir } => run_configs(&cache, &tar_path, out_dir.as_deref()),
+        Command::Configs { out_dir } => {
+            run_configs(&cache, &tar_path, out_dir.as_deref(), version.build)
+        }
         Command::Cs2 { out_file, out_dir } => run_cs2(
             &cache,
             &tar_path,
             &cli.data_dir,
             out_file.as_deref(),
             out_dir.as_deref(),
+            version,
         ),
         Command::Models {
             out_file,
@@ -312,6 +338,7 @@ pub fn run(cli: Cli) -> Result<()> {
             out_file.as_deref(),
             out_dir.as_deref(),
             sample_only,
+            version.build,
         ),
         Command::Audio { out_dir, max_files } => {
             run_audio(&cache, &tar_path, out_dir.as_deref(), max_files)
@@ -326,14 +353,22 @@ pub fn run(cli: Cli) -> Result<()> {
             &tar_path,
             &cli.data_dir,
             &out_dir,
-            sample_models,
-            skip_audio,
-            max_audio_files,
+            UnpackRunOptions {
+                sample_models,
+                skip_audio,
+                max_audio_files,
+            },
+            version,
         ),
     }
 }
 
-fn run_interfaces(cache: &FlatCache, tar_path: &Path, out_dir: Option<&Path>) -> Result<()> {
+fn run_interfaces(
+    cache: &FlatCache,
+    tar_path: &Path,
+    out_dir: Option<&Path>,
+    build: u32,
+) -> Result<()> {
     ensure_archive_complete(cache.root(), tar_path, ARCHIVE_INTERFACES)?;
     let cache = FlatCache::open(cache.root())?;
     let index = cache.archive_index(ARCHIVE_INTERFACES)?;
@@ -343,7 +378,7 @@ fn run_interfaces(cache: &FlatCache, tar_path: &Path, out_dir: Option<&Path>) ->
         .map(|group| -> Result<usize> {
             let group_files = cache.group_files_with_index(&index, ARCHIVE_INTERFACES, *group)?;
             let file_count = group_files.len();
-            let rendered = render_interface_group(*group, &group_files, BUILD);
+            let rendered = render_interface_group(*group, &group_files, build);
             if let Some(out) = out_dir {
                 let is_scripted = group_files
                     .values()
@@ -420,7 +455,12 @@ fn run_varbits(cache: &FlatCache, tar_path: &Path, out_file: Option<&Path>) -> R
     })
 }
 
-fn run_configs(cache: &FlatCache, tar_path: &Path, out_dir: Option<&Path>) -> Result<()> {
+fn run_configs(
+    cache: &FlatCache,
+    tar_path: &Path,
+    out_dir: Option<&Path>,
+    build: u32,
+) -> Result<()> {
     ensure_archive_complete(cache.root(), tar_path, ARCHIVE_CONFIG)?;
     ensure_archive_complete(cache.root(), tar_path, ARCHIVE_ENUM_CONFIG)?;
     let struct_archive_available =
@@ -460,7 +500,7 @@ fn run_configs(cache: &FlatCache, tar_path: &Path, out_dir: Option<&Path>) -> Re
     let param_files = crate::js5::unpack_group(&config_index, CONFIG_GROUP_PARAM, &param_payload)?;
     let mut params = Vec::with_capacity(param_files.len());
     for (id, data) in param_files {
-        params.push(parse_param(id, &data)?);
+        params.push(parse_param(id, &data).with_context(|| format!("parse_param id {id}"))?);
     }
 
     let dbtable_payload = cache
@@ -470,7 +510,7 @@ fn run_configs(cache: &FlatCache, tar_path: &Path, out_dir: Option<&Path>) -> Re
         crate::js5::unpack_group(&config_index, CONFIG_GROUP_DBTABLE, &dbtable_payload)?;
     let mut dbtables = Vec::with_capacity(dbtable_files.len());
     for (id, data) in dbtable_files {
-        dbtables.push(parse_dbtable(id, &data)?);
+        dbtables.push(parse_dbtable(id, &data).with_context(|| format!("parse_dbtable id {id}"))?);
     }
 
     let dbrow_payload = cache
@@ -479,7 +519,7 @@ fn run_configs(cache: &FlatCache, tar_path: &Path, out_dir: Option<&Path>) -> Re
     let dbrow_files = crate::js5::unpack_group(&config_index, CONFIG_GROUP_DBROW, &dbrow_payload)?;
     let mut dbrows = Vec::with_capacity(dbrow_files.len());
     for (id, data) in dbrow_files {
-        dbrows.push(parse_dbrow(id, &data)?);
+        dbrows.push(parse_dbrow(id, &data).with_context(|| format!("parse_dbrow id {id}"))?);
     }
 
     let mut idks = Vec::new();
@@ -487,7 +527,7 @@ fn run_configs(cache: &FlatCache, tar_path: &Path, out_dir: Option<&Path>) -> Re
         let files = crate::js5::unpack_group(&config_index, CONFIG_GROUP_IDK, &payload)?;
         idks.reserve(files.len());
         for (id, data) in files {
-            idks.push(parse_idk(id, &data)?);
+            idks.push(parse_idk(id, &data).with_context(|| format!("parse_idk id {id}"))?);
         }
     }
 
@@ -498,14 +538,16 @@ fn run_configs(cache: &FlatCache, tar_path: &Path, out_dir: Option<&Path>) -> Re
             let files = cache.group_files_with_index(&loc_index, ARCHIVE_LOC_CONFIG, *group)?;
             for (file, data) in files {
                 let loc_id = (group << 8) | file;
-                locs.push(parse_loc(loc_id, &data)?);
+                locs.push(
+                    parse_loc(loc_id, &data).with_context(|| format!("parse_loc id {loc_id}"))?,
+                );
             }
         }
     } else if let Some(payload) = cache.get(ARCHIVE_CONFIG, CONFIG_GROUP_LOC_LEGACY)? {
         let files = crate::js5::unpack_group(&config_index, CONFIG_GROUP_LOC_LEGACY, &payload)?;
         locs.reserve(files.len());
         for (id, data) in files {
-            locs.push(parse_loc(id, &data)?);
+            locs.push(parse_loc(id, &data).with_context(|| format!("parse_loc id {id}"))?);
         }
     }
 
@@ -516,14 +558,16 @@ fn run_configs(cache: &FlatCache, tar_path: &Path, out_dir: Option<&Path>) -> Re
             let files = cache.group_files_with_index(&npc_index, ARCHIVE_NPC_CONFIG, *group)?;
             for (file, data) in files {
                 let npc_id = (group << 7) | file;
-                npcs.push(parse_npc(npc_id, &data)?);
+                npcs.push(
+                    parse_npc(npc_id, &data).with_context(|| format!("parse_npc id {npc_id}"))?,
+                );
             }
         }
     } else if let Some(payload) = cache.get(ARCHIVE_CONFIG, CONFIG_GROUP_NPC_LEGACY)? {
         let files = crate::js5::unpack_group(&config_index, CONFIG_GROUP_NPC_LEGACY, &payload)?;
         npcs.reserve(files.len());
         for (id, data) in files {
-            npcs.push(parse_npc(id, &data)?);
+            npcs.push(parse_npc(id, &data).with_context(|| format!("parse_npc id {id}"))?);
         }
     }
 
@@ -534,14 +578,16 @@ fn run_configs(cache: &FlatCache, tar_path: &Path, out_dir: Option<&Path>) -> Re
             let files = cache.group_files_with_index(&obj_index, ARCHIVE_OBJ_CONFIG, *group)?;
             for (file, data) in files {
                 let obj_id = (group << 8) | file;
-                objs.push(parse_obj(obj_id, &data)?);
+                objs.push(
+                    parse_obj(obj_id, &data).with_context(|| format!("parse_obj id {obj_id}"))?,
+                );
             }
         }
     } else if let Some(payload) = cache.get(ARCHIVE_CONFIG, CONFIG_GROUP_OBJ_LEGACY)? {
         let files = crate::js5::unpack_group(&config_index, CONFIG_GROUP_OBJ_LEGACY, &payload)?;
         objs.reserve(files.len());
         for (id, data) in files {
-            objs.push(parse_obj(id, &data)?);
+            objs.push(parse_obj(id, &data).with_context(|| format!("parse_obj id {id}"))?);
         }
     }
 
@@ -552,14 +598,16 @@ fn run_configs(cache: &FlatCache, tar_path: &Path, out_dir: Option<&Path>) -> Re
             let files = cache.group_files_with_index(&seq_index, ARCHIVE_SEQ_CONFIG, *group)?;
             for (file, data) in files {
                 let seq_id = (group << 7) | file;
-                seqs.push(parse_seq(seq_id, &data)?);
+                seqs.push(
+                    parse_seq(seq_id, &data).with_context(|| format!("parse_seq id {seq_id}"))?,
+                );
             }
         }
     } else if let Some(payload) = cache.get(ARCHIVE_CONFIG, CONFIG_GROUP_SEQ)? {
         let files = crate::js5::unpack_group(&config_index, CONFIG_GROUP_SEQ, &payload)?;
         seqs.reserve(files.len());
         for (id, data) in files {
-            seqs.push(parse_seq(id, &data)?);
+            seqs.push(parse_seq(id, &data).with_context(|| format!("parse_seq id {id}"))?);
         }
     }
 
@@ -570,14 +618,17 @@ fn run_configs(cache: &FlatCache, tar_path: &Path, out_dir: Option<&Path>) -> Re
             let files = cache.group_files_with_index(&spot_index, ARCHIVE_SPOT_CONFIG, *group)?;
             for (file, data) in files {
                 let spot_id = (group << 8) | file;
-                spots.push(parse_spot(spot_id, &data)?);
+                spots.push(
+                    parse_spot(spot_id, &data)
+                        .with_context(|| format!("parse_spot id {spot_id}"))?,
+                );
             }
         }
     } else if let Some(payload) = cache.get(ARCHIVE_CONFIG, CONFIG_GROUP_SPOT)? {
         let files = crate::js5::unpack_group(&config_index, CONFIG_GROUP_SPOT, &payload)?;
         spots.reserve(files.len());
         for (id, data) in files {
-            spots.push(parse_spot(id, &data)?);
+            spots.push(parse_spot(id, &data).with_context(|| format!("parse_spot id {id}"))?);
         }
     }
 
@@ -586,7 +637,7 @@ fn run_configs(cache: &FlatCache, tar_path: &Path, out_dir: Option<&Path>) -> Re
         let files = crate::js5::unpack_group(&config_index, CONFIG_GROUP_BAS, &payload)?;
         bass.reserve(files.len());
         for (id, data) in files {
-            bass.push(parse_bas(id, &data)?);
+            bass.push(parse_bas(id, &data, build).with_context(|| format!("parse_bas id {id}"))?);
         }
     }
 
@@ -1103,10 +1154,11 @@ fn run_cs2(
     data_dir: &Path,
     out_file: Option<&Path>,
     out_dir: Option<&Path>,
+    version: RuntimeVersion,
 ) -> Result<()> {
     ensure_archive_complete(cache.root(), tar_path, ARCHIVE_CLIENTSCRIPTS)?;
     let cache = FlatCache::open(cache.root())?;
-    let opcode_book = OpcodeBook::load(data_dir, BUILD, SUBBUILD)?;
+    let opcode_book = OpcodeBook::load(data_dir, version.build, version.subbuild)?;
     let index = cache.archive_index(ARCHIVE_CLIENTSCRIPTS)?;
     let keep_decoded = out_file.is_some();
     let write_source = out_dir.is_some();
@@ -1127,7 +1179,7 @@ fn run_cs2(
             let single_file_group = files.len() == 1;
 
             for (file, bytes) in files {
-                let script = decode_script(&bytes, &opcode_book, BUILD)?;
+                let script = decode_script(&bytes, &opcode_book, version.build)?;
                 scripts += 1;
                 instructions += script.code.len();
                 for instruction in &script.code {
@@ -1173,7 +1225,7 @@ fn run_cs2(
                 let mut decoded = Vec::new();
 
                 for (_, bytes) in files {
-                    let script = decode_script(&bytes, &opcode_book, BUILD)?;
+                    let script = decode_script(&bytes, &opcode_book, version.build)?;
                     for instruction in &script.code {
                         *opcode_counts
                             .entry(instruction.command.clone())
@@ -1224,14 +1276,22 @@ fn run_models(
     out_file: Option<&Path>,
     out_dir: Option<&Path>,
     sample_only: bool,
+    build: u32,
 ) -> Result<()> {
     ensure_archive_complete(cache.root(), tar_path, ARCHIVE_MODELS_RT7)?;
     let cache = FlatCache::open(cache.root())?;
     let index = cache.archive_index(ARCHIVE_MODELS_RT7)?;
+    let available_groups: HashSet<u32> = index.group_id.iter().copied().collect();
 
     let groups: Vec<u32> = if sample_only {
         let mut sample = (0_u32..=100).collect::<Vec<_>>();
-        sample.extend([1_000, 5_000, 10_000, 50_000, 100_000, 140_130]);
+        sample.extend([1_000, 5_000, 10_000, 50_000, 100_000]);
+        if let Some(last) = index.group_id.last() {
+            sample.push(*last);
+        }
+        sample.sort_unstable();
+        sample.dedup();
+        sample.retain(|group| available_groups.contains(group));
         sample
     } else {
         index.group_id.clone()
@@ -1248,7 +1308,7 @@ fn run_models(
             let Some(bytes) = files.get(&0) else {
                 continue;
             };
-            match Model::decode(bytes, BUILD) {
+            match Model::decode(bytes, build) {
                 Ok(model) => {
                     parsed_count += 1;
                     let model_path = path.join(format!("model_{group}.json"));
@@ -1290,7 +1350,7 @@ fn run_models(
                     parsed_model: None,
                 });
             };
-            match Model::decode(bytes, BUILD) {
+            match Model::decode(bytes, build) {
                 Ok(model) => Ok(ModelGroupResult {
                     parsed_count: 1,
                     parse_errors: 0,
@@ -1331,9 +1391,8 @@ fn run_unpack(
     tar_path: &Path,
     data_dir: &Path,
     out_dir: &Path,
-    sample_models: bool,
-    skip_audio: bool,
-    max_audio_files: Option<usize>,
+    options: UnpackRunOptions,
+    version: RuntimeVersion,
 ) -> Result<()> {
     let interface_dir = out_dir.join("interface");
     let config_dir = out_dir.join("config");
@@ -1341,7 +1400,7 @@ fn run_unpack(
     let model_dir = out_dir.join("model");
     let audio_dir = out_dir.join("audio");
 
-    run_interfaces(cache, tar_path, Some(&interface_dir))?;
+    run_interfaces(cache, tar_path, Some(&interface_dir), version.build)?;
     run_varps(
         cache,
         tar_path,
@@ -1349,22 +1408,24 @@ fn run_unpack(
         VarDomainArg::All,
     )?;
     run_varbits(cache, tar_path, Some(&config_dir.join("varbits.json")))?;
-    run_configs(cache, tar_path, Some(config_dir.as_path()))?;
+    run_configs(cache, tar_path, Some(config_dir.as_path()), version.build)?;
     run_cs2(
         cache,
         tar_path,
         data_dir,
         Some(&script_dir.join("scripts.json")),
         Some(&script_dir.join("decompiled")),
+        version,
     )?;
 
-    if sample_models {
+    if options.sample_models {
         run_models(
             cache,
             tar_path,
             Some(&model_dir.join("models_sample.json")),
             Some(&model_dir.join("decoded")),
             true,
+            version.build,
         )?;
     } else {
         run_models(
@@ -1373,14 +1434,15 @@ fn run_unpack(
             Some(&model_dir.join("models.json")),
             Some(&model_dir.join("decoded")),
             false,
+            version.build,
         )?;
     }
 
-    if !skip_audio {
-        run_audio(cache, tar_path, Some(&audio_dir), max_audio_files)?;
+    if !options.skip_audio {
+        run_audio(cache, tar_path, Some(&audio_dir), options.max_audio_files)?;
     }
 
-    run_top_level_exports(cache, tar_path, data_dir, out_dir)?;
+    run_top_level_exports(cache, tar_path, data_dir, out_dir, version.build)?;
 
     Ok(())
 }
@@ -1390,6 +1452,7 @@ fn run_top_level_exports(
     tar_path: &Path,
     data_dir: &Path,
     out_dir: &Path,
+    build: u32,
 ) -> Result<()> {
     let hash_names = load_other_names_map(data_dir)?;
 
@@ -1400,7 +1463,8 @@ fn run_top_level_exports(
         &out_dir.join("binary"),
         ".dat",
         &hash_names,
-    )?;
+    )
+    .context("export binary archive")?;
     export_archive_raw(
         cache,
         tar_path,
@@ -1408,7 +1472,8 @@ fn run_top_level_exports(
         &out_dir.join("ttf"),
         ".ttf",
         &hash_names,
-    )?;
+    )
+    .context("export ttf archive")?;
     export_archive_json(
         cache,
         tar_path,
@@ -1417,7 +1482,8 @@ fn run_top_level_exports(
         ".json",
         &hash_names,
         |_, _, data| parse_fontmetrics(data),
-    )?;
+    )
+    .context("export fontmetrics archive")?;
     export_archive_json(
         cache,
         tar_path,
@@ -1426,7 +1492,8 @@ fn run_top_level_exports(
         ".json",
         &hash_names,
         |_, _, data| decode_vfx(data),
-    )?;
+    )
+    .context("export vfx archive")?;
     export_archive_json(
         cache,
         tar_path,
@@ -1435,7 +1502,8 @@ fn run_top_level_exports(
         ".json",
         &hash_names,
         |_, _, data| decode_animator_controller(data),
-    )?;
+    )
+    .context("export animator archive")?;
     export_archive_json(
         cache,
         tar_path,
@@ -1444,7 +1512,8 @@ fn run_top_level_exports(
         ".json",
         &hash_names,
         |_, _, data| decode_cutscene2d(data),
-    )?;
+    )
+    .context("export cutscene2d archive")?;
 
     export_group_json(
         cache,
@@ -1454,7 +1523,8 @@ fn run_top_level_exports(
         &out_dir.join("uianimcurve"),
         ".json",
         |_, _, data| parse_uianimcurve(data),
-    )?;
+    )
+    .context("export uianimcurve group")?;
     export_group_json(
         cache,
         tar_path,
@@ -1463,46 +1533,55 @@ fn run_top_level_exports(
         &out_dir.join("uianim"),
         ".json",
         |_, _, data| parse_uianim(data),
-    )?;
+    )
+    .context("export uianim group")?;
 
-    export_mapsquares_json(cache, tar_path, &out_dir.join("maps"))?;
+    export_mapsquares_json(cache, tar_path, &out_dir.join("maps"), build)
+        .context("export mapsquares")?;
     export_defaults_text(
         cache,
         tar_path,
         DEFAULTS_GROUP_GRAPHICS,
         &out_dir.join("config/graphics.defaults"),
-        parse_graphics_defaults,
-    )?;
+        |id, data| parse_graphics_defaults(id, data, build),
+    )
+    .context("export graphics defaults")?;
     export_defaults_text(
         cache,
         tar_path,
         DEFAULTS_GROUP_AUDIO,
         &out_dir.join("config/audio.defaults"),
-        parse_audio_defaults,
-    )?;
+        |id, data| parse_audio_defaults(id, data, build),
+    )
+    .context("export audio defaults")?;
     export_defaults_text(
         cache,
         tar_path,
         DEFAULTS_GROUP_WEARPOS,
         &out_dir.join("config/wearpos.defaults"),
         parse_wearpos_defaults,
-    )?;
+    )
+    .context("export wearpos defaults")?;
     export_defaults_text(
         cache,
         tar_path,
         DEFAULTS_GROUP_WORLDMAP,
         &out_dir.join("config/worldmap.defaults"),
         parse_worldmap_defaults,
-    )?;
+    )
+    .context("export worldmap defaults")?;
     export_defaults_text(
         cache,
         tar_path,
         DEFAULTS_GROUP_TITLE,
         &out_dir.join("config/title.defaults"),
         parse_title_defaults,
-    )?;
-    export_worldmap_dump(cache, tar_path, &out_dir.join("worldmap"))?;
-    export_worldarea_png(cache, tar_path, &out_dir.join("areas.png"))?;
+    )
+    .context("export title defaults")?;
+    export_worldmap_dump(cache, tar_path, &out_dir.join("worldmap"))
+        .context("export worldmap dump")?;
+    export_worldarea_png(cache, tar_path, &out_dir.join("areas.png"))
+        .context("export worldarea png")?;
     Ok(())
 }
 
@@ -1668,7 +1747,12 @@ where
     Ok(count)
 }
 
-fn export_mapsquares_json(cache: &FlatCache, tar_path: &Path, out_dir: &Path) -> Result<usize> {
+fn export_mapsquares_json(
+    cache: &FlatCache,
+    tar_path: &Path,
+    out_dir: &Path,
+    build: u32,
+) -> Result<usize> {
     if ensure_archive_complete(cache.root(), tar_path, ARCHIVE_MAPSQUARES).is_err() {
         return Ok(0);
     }
@@ -1677,14 +1761,27 @@ fn export_mapsquares_json(cache: &FlatCache, tar_path: &Path, out_dir: &Path) ->
 
     let index = cache.archive_index(ARCHIVE_MAPSQUARES)?;
     let mut count = 0_usize;
+    let mut parse_errors = 0_usize;
     for group in &index.group_id {
         let files = cache.group_files_with_index(&index, ARCHIVE_MAPSQUARES, *group)?;
-        let decoded = decode_map_square(&files, BUILD)?;
         let square_x = group & 0b111_1111;
         let square_z = group >> 7;
-        let path = out_dir.join(format!("{square_x}_{square_z}.json"));
-        write_json(&path, &decoded)?;
-        count += 1;
+        match decode_map_square(&files, build) {
+            Ok(decoded) => {
+                let path = out_dir.join(format!("{square_x}_{square_z}.json"));
+                write_json(&path, &decoded)?;
+                count += 1;
+            }
+            Err(error) => {
+                parse_errors += 1;
+                let error_path = out_dir.join(format!("{square_x}_{square_z}.error.txt"));
+                write_text(&error_path, &format!("{error:#}"))?;
+            }
+        }
+    }
+
+    if parse_errors > 0 {
+        eprintln!("mapsquares: parsed={count} errors={parse_errors}");
     }
 
     Ok(count)
@@ -2077,7 +2174,7 @@ fn parse_defaults_eof(kind: &str, id: u32, packet: &crate::packet::Packet<'_>) -
     bail!("{kind}_{id} end of file not reached")
 }
 
-fn parse_audio_defaults(id: u32, data: &[u8]) -> Result<Vec<String>> {
+fn parse_audio_defaults(id: u32, data: &[u8], build: u32) -> Result<Vec<String>> {
     let mut packet = crate::packet::Packet::new(data);
     let mut lines = vec![format!("[audiodefaults_{id}]")];
     loop {
@@ -2087,7 +2184,7 @@ fn parse_audio_defaults(id: u32, data: &[u8]) -> Result<Vec<String>> {
                 return Ok(lines);
             }
             1 => {
-                let song = if BUILD >= 912 {
+                let song = if build >= 912 {
                     packet.g4s()?
                 } else {
                     i32::from(packet.g2()?)
@@ -2226,7 +2323,7 @@ fn parse_title_defaults(id: u32, data: &[u8]) -> Result<Vec<String>> {
     }
 }
 
-fn parse_graphics_defaults(id: u32, data: &[u8]) -> Result<Vec<String>> {
+fn parse_graphics_defaults(id: u32, data: &[u8], build: u32) -> Result<Vec<String>> {
     let mut packet = crate::packet::Packet::new(data);
     let mut lines = vec![format!("[graphicsdefaults_{id}]")];
     let mut hitmark_count = 4_u8;
@@ -2243,7 +2340,7 @@ fn parse_graphics_defaults(id: u32, data: &[u8]) -> Result<Vec<String>> {
                 }
             }
             2 => {
-                let model = if BUILD < 681 {
+                let model = if build < 681 {
                     packet.g2null()?
                 } else {
                     packet.gsmart2or4null()?

@@ -2442,7 +2442,7 @@ pub fn parse_achievement(id: u32, data: &[u8]) -> Result<OpListEntry> {
     }
 }
 
-pub fn parse_bas(id: u32, data: &[u8]) -> Result<OpListEntry> {
+pub fn parse_bas(id: u32, data: &[u8], build: u32) -> Result<OpListEntry> {
     let mut packet = Packet::new(data);
     let mut ops = Vec::new();
 
@@ -2515,9 +2515,11 @@ pub fn parse_bas(id: u32, data: &[u8]) -> Result<OpListEntry> {
                         packet.gsmart2or4null()?,
                         packet.g1()?
                     );
-                    let unknown_count = usize::from(packet.g1()?);
-                    for _ in 0..unknown_count {
-                        let _ = write!(line, ",{}", packet.g1()?);
+                    if build >= 916 {
+                        let unknown_count = usize::from(packet.g1()?);
+                        for _ in 0..unknown_count {
+                            let _ = write!(line, ",{}", packet.g1()?);
+                        }
                     }
                     ops.push(line);
                 }
@@ -4253,6 +4255,24 @@ mod tests {
         assert!(scoped.scope_perm);
         let unscoped = parse_var_client_string(13, &[0]).expect("parse varcstr");
         assert!(!unscoped.scope_perm);
+    }
+
+    #[test]
+    fn parses_bas_opcode52_pre916_shape() {
+        let bytes = [52, 1, 0, 5, 7, 0];
+        let parsed = parse_bas(10, &bytes, 910).expect("parse bas pre916");
+        assert_eq!(10, parsed.id);
+        assert_eq!(1, parsed.ops.len());
+        assert_eq!("randomreadyanim=5,7", parsed.ops[0]);
+    }
+
+    #[test]
+    fn parses_bas_opcode52_post916_shape() {
+        let bytes = [52, 1, 0, 5, 7, 0, 0];
+        let parsed = parse_bas(11, &bytes, 947).expect("parse bas post916");
+        assert_eq!(11, parsed.id);
+        assert_eq!(1, parsed.ops.len());
+        assert_eq!("randomreadyanim=5,7", parsed.ops[0]);
     }
 
     #[test]
