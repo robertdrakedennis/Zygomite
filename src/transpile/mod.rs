@@ -8,7 +8,7 @@ pub mod structured_writer;
 pub mod writer;
 
 pub use ast::*;
-pub use cfg::{BasicBlock, ControlFlowGraph, build_cfg, generate_structured};
+pub use cfg::{Block, StructuredStatement, SwitchCase, build_cfg, generate_structured};
 pub use codegen::{CodeGen, generate_program};
 pub use diagnostics::{Diagnostic, Diagnostics, Severity, Span};
 pub use scope::{LocalType, Scope, Scopes, Symbol, SymbolKind, SymbolTable};
@@ -123,9 +123,8 @@ impl Transpiler {
     ) -> TranspiledScript {
         let codegen = CodeGen::new(self.symbol_table.clone());
         let decl = codegen.generate(script, script_id);
-        let cfg = build_cfg(decl.instructions.clone());
         let mut writer = StructuredWriter::new();
-        let source = writer.write_declaration_structured(&decl, &cfg);
+        let source = writer.write_declaration(&decl);
         TranspiledScript {
             source,
             referenced_vars: collect_var_refs(script),

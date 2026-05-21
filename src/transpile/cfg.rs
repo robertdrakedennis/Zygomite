@@ -1,19 +1,29 @@
-use super::ast::{Expression, ReturnStatement, Statement, TypeAnnotation};
+use super::ast::{Expression, Statement, TypeAnnotation};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone)]
-pub struct BasicBlock {
-    pub index: usize,
+pub struct Block {
+    pub start: usize,
+    pub end: usize,
     pub statements: Vec<Statement>,
     pub successors: Vec<usize>,
+    pub predecessors: Vec<usize>,
     pub is_loop_header: bool,
+    pub loop_targets: Vec<usize>,
 }
 
-#[derive(Debug, Clone)]
-pub struct ControlFlowGraph {
-    pub blocks: Vec<BasicBlock>,
-    pub entry: usize,
-    pub exits: Vec<usize>,
+impl Block {
+    pub fn new(start: usize) -> Self {
+        Self {
+            start,
+            end: start,
+            statements: Vec::new(),
+            successors: Vec::new(),
+            predecessors: Vec::new(),
+            is_loop_header: false,
+            loop_targets: Vec::new(),
+        }
+    }
 }
 
 pub struct CfgBuilder {
@@ -25,36 +35,17 @@ impl CfgBuilder {
         Self { instructions }
     }
 
-    pub fn build(self) -> ControlFlowGraph {
+    pub fn build(self) -> Vec<Block> {
         if self.instructions.is_empty() {
-            return ControlFlowGraph {
-                blocks: vec![],
-                entry: 0,
-                exits: vec![],
-            };
+            return vec![];
         }
 
         let leaders = self.compute_leaders();
-        let blocks = self.create_blocks(&leaders);
-        let edges = self.compute_edges(&blocks);
+        let mut blocks = self.create_blocks(&leaders);
+        self.compute_edges(&mut blocks);
+        self.detect_loops(&mut blocks);
 
-        let mut cfg_blocks = blocks;
-        for (i, block) in cfg_blocks.iter_mut().enumerate() {
-            block.successors = edges.get(&i).cloned().unwrap_or_default();
-        }
-
-        let exits: Vec<usize> = cfg_blocks
-            .iter()
-            .enumerate()
-            .filter(|(_, b)| b.successors.is_empty())
-            .map(|(i, _)| i)
-            .collect();
-
-        ControlFlowGraph {
-            blocks: cfg_blocks,
-            entry: 0,
-            exits,
-        }
+        blocks
     }
 
     fn compute_leaders(&self) -> Vec<usize> {
@@ -70,7 +61,7 @@ impl CfgBuilder {
                 }
             }
 
-            let is_branch_end = matches!(
+            if matches!(
                 instr.command.as_str(),
                 "branch"
                     | "branch_not"
@@ -79,8 +70,7 @@ impl CfgBuilder {
                     | "branch_equals"
                     | "gosub_with_params"
                     | "return"
-            );
-            if is_branch_end {
+            ) {
                 let next = i + 1;
                 if next < self.instructions.len() {
                     leaders.insert(next);
@@ -104,7 +94,8 @@ impl CfgBuilder {
             }
             "switch" => {
                 if let super::ast::OperandNode::Switch(cases) = &instr.operand {
-                    let targets: Vec<usize> = cases.iter().map(|c| c.target).collect();
+                    let mut targets: Vec<usize> = cases.iter().map(|c| c.target).collect();
+                    targets.push(instr.index + 1);
                     Some(targets)
                 } else {
                     None
@@ -114,76 +105,91 @@ impl CfgBuilder {
         }
     }
 
-    fn create_blocks(&self, leaders: &[usize]) -> Vec<BasicBlock> {
+    fn create_blocks(&self, leaders: &[usize]) -> Vec<Block> {
         let mut blocks = Vec::new();
 
-        for (bi, &start) in leaders.iter().enumerate() {
-            let end = if bi + 1 < leaders.len() {
-                leaders[bi + 1]
-            } else {
-                self.instructions.len()
-            };
+        for &start in leaders {
+            let end = leaders
+                .iter()
+                .copied()
+                .find(|&x| x > start)
+                .unwrap_or(self.instructions.len());
+            let mut block = Block::new(start);
+            block.end = end;
+            blocks.push(block);
+        }
 
-            let statements: Vec<Statement> = (start..end)
+        for block in &mut blocks {
+            let stmts: Vec<Statement> = (block.start..block.end)
                 .filter_map(|i| self.instruction_to_statement(&self.instructions[i]))
                 .collect();
-
-            let is_loop_header = if start > 0 {
-                self.has_back_edge(start, leaders)
-            } else {
-                false
-            };
-
-            blocks.push(BasicBlock {
-                index: start,
-                statements,
-                successors: vec![],
-                is_loop_header,
-            });
+            block.statements = stmts;
         }
 
         blocks
     }
 
-    fn has_back_edge(&self, target: usize, _leaders: &[usize]) -> bool {
-        for i in 0..self.instructions.len() {
-            if let Some(targets) = self.extract_branch_targets(&self.instructions[i])
-                && targets.contains(&target)
-                && i > target
-            {
-                return true;
-            }
-        }
-        false
-    }
-
-    fn compute_edges(&self, blocks: &[BasicBlock]) -> HashMap<usize, Vec<usize>> {
-        let mut edges: HashMap<usize, Vec<usize>> = HashMap::new();
+    fn compute_edges(&self, blocks: &mut [Block]) {
+        let block_count = blocks.len();
+        let mut succ_map: HashMap<usize, Vec<usize>> = HashMap::new();
+        let mut pred_map: HashMap<usize, Vec<usize>> = HashMap::new();
 
         for (bi, block) in blocks.iter().enumerate() {
-            if let Some(last_instr) = self.instructions.iter().find(|i| i.index == block.index)
-                && let Some(targets) = self.extract_branch_targets(last_instr)
+            let last_instr = self.instructions.iter().find(|i| i.index == block.start);
+
+            if let Some(instr) = last_instr
+                && let Some(targets) = self.extract_branch_targets(instr)
             {
                 for &target in &targets {
-                    if let Some(target_block) = blocks.iter().position(|b| b.index == target) {
-                        edges.entry(bi).or_default().push(target_block);
+                    if let Some(target_bi) = blocks.iter().position(|b| b.start == target) {
+                        succ_map.entry(bi).or_default().push(target_bi);
+                        pred_map.entry(target_bi).or_default().push(bi);
                     }
                 }
             }
 
-            let next_block = bi + 1;
-            if next_block < blocks.len() {
-                edges.entry(bi).or_default().push(next_block);
+            let has_branch_end = last_instr
+                .map(|i| {
+                    matches!(
+                        i.command.as_str(),
+                        "branch" | "return" | "gosub_with_params"
+                    )
+                })
+                .unwrap_or(false);
+
+            if !has_branch_end && bi + 1 < block_count {
+                succ_map.entry(bi).or_default().push(bi + 1);
+                pred_map.entry(bi + 1).or_default().push(bi);
             }
         }
 
-        edges
+        for (bi, block) in blocks.iter_mut().enumerate() {
+            if let Some(succs) = succ_map.get(&bi) {
+                block.successors.clone_from(succs);
+            }
+            if let Some(preds) = pred_map.get(&bi) {
+                block.predecessors.clone_from(preds);
+            }
+        }
+    }
+
+    fn detect_loops(&self, blocks: &mut [Block]) {
+        for (bi, block) in blocks.iter_mut().enumerate() {
+            for &succ in &block.successors {
+                if succ <= bi {
+                    block.is_loop_header = true;
+                    if !block.loop_targets.contains(&succ) {
+                        block.loop_targets.push(succ);
+                    }
+                }
+            }
+        }
     }
 
     fn instruction_to_statement(&self, instr: &super::ast::InstructionNode) -> Option<Statement> {
         use super::ast::{
-            CallExpr, ExpressionStatement, GotoStatement, Identifier, NumberLiteral, StringLiteral,
-            VariableDeclaration,
+            CallExpr, ExpressionStatement, GotoStatement, Identifier, NumberLiteral,
+            ReturnStatement, StringLiteral, VariableDeclaration,
         };
 
         match instr.command.as_str() {
@@ -205,16 +211,10 @@ impl CfgBuilder {
             }
             "push_int_local" | "push_string_local" | "push_long_local" => {
                 if let super::ast::OperandNode::Local(idx) = instr.operand {
-                    let type_ = if instr.command.contains("long") {
-                        "local_long"
-                    } else if instr.command.contains("string") {
-                        "local_obj"
-                    } else {
-                        "local_int"
-                    };
+                    let (prefix, _) = self.local_type_info(&instr.command);
                     return Some(Statement::ExpressionStatement(ExpressionStatement {
                         expr: Expression::Identifier(Identifier {
-                            name: format!("{type_}_{idx}"),
+                            name: format!("{prefix}_{idx}"),
                         }),
                         semicolon: true,
                     }));
@@ -222,15 +222,9 @@ impl CfgBuilder {
             }
             "pop_int_local" | "pop_string_local" | "pop_long_local" => {
                 if let super::ast::OperandNode::Local(idx) = instr.operand {
-                    let (type_, ts_type) = if instr.command.contains("long") {
-                        ("local_long", TypeAnnotation::BigInt)
-                    } else if instr.command.contains("string") {
-                        ("local_obj", TypeAnnotation::String)
-                    } else {
-                        ("local_int", TypeAnnotation::Number)
-                    };
+                    let (prefix, ts_type) = self.local_type_info(&instr.command);
                     return Some(Statement::VariableDeclaration(VariableDeclaration {
-                        name: format!("{type_}_{idx}"),
+                        name: format!("{prefix}_{idx}"),
                         type_hint: ts_type,
                         initializer: Some(Expression::Call(CallExpr {
                             callee: Box::new(Expression::Identifier(Identifier {
@@ -249,57 +243,193 @@ impl CfgBuilder {
             "return" => {
                 return Some(Statement::ReturnStatement(ReturnStatement { value: None }));
             }
+            "switch" => {
+                return Some(Statement::Comment("switch(pop()) { ... }".to_string()));
+            }
             _ => {}
         }
 
         None
     }
+
+    fn local_type_info(&self, cmd: &str) -> (&'static str, TypeAnnotation) {
+        if cmd.contains("long") {
+            ("local_long", TypeAnnotation::BigInt)
+        } else if cmd.contains("string") {
+            ("local_obj", TypeAnnotation::String)
+        } else {
+            ("local_int", TypeAnnotation::Number)
+        }
+    }
 }
 
-pub fn build_cfg(instructions: Vec<super::ast::InstructionNode>) -> ControlFlowGraph {
+pub fn build_cfg(instructions: Vec<super::ast::InstructionNode>) -> Vec<Block> {
     CfgBuilder::new(instructions).build()
 }
 
-pub struct StructuredCodeGen {
-    cfg: ControlFlowGraph,
+#[derive(Debug)]
+pub enum StructuredStatement {
+    While {
+        condition: String,
+        body: Vec<Self>,
+    },
+    If {
+        condition: String,
+        then_case: Vec<Self>,
+        else_case: Option<Vec<Self>>,
+    },
+    Switch {
+        expression: String,
+        cases: Vec<SwitchCase>,
+        default: Option<Vec<Self>>,
+    },
+    Assignment {
+        target: String,
+        value: String,
+    },
+    Expression {
+        expr: String,
+    },
+    Goto {
+        target: usize,
+    },
+    Return {
+        value: Option<String>,
+    },
+    Comment(String),
 }
 
-impl StructuredCodeGen {
-    pub fn new(cfg: ControlFlowGraph) -> Self {
-        Self { cfg }
+#[derive(Debug)]
+pub struct SwitchCase {
+    pub value: i32,
+    pub body: Vec<StructuredStatement>,
+}
+
+pub struct StructuredCfgGen {
+    blocks: Vec<Block>,
+}
+
+impl StructuredCfgGen {
+    pub fn new(blocks: Vec<Block>) -> Self {
+        Self { blocks }
     }
 
-    pub fn generate(self) -> Vec<Statement> {
-        let mut statements = Vec::new();
-        let blocks = self.cfg.blocks.clone();
-
-        for block in &blocks {
-            if block.is_loop_header {
-                let loop_stmts = self.extract_loop_from_block(block);
-                statements.extend(loop_stmts);
-            } else {
-                statements.extend(block.statements.clone());
-            }
+    pub fn generate(self) -> Vec<StructuredStatement> {
+        if self.blocks.is_empty() {
+            return vec![];
         }
 
-        statements
+        let mut result = Vec::new();
+        let mut visited = vec![false; self.blocks.len()];
+        self.emit_block(0, &mut visited, &mut result);
+        result
     }
 
-    fn extract_loop_from_block(&self, block: &BasicBlock) -> Vec<Statement> {
-        let mut loop_stmts = Vec::new();
-        loop_stmts.push(Statement::Comment("while {".to_string()));
+    fn emit_block(&self, bi: usize, visited: &mut Vec<bool>, out: &mut Vec<StructuredStatement>) {
+        if bi >= self.blocks.len() || visited[bi] {
+            return;
+        }
+        visited[bi] = true;
+
+        let block = &self.blocks[bi];
+
+        if block.is_loop_header && block.loop_targets.first() == Some(&bi) {
+            self.emit_loop_header(bi, visited, out);
+            return;
+        }
 
         for stmt in &block.statements {
-            loop_stmts.push(stmt.clone());
+            out.push(self.stmt_to_structured(stmt));
         }
 
-        loop_stmts.push(Statement::Comment("}".to_string()));
-        loop_stmts
+        if let Some(&next) = block.successors.first()
+            && next > bi
+        {
+            self.emit_block(next, visited, out);
+        }
+    }
+
+    fn emit_loop_header(
+        &self,
+        bi: usize,
+        _visited: &mut Vec<bool>,
+        out: &mut Vec<StructuredStatement>,
+    ) {
+        let block = &self.blocks[bi];
+
+        if let Some(&_loop_target) = block.loop_targets.first() {
+            let body_stmts = self.collect_loop_body();
+
+            out.push(StructuredStatement::While {
+                condition: "true".to_string(),
+                body: body_stmts,
+            });
+        }
+    }
+
+    fn collect_loop_body(&self) -> Vec<StructuredStatement> {
+        let mut stmts = Vec::new();
+        for block in &self.blocks {
+            if block.is_loop_header {
+                for stmt in &block.statements {
+                    match self.stmt_to_structured(stmt) {
+                        StructuredStatement::Goto { target } => {
+                            if target != block.start {
+                                stmts.push(StructuredStatement::Comment(format!(
+                                    "goto block_{target}"
+                                )));
+                            }
+                        }
+                        s => stmts.push(s),
+                    }
+                }
+            }
+        }
+        stmts
+    }
+
+    fn stmt_to_structured(&self, stmt: &Statement) -> StructuredStatement {
+        match stmt {
+            Statement::Comment(text) => StructuredStatement::Comment(text.clone()),
+            Statement::ExpressionStatement(es) => StructuredStatement::Expression {
+                expr: self.expr_to_string(&es.expr),
+            },
+            Statement::VariableDeclaration(vd) => {
+                let value = match &vd.initializer {
+                    Some(expr) => self.expr_to_string(expr),
+                    None => "pop()".to_string(),
+                };
+                StructuredStatement::Assignment {
+                    target: vd.name.clone(),
+                    value,
+                }
+            }
+            Statement::GotoStatement(gs) => StructuredStatement::Goto { target: gs.target },
+            Statement::ReturnStatement(rs) => StructuredStatement::Return {
+                value: rs.value.as_ref().map(|e| self.expr_to_string(e)),
+            },
+            _ => StructuredStatement::Comment(format!("{stmt:?}")),
+        }
+    }
+
+    #[allow(clippy::self_only_used_in_recursion)]
+    fn expr_to_string(&self, expr: &Expression) -> String {
+        match expr {
+            Expression::NumberLiteral(n) => n.value.to_string(),
+            Expression::Identifier(id) => id.name.clone(),
+            Expression::StringLiteral(s) => format!("\"{}\"", s.value),
+            Expression::Call(c) => {
+                let callee = self.expr_to_string(&c.callee);
+                let args: Vec<String> =
+                    c.arguments.iter().map(|e| self.expr_to_string(e)).collect();
+                format!("{callee}({})", args.join(", "))
+            }
+            _ => "pop()".to_string(),
+        }
     }
 }
 
-pub fn generate_structured(instructions: Vec<super::ast::InstructionNode>) -> Vec<Statement> {
-    let cfg = build_cfg(instructions);
-    let generator = StructuredCodeGen::new(cfg);
+pub fn generate_structured(blocks: Vec<Block>) -> Vec<StructuredStatement> {
+    let generator = StructuredCfgGen::new(blocks);
     generator.generate()
 }
