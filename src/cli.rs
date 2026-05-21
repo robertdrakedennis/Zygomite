@@ -2193,7 +2193,7 @@ fn export_worldmap_dump(cache: &FlatCache, tar_path: &Path, out_dir: &Path) -> R
         unpack_worldmap_labels(cache, &index, &debug_name, &mut lines)?;
         lines.push(String::new());
     }
-    write_text(&out_dir.join("dump.wma"), &lines.join("\n"))?;
+
     Ok(())
 }
 
@@ -4317,6 +4317,43 @@ fn export_db_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
         "export const DB_TABLE_COUNT = {};",
         ctx.dbtables.len()
     ));
+
+    // ── Reverse-engineered table schemas ──
+    lines.push(String::new());
+    lines.push("// Reverse-engineered table column meanings:".to_string());
+    lines.push("// Table 163 (5,237 rows, 32 cols) — Items".to_string());
+    lines.push("//   col  0: itemId (int)".to_string());
+    lines.push("//   col  1: parentId (int) — parent item or category".to_string());
+    lines.push("//   col  2: name (string)".to_string());
+    lines.push("//   col  3: description (string)".to_string());
+    lines.push("//   col  4: paramId (int) — linked param config entry".to_string());
+    lines.push("//   col  5: typeId (int) — item type/category".to_string());
+    lines.push("//   col  6: value (int, default 99) — shop price".to_string());
+    lines.push("//   col  7: flags (int, default 268435454)".to_string());
+    lines.push("//   col  8: stackable (int, default 1)".to_string());
+    lines.push("//   col 11: membersOnly (boolean, default false)".to_string());
+    lines.push("//   col 13: categoryId (int)".to_string());
+    lines.push("//   col 23: modelId (int)".to_string());
+    lines.push("//   col 24: modelId2 (int)".to_string());
+    lines.push("//   col 26: color (int) — RGBA tint".to_string());
+    lines.push("//   col 30: equipmentOverrides (int[6]) — only for special items".to_string());
+    lines.push("//         index 0-5: stab/slash/crush/magic/range/strength bonus".to_string());
+    lines.push("//   col 31: soundId (int)".to_string());
+    lines.push("//".to_string());
+    lines.push("// Table 29 (105 rows, 46 cols) — NPC stats".to_string());
+    lines.push("//   cols 1-3: model IDs".to_string());
+    lines.push("//   col  5: name (string)".to_string());
+    lines.push("//   col  7: size (int)".to_string());
+    lines.push("//   col  9: combatLevel (int)".to_string());
+    lines.push("//   col 10: hitpoints (int)".to_string());
+    lines.push("//   col 14: attack (int)".to_string());
+    lines.push("//   col 17: defence (int)".to_string());
+    lines.push("//   col 18: accuracy (int)".to_string());
+    lines.push("//".to_string());
+    lines.push("// Note: Most equipment/weapon stats are computed client-side".to_string());
+    lines.push("// from item tier + category, not stored per-item in this table.".to_string());
+    lines.push("// Only override stats (halos, special items) use col 30.".to_string());
+    lines.push(String::new());
 
     // DB Rows (data) — grouped by table ID for navigability
     if !ctx.dbrows.is_empty() {
