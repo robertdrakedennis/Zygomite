@@ -3457,6 +3457,7 @@ fn run_transpile_scripts(
 
     let transpiler = Transpiler::new()
         .with_enums(&ctx.enums)
+        .with_enums_map(&ctx.enums)
         .with_vars(&ctx.varps_by_domain)
         .with_varbits(&ctx.varbits)
         .with_params(&ctx.params)
@@ -3692,21 +3693,76 @@ fn export_enum_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
         "// Auto-generated Enum definitions".to_string(),
         "// Source: RS3 cache enum config".to_string(),
         String::new(),
-        "export interface EnumPair {".to_string(),
-        "    key: number;".to_string(),
-        "    value: number | string;".to_string(),
-        "    dense: boolean;".to_string(),
-        "}".to_string(),
-        String::new(),
-        "export interface EnumEntry {".to_string(),
-        "    id: number;".to_string(),
-        "    inputType: string;".to_string(),
-        "    outputType: string;".to_string(),
-        "    default: number | string | null;".to_string(),
-        "    values: EnumPair[];".to_string(),
-        "}".to_string(),
-        String::new(),
     ];
+
+    // ── Per-enum const objects with named constants ──
+    let mut reverse_lookup: Vec<(i32, String)> = Vec::new();
+
+    for entry in &entries {
+        if entry.values.is_empty() {
+            continue;
+        }
+        let obj_name = format!("Enum_{id}", id = entry.id);
+        let mut props: Vec<String> = Vec::new();
+
+        for pair in &entry.values {
+            let prop = match &pair.value {
+                crate::config::ScalarValue::Str(s) => {
+                    let name = str_to_screaming_snake(s);
+                    if name.is_empty() {
+                        format!("KEY_{key}", key = pair.key)
+                    } else {
+                        name
+                    }
+                }
+                _ => format!("KEY_{key}", key = pair.key),
+            };
+            // Deduplicate property names
+            let unique_prop = if props.iter().any(|p| p.starts_with(&format!("{prop} ="))) {
+                format!("{prop}_{key}", key = pair.key)
+            } else {
+                prop.clone()
+            };
+            props.push(format!("    {unique_prop}: {key},", key = pair.key));
+            reverse_lookup.push((pair.key, format!("{obj_name}.{unique_prop}")));
+        }
+
+        lines.push(format!("export const {obj_name} = {{"));
+        lines.extend(props);
+        lines.push("} as const;".to_string());
+        lines.push(String::new());
+    }
+
+    // ── Reverse lookup: enum value → qualified name ──
+    reverse_lookup.sort_by_key(|(k, _)| *k);
+    reverse_lookup.dedup_by_key(|(k, _)| *k);
+    if !reverse_lookup.is_empty() {
+        lines.push("// Reverse lookup: maps enum key values to qualified names.".to_string());
+        lines.push(
+            "export const ENUM_VALUE_TO_NAME: ReadonlyMap<number, string> = new Map([".to_string(),
+        );
+        for (key, name) in &reverse_lookup {
+            lines.push(format!("    [{key}, '{name}'],"));
+        }
+        lines.push("]);".to_string());
+        lines.push(String::new());
+    }
+
+    // ── Existing types and runtime map ──
+    lines.push("export interface EnumPair {".to_string());
+    lines.push("    key: number;".to_string());
+    lines.push("    value: number | string;".to_string());
+    lines.push("    dense: boolean;".to_string());
+    lines.push("}".to_string());
+    lines.push(String::new());
+    lines.push("export interface EnumEntry {".to_string());
+    lines.push("    id: number;".to_string());
+    lines.push("    inputType: string;".to_string());
+    lines.push("    outputType: string;".to_string());
+    lines.push("    default: number | string | null;".to_string());
+    lines.push("    values: EnumPair[];".to_string());
+    lines.push("}".to_string());
+    lines.push(String::new());
 
     lines.push("export const ENUMS: ReadonlyMap<number, EnumEntry> = new Map([".to_string());
     for entry in &entries {
@@ -3752,6 +3808,30 @@ fn export_enum_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
     lines.push(format!("export const ENUM_COUNT = {};", entries.len()));
 
     write_text(&out_dir.join("enums.ts"), &lines.join("\n"))
+}
+
+/// Convert a lowercase or mixed-case string value (e.g. "`skill_type`",
+/// "my value") to `SCREAMING_SNAKE_CASE` for use as a
+/// TypeScript const property name.
+fn str_to_screaming_snake(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        if c.is_ascii_alphanumeric() {
+            out.push(c.to_ascii_uppercase());
+        } else if c == ' ' || c == '-' || c == '/' || c == '.' {
+            out.push('_');
+        }
+    }
+    // Trim leading/trailing underscores
+    let trimmed = out.trim_matches('_');
+    // Can't start with a digit
+    if trimmed.starts_with(|c: char| c.is_ascii_digit()) {
+        format!("_{trimmed}")
+    } else if trimmed.is_empty() {
+        String::new()
+    } else {
+        trimmed.to_string()
+    }
 }
 
 fn export_struct_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
@@ -4182,6 +4262,7 @@ fn export_index(out_dir: &Path) -> Result<()> {
         "export {".to_string(),
         "    ENUMS,".to_string(),
         "    ENUM_COUNT,".to_string(),
+        "    ENUM_VALUE_TO_NAME,".to_string(),
         "    type EnumEntry,".to_string(),
         "    type EnumPair,".to_string(),
         "} from './enums';".to_string(),

@@ -5,13 +5,18 @@ use std::fmt::Write as _;
 pub struct StructuredWriter {
     indent: usize,
     component_names: std::collections::HashMap<u32, String>,
+    enum_value_names: std::collections::HashMap<i32, String>,
 }
 
 impl StructuredWriter {
-    pub fn new(component_names: std::collections::HashMap<u32, String>) -> Self {
+    pub fn new(
+        component_names: std::collections::HashMap<u32, String>,
+        enum_value_names: std::collections::HashMap<i32, String>,
+    ) -> Self {
         Self {
             indent: 0,
             component_names,
+            enum_value_names,
         }
     }
 
@@ -54,7 +59,11 @@ impl StructuredWriter {
         );
 
         // ── Build function body ──
-        let blocks = build_cfg(decl.instructions.clone(), &self.component_names);
+        let blocks = build_cfg(
+            decl.instructions.clone(),
+            &self.component_names,
+            &self.enum_value_names,
+        );
         let structured = emit_structured(blocks);
 
         let mut body = String::new();
@@ -79,9 +88,16 @@ impl StructuredWriter {
         let needs_enums = body.contains("ENUMS.");
         let needs_params = body.contains("PARAMS.");
         let needs_components = body.contains("ComponentId.");
+        let needs_enum_refs = body.contains("Enum_");
 
         // ── Emit imports ──
-        if needs_vars || needs_varbits || needs_enums || needs_params || needs_components {
+        if needs_vars
+            || needs_varbits
+            || needs_enums
+            || needs_params
+            || needs_components
+            || needs_enum_refs
+        {
             let mut imports = Vec::new();
             if needs_vars {
                 imports.push("VARS");
@@ -89,7 +105,7 @@ impl StructuredWriter {
             if needs_varbits {
                 imports.push("VARBITS");
             }
-            if needs_enums {
+            if needs_enums || needs_enum_refs {
                 imports.push("ENUMS");
             }
             if needs_params {
@@ -238,6 +254,9 @@ impl StructuredWriter {
 
 impl Default for StructuredWriter {
     fn default() -> Self {
-        Self::new(std::collections::HashMap::new())
+        Self::new(
+            std::collections::HashMap::new(),
+            std::collections::HashMap::new(),
+        )
     }
 }

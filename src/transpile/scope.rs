@@ -125,6 +125,8 @@ pub struct SymbolTable {
     pub script_names: HashMap<ScriptId, String>,
     /// Maps interface component IDs to their RS3 names (e.g. 5 → "`chat_box`").
     pub component_names: HashMap<u32, String>,
+    /// Maps enum key values to qualified names (e.g. 0 → "`Enum_1234.ATTACK`").
+    pub enum_value_names: HashMap<i32, String>,
 }
 
 impl SymbolTable {
@@ -174,6 +176,11 @@ impl SymbolTable {
 
     pub fn with_component_names(mut self, names: HashMap<u32, String>) -> Self {
         self.component_names = names;
+        self
+    }
+
+    pub fn with_enum_value_names(mut self, names: HashMap<i32, String>) -> Self {
+        self.enum_value_names = names;
         self
     }
 

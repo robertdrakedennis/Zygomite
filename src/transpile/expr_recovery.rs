@@ -181,18 +181,22 @@ pub struct ExprRecovery<'a, S: std::hash::BuildHasher = std::collections::hash_m
     locals: std::collections::HashMap<String, Expression>,
     /// Maps component IDs to their RS3 names (e.g. 5 → "`chat_box`").
     component_names: &'a std::collections::HashMap<u32, String, S>,
+    /// Maps enum key values to qualified names (e.g. 0 → "`Enum_1234.ATTACK`").
+    enum_value_names: &'a std::collections::HashMap<i32, String, S>,
 }
 
 impl<'a, S: std::hash::BuildHasher> ExprRecovery<'a, S> {
     pub fn new(
         instructions: &'a [InstructionNode],
         component_names: &'a std::collections::HashMap<u32, String, S>,
+        enum_value_names: &'a std::collections::HashMap<i32, String, S>,
     ) -> Self {
         Self {
             instructions,
             stack: Vec::new(),
             locals: std::collections::HashMap::new(),
             component_names,
+            enum_value_names,
         }
     }
 
@@ -248,8 +252,33 @@ impl<'a, S: std::hash::BuildHasher> ExprRecovery<'a, S> {
                         value: s.clone(),
                     }));
                 } else if let OperandNode::Int(v) = op {
-                    self.stack
-                        .push(Expression::NumberLiteral(NumberLiteral { value: *v }));
+                    // Only resolve non-negative values as enum keys.
+                    // Negative values (e.g. -1) are sentinel/not-found markers.
+                    if *v >= 0 {
+                        if let Some(qualified) = self.enum_value_names.get(v) {
+                            if let Some(dot) = qualified.find('.') {
+                                let obj = &qualified[..dot];
+                                let prop = &qualified[dot + 1..];
+                                self.stack.push(Expression::PropertyAccess(
+                                    super::ast::PropertyAccess {
+                                        object: Box::new(Expression::Identifier(Identifier {
+                                            name: obj.to_string(),
+                                        })),
+                                        property: prop.to_string(),
+                                    },
+                                ));
+                            } else {
+                                self.stack
+                                    .push(Expression::NumberLiteral(NumberLiteral { value: *v }));
+                            }
+                        } else {
+                            self.stack
+                                .push(Expression::NumberLiteral(NumberLiteral { value: *v }));
+                        }
+                    } else {
+                        self.stack
+                            .push(Expression::NumberLiteral(NumberLiteral { value: *v }));
+                    }
                 }
                 None
             }

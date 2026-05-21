@@ -109,6 +109,29 @@ impl Transpiler {
         self
     }
 
+    pub fn with_enums_map(mut self, enums: &BTreeMap<u32, crate::config::EnumEntry>) -> Self {
+        let mut names = HashMap::new();
+        for entry in enums.values() {
+            let obj = format!("Enum_{id}", id = entry.id);
+            for pair in &entry.values {
+                let prop = match &pair.value {
+                    crate::config::ScalarValue::Str(s) => {
+                        let name = str_to_screaming_snake(s);
+                        if name.is_empty() {
+                            format!("KEY_{key}", key = pair.key)
+                        } else {
+                            name
+                        }
+                    }
+                    _ => format!("KEY_{key}", key = pair.key),
+                };
+                names.insert(pair.key, format!("{obj}.{prop}"));
+            }
+        }
+        self.symbol_table.enum_value_names = names;
+        self
+    }
+
     pub fn script_name_for(&self, script_id: ScriptId) -> Option<String> {
         self.symbol_table.script_names.get(&script_id).cloned()
     }
@@ -140,7 +163,10 @@ impl Transpiler {
     ) -> TranspiledScript {
         let codegen = CodeGen::new(self.symbol_table.clone());
         let decl = codegen.generate(script, script_id);
-        let mut writer = StructuredWriter::new(self.symbol_table.component_names.clone());
+        let mut writer = StructuredWriter::new(
+            self.symbol_table.component_names.clone(),
+            self.symbol_table.enum_value_names.clone(),
+        );
         let source = writer.write_declaration(&decl);
         TranspiledScript {
             source,
@@ -206,6 +232,25 @@ fn collect_script_refs(script: &CompiledScript) -> Vec<ScriptId> {
         }
     }
     refs
+}
+
+fn str_to_screaming_snake(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        if c.is_ascii_alphanumeric() {
+            out.push(c.to_ascii_uppercase());
+        } else if c == ' ' || c == '-' || c == '/' || c == '.' {
+            out.push('_');
+        }
+    }
+    let trimmed = out.trim_matches('_');
+    if trimmed.starts_with(|c: char| c.is_ascii_digit()) {
+        format!("_{trimmed}")
+    } else if trimmed.is_empty() {
+        String::new()
+    } else {
+        trimmed.to_string()
+    }
 }
 
 pub fn sanitize_ts_ident(name: &str) -> String {
