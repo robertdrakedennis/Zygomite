@@ -3324,6 +3324,7 @@ fn run_dep_tree_script(
     Ok(())
 }
 
+// Resolves dependency tree for a varp entry across 9 parameter sources.
 #[allow(clippy::too_many_arguments)]
 fn run_dep_tree_varp(
     cache: &FlatCache,
@@ -3386,6 +3387,7 @@ fn run_dep_tree_varbit(
     Ok(())
 }
 
+// Resolves dependency tree for a config entry across 8 parameter sources.
 #[allow(clippy::too_many_arguments)]
 fn run_dep_tree_config(
     cache: &FlatCache,

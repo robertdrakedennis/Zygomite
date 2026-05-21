@@ -1,6 +1,6 @@
-use std::collections::{HashMap, HashSet};
 use super::ast::Expression;
 use super::expr_recovery::{ExprRecovery, RecoveredStmt};
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone)]
 pub struct Block {
@@ -40,8 +40,11 @@ pub struct CfgBuilder {
 
 impl CfgBuilder {
     pub fn new(instructions: Vec<super::ast::InstructionNode>) -> Self {
-        let recovered = ExprRecovery::new(instructions.clone()).recover();
-        Self { instructions, recovered }
+        let recovered = ExprRecovery::new(&instructions).recover();
+        Self {
+            instructions,
+            recovered,
+        }
     }
 
     pub fn build(self) -> Vec<Block> {
@@ -77,12 +80,22 @@ impl CfgBuilder {
 
             let is_branch = matches!(
                 instr.command.as_str(),
-                "branch" | "branch_not" | "branch_if_true" | "branch_if_false"
-                    | "branch_equals" | "branch_less_than" | "branch_greater_than"
-                    | "branch_less_than_or_equals" | "branch_greater_than_or_equals"
-                    | "long_branch_not" | "long_branch_equals" | "long_branch_less_than"
-                    | "long_branch_greater_than" | "long_branch_less_than_or_equals"
-                    | "long_branch_greater_than_or_equals" | "return"
+                "branch"
+                    | "branch_not"
+                    | "branch_if_true"
+                    | "branch_if_false"
+                    | "branch_equals"
+                    | "branch_less_than"
+                    | "branch_greater_than"
+                    | "branch_less_than_or_equals"
+                    | "branch_greater_than_or_equals"
+                    | "long_branch_not"
+                    | "long_branch_equals"
+                    | "long_branch_less_than"
+                    | "long_branch_greater_than"
+                    | "long_branch_less_than_or_equals"
+                    | "long_branch_greater_than_or_equals"
+                    | "return"
             );
 
             if is_branch && next < self.instructions.len() {
@@ -111,11 +124,19 @@ impl CfgBuilder {
                     None
                 }
             }
-            "branch_not" | "branch_if_true" | "branch_if_false"
-            | "branch_equals" | "branch_less_than" | "branch_greater_than"
-            | "branch_less_than_or_equals" | "branch_greater_than_or_equals"
-            | "long_branch_not" | "long_branch_equals" | "long_branch_less_than"
-            | "long_branch_greater_than" | "long_branch_less_than_or_equals"
+            "branch_not"
+            | "branch_if_true"
+            | "branch_if_false"
+            | "branch_equals"
+            | "branch_less_than"
+            | "branch_greater_than"
+            | "branch_less_than_or_equals"
+            | "branch_greater_than_or_equals"
+            | "long_branch_not"
+            | "long_branch_equals"
+            | "long_branch_less_than"
+            | "long_branch_greater_than"
+            | "long_branch_less_than_or_equals"
             | "long_branch_greater_than_or_equals" => {
                 if let super::ast::OperandNode::Branch(target) = instr.operand {
                     Some(vec![target, instr.index + 1])
@@ -140,7 +161,11 @@ impl CfgBuilder {
         let mut blocks = Vec::new();
 
         for (i, &start) in leaders.iter().enumerate() {
-            let end = leaders.iter().copied().find(|&x| x > start).unwrap_or(self.instructions.len());
+            let end = leaders
+                .iter()
+                .copied()
+                .find(|&x| x > start)
+                .unwrap_or(self.instructions.len());
             let mut block = Block::new(i, start);
             block.end = end;
             blocks.push(block);
@@ -148,7 +173,11 @@ impl CfgBuilder {
 
         for block in &mut *blocks {
             let stmts: Vec<RecoveredStmt> = (block.start..block.end)
-                .filter_map(|idx| self.recovered.get(idx).and_then(|o: &Option<RecoveredStmt>| o.clone()))
+                .filter_map(|idx| {
+                    self.recovered
+                        .get(idx)
+                        .and_then(|o: &Option<RecoveredStmt>| o.clone())
+                })
                 .collect();
             block.statements = stmts;
         }
@@ -175,21 +204,21 @@ impl CfgBuilder {
             };
 
             // Detect: conditional_branch (target == next_instr) followed by `branch`
-            let targets_opt: Option<Vec<usize>> =
-                if let (Some(prev), Some(last)) = (prev_instr, last_instr)
-                    && last.command == "branch"
-                    && is_cond_flag_instr(&prev.command)
-                    && prev.index + 1 == last.index
-                    && let super::ast::OperandNode::Branch(target) = last.operand
-                {
-                    let true_target = target;
-                    let false_target = last.index + 1;
-                    Some(vec![true_target, false_target])
-                } else if let Some(instr) = last_instr {
-                    self.extract_branch_targets(instr)
-                } else {
-                    None
-                };
+            let targets_opt: Option<Vec<usize>> = if let (Some(prev), Some(last)) =
+                (prev_instr, last_instr)
+                && last.command == "branch"
+                && is_cond_flag_instr(&prev.command)
+                && prev.index + 1 == last.index
+                && let super::ast::OperandNode::Branch(target) = last.operand
+            {
+                let true_target = target;
+                let false_target = last.index + 1;
+                Some(vec![true_target, false_target])
+            } else if let Some(instr) = last_instr {
+                self.extract_branch_targets(instr)
+            } else {
+                None
+            };
 
             if let Some(targets) = targets_opt {
                 for &target in &targets {
@@ -200,9 +229,8 @@ impl CfgBuilder {
                 }
             }
 
-            let has_jump = last_instr.is_some_and(|i| {
-                matches!(i.command.as_str(), "branch" | "return")
-            });
+            let has_jump =
+                last_instr.is_some_and(|i| matches!(i.command.as_str(), "branch" | "return"));
 
             if !has_jump && bi + 1 < block_count {
                 succ_map.entry(bi).or_default().push(bi + 1);
@@ -238,20 +266,24 @@ impl CfgBuilder {
                 // (not just the last statement, which might be a Goto)
                 for stmt in block.statements.iter().rev() {
                     let cond = match stmt {
-                        RecoveredStmt::Branch { condition, negated: false, .. } => {
-                            Some(expr_to_string(condition))
-                        }
-                        RecoveredStmt::Branch { condition, negated: true, .. } => {
-                            Some(format!("!({})", expr_to_string(condition)))
-                        }
-                        RecoveredStmt::BranchBinary { op, left, right, .. } => {
-                            Some(format!(
-                                "({} {} {})",
-                                expr_to_string(left),
-                                op.as_str(),
-                                expr_to_string(right)
-                            ))
-                        }
+                        RecoveredStmt::Branch {
+                            condition,
+                            negated: false,
+                            ..
+                        } => Some(expr_to_string(condition)),
+                        RecoveredStmt::Branch {
+                            condition,
+                            negated: true,
+                            ..
+                        } => Some(format!("!({})", expr_to_string(condition))),
+                        RecoveredStmt::BranchBinary {
+                            op, left, right, ..
+                        } => Some(format!(
+                            "({} {} {})",
+                            expr_to_string(left),
+                            op.as_str(),
+                            expr_to_string(right)
+                        )),
                         _ => None,
                     };
                     if let Some(cond) = cond {
@@ -267,11 +299,19 @@ impl CfgBuilder {
 fn is_cond_flag_instr(cmd: &str) -> bool {
     matches!(
         cmd,
-        "branch_not" | "branch_if_true" | "branch_if_false"
-            | "branch_equals" | "branch_less_than" | "branch_greater_than"
-            | "branch_less_than_or_equals" | "branch_greater_than_or_equals"
-            | "long_branch_not" | "long_branch_equals" | "long_branch_less_than"
-            | "long_branch_greater_than" | "long_branch_less_than_or_equals"
+        "branch_not"
+            | "branch_if_true"
+            | "branch_if_false"
+            | "branch_equals"
+            | "branch_less_than"
+            | "branch_greater_than"
+            | "branch_less_than_or_equals"
+            | "branch_greater_than_or_equals"
+            | "long_branch_not"
+            | "long_branch_equals"
+            | "long_branch_less_than"
+            | "long_branch_greater_than"
+            | "long_branch_less_than_or_equals"
             | "long_branch_greater_than_or_equals"
     )
 }
@@ -318,13 +358,31 @@ pub fn expr_to_string(expr: &Expression) -> String {
 
 #[derive(Debug)]
 pub enum StructuredStmt {
-    While { body: Vec<Self> },
-    If { condition: String, then_body: Vec<Self>, else_body: Option<Vec<Self>> },
-    Switch { expr: String, cases: Vec<SwitchCaseStmt> },
-    Assignment { target: String, value: String },
-    Expr { expr: String },
-    Goto { target: usize },
-    Return { value: Option<String> },
+    While {
+        body: Vec<Self>,
+    },
+    If {
+        condition: String,
+        then_body: Vec<Self>,
+        else_body: Option<Vec<Self>>,
+    },
+    Switch {
+        expr: String,
+        cases: Vec<SwitchCaseStmt>,
+    },
+    Assignment {
+        target: String,
+        value: String,
+    },
+    Expr {
+        expr: String,
+    },
+    Goto {
+        target: usize,
+    },
+    Return {
+        value: Option<String>,
+    },
     Comment(String),
     Break,
     Continue,
@@ -392,10 +450,12 @@ impl StructuredEmitter {
         self.emit_block_statements(&block);
 
         if block.is_conditional_branch && block.successors.len() >= 2 {
-            let condition = block.branch_condition.clone().unwrap_or_else(|| "pop()".to_string());
+            let condition = block.branch_condition.clone().unwrap_or_default();
             if condition.is_empty() {
                 // Fallback to unconditional navigation
-                if let Some(&next) = block.successors.first() && next > bi {
+                if let Some(&next) = block.successors.first()
+                    && next > bi
+                {
                     self.emit_block(next);
                 }
                 return;
@@ -443,14 +503,18 @@ impl StructuredEmitter {
             return;
         }
 
-        if let Some(&next) = block.successors.first() && next > bi {
+        if let Some(&next) = block.successors.first()
+            && next > bi
+        {
             self.emit_block(next);
         }
     }
 
     fn emit_loop(&mut self, bi: usize) {
         let block = self.blocks[bi].clone();
-        let Some(loop_target) = block.loop_target else { return };
+        let Some(loop_target) = block.loop_target else {
+            return;
+        };
         let successors = block.successors;
 
         let body_blocks = self.collect_loop_blocks(bi, loop_target);
@@ -475,12 +539,7 @@ impl StructuredEmitter {
 
     /// Emit statements for blocks within a loop body, handling nested
     /// if/else and converting gotos to break/continue.
-    fn emit_block_loop(
-        &mut self,
-        bi: usize,
-        loop_target: usize,
-        body_blocks: &HashSet<usize>,
-    ) {
+    fn emit_block_loop(&mut self, bi: usize, loop_target: usize, body_blocks: &HashSet<usize>) {
         if bi >= self.blocks.len() || self.visited[bi] {
             return;
         }
@@ -491,7 +550,10 @@ impl StructuredEmitter {
         // Emit block statements (skip the loop-back goto at the end)
         let block_is_cond = block.is_conditional_branch
             && block.successors.len() >= 2
-            && block.branch_condition.as_ref().is_some_and(|c| !c.is_empty());
+            && block
+                .branch_condition
+                .as_ref()
+                .is_some_and(|c| !c.is_empty());
 
         for stmt in &block.statements {
             if is_loop_back_stmt(stmt, loop_target) {
@@ -565,7 +627,8 @@ impl StructuredEmitter {
 
         // Linear successor: follow forward within loop body
         if let Some(&next) = block.successors.first()
-            && body_blocks.contains(&next) && next > bi
+            && body_blocks.contains(&next)
+            && next > bi
         {
             self.emit_block_loop(next, loop_target, body_blocks);
         }
@@ -573,17 +636,19 @@ impl StructuredEmitter {
 
     fn stmt_to_structured(&self, stmt: &RecoveredStmt) -> StructuredStmt {
         match stmt {
-            RecoveredStmt::Expression(expr) => {
-                StructuredStmt::Expr { expr: Self::expr_to_string(expr) }
-            }
-            RecoveredStmt::Assignment { target, value, .. } => {
-                StructuredStmt::Assignment {
-                    target: target.clone(),
-                    value: Self::expr_to_string(value),
-                }
-            }
+            RecoveredStmt::Expression(expr) => StructuredStmt::Expr {
+                expr: Self::expr_to_string(expr),
+            },
+            RecoveredStmt::Assignment { target, value, .. } => StructuredStmt::Assignment {
+                target: target.clone(),
+                value: Self::expr_to_string(value),
+            },
             RecoveredStmt::Goto(target) => StructuredStmt::Goto { target: *target },
-            RecoveredStmt::Branch { condition, target, negated } => {
+            RecoveredStmt::Branch {
+                condition,
+                target,
+                negated,
+            } => {
                 let prefix = if *negated { "if (!(" } else { "if (" };
                 let suffix = format!(")) goto {target};");
                 StructuredStmt::Comment(format!(
@@ -593,7 +658,12 @@ impl StructuredEmitter {
                     suffix
                 ))
             }
-            RecoveredStmt::BranchBinary { op, left, right, target } => {
+            RecoveredStmt::BranchBinary {
+                op,
+                left,
+                right,
+                target,
+            } => {
                 let cond = format!(
                     "({} {} {})",
                     expr_to_string(left),
@@ -602,7 +672,10 @@ impl StructuredEmitter {
                 );
                 StructuredStmt::Comment(format!("if ({cond}) goto {target};"))
             }
-            RecoveredStmt::Switch { discriminant, cases } => {
+            RecoveredStmt::Switch {
+                discriminant,
+                cases,
+            } => {
                 let expr = Self::expr_to_string(discriminant);
                 let cases = cases
                     .iter()
@@ -613,9 +686,9 @@ impl StructuredEmitter {
                     .collect();
                 StructuredStmt::Switch { expr, cases }
             }
-            RecoveredStmt::Return(val) => {
-                StructuredStmt::Return { value: val.as_ref().map(Self::expr_to_string) }
-            }
+            RecoveredStmt::Return(val) => StructuredStmt::Return {
+                value: val.as_ref().map(Self::expr_to_string),
+            },
             RecoveredStmt::Comment(text) => StructuredStmt::Comment(text.clone()),
         }
     }

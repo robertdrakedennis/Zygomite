@@ -1,3 +1,5 @@
+// Legacy transpiler: builder methods return Self for chaining;
+// unused_self on helper methods that mirror the new transpile API.
 #![allow(clippy::return_self_not_must_use, clippy::unused_self)]
 
 use crate::config::EnumEntry;

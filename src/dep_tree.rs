@@ -1,3 +1,6 @@
+// Tree resolver functions take many typed parameters (archive, group, flags, etc.).
+// Self type is verbose in deeply nested types; implicit_hasher avoids boilerplate
+// when constructing HashSet/HashMap; collapsible_if is clearer in guard chains.
 #![allow(
     clippy::too_many_arguments,
     clippy::use_self,

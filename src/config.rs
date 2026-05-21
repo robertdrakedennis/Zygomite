@@ -2128,6 +2128,7 @@ pub enum SeqUnknown20 {
 }
 
 #[derive(Clone, Debug, Serialize)]
+// Animation sequence flags are inherently many independent booleans.
 #[allow(clippy::struct_excessive_bools)]
 pub struct SeqEntry {
     pub id: u32,
@@ -3561,6 +3562,7 @@ fn parse_multi_variants_block(packet: &mut Packet<'_>, ops: &mut Vec<String>) ->
     Ok(())
 }
 
+// Material format uses short names for texture/animation IDs.
 #[allow(clippy::similar_names)]
 fn parse_material_v0(packet: &mut Packet<'_>, ops: &mut Vec<String>) -> Result<()> {
     ops.push(format!("unknown1={}", packet.g1()?));
@@ -3689,6 +3691,7 @@ fn parse_material_v0(packet: &mut Packet<'_>, ops: &mut Vec<String>) -> Result<(
     Ok(())
 }
 
+// Same pattern as v0; texture/animation variable naming follows game conventions.
 #[allow(clippy::similar_names)]
 fn parse_material_v1(packet: &mut Packet<'_>, ops: &mut Vec<String>) -> Result<()> {
     let flags_b = packet.g4s()?;

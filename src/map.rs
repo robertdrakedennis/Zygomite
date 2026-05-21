@@ -147,6 +147,7 @@ pub struct EnvLightProbeSettings {
 }
 
 #[derive(Clone, Debug, Serialize)]
+// RS3 light flags are inherently many independent booleans (scattering, shadows, etc.)
 #[allow(clippy::struct_excessive_bools)]
 pub struct PointLight {
     pub level: u8,

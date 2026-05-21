@@ -1,5 +1,5 @@
 use super::ast::{Declaration, TypeAnnotation};
-use super::cfg::{build_cfg, emit_structured, StructuredStmt};
+use super::cfg::{StructuredStmt, build_cfg, emit_structured};
 use std::fmt::Write as _;
 
 pub struct StructuredWriter {
@@ -26,19 +26,43 @@ impl StructuredWriter {
             &mut out,
             "// script_{}: locals(int={}, obj={}, long={}) args(int={}, obj={}, long={})\n",
             decl.script_id,
-            decl.locals.iter().filter(|l| matches!(l.type_annotation, TypeAnnotation::Number)).count(),
-            decl.locals.iter().filter(|l| matches!(l.type_annotation, TypeAnnotation::String)).count(),
-            decl.locals.iter().filter(|l| matches!(l.type_annotation, TypeAnnotation::BigInt)).count(),
-            decl.arguments.iter().filter(|l| matches!(l.type_annotation, TypeAnnotation::Number)).count(),
-            decl.arguments.iter().filter(|l| matches!(l.type_annotation, TypeAnnotation::String)).count(),
-            decl.arguments.iter().filter(|l| matches!(l.type_annotation, TypeAnnotation::BigInt)).count(),
+            decl.locals
+                .iter()
+                .filter(|l| matches!(l.type_annotation, TypeAnnotation::Number))
+                .count(),
+            decl.locals
+                .iter()
+                .filter(|l| matches!(l.type_annotation, TypeAnnotation::String))
+                .count(),
+            decl.locals
+                .iter()
+                .filter(|l| matches!(l.type_annotation, TypeAnnotation::BigInt))
+                .count(),
+            decl.arguments
+                .iter()
+                .filter(|l| matches!(l.type_annotation, TypeAnnotation::Number))
+                .count(),
+            decl.arguments
+                .iter()
+                .filter(|l| matches!(l.type_annotation, TypeAnnotation::String))
+                .count(),
+            decl.arguments
+                .iter()
+                .filter(|l| matches!(l.type_annotation, TypeAnnotation::BigInt))
+                .count(),
         );
 
         out.push_str("const ");
-        let mut locals: Vec<String> = decl.arguments.iter()
+        let mut locals: Vec<String> = decl
+            .arguments
+            .iter()
             .map(|v| format!("{}: {}", v.name, v.type_annotation.as_str()))
             .collect();
-        locals.extend(decl.locals.iter().map(|v| format!("{}: {}", v.name, v.type_annotation.as_str())));
+        locals.extend(
+            decl.locals
+                .iter()
+                .map(|v| format!("{}: {}", v.name, v.type_annotation.as_str())),
+        );
         out.push_str(&locals.join(", "));
         out.push_str(";\n\n");
 
@@ -67,7 +91,11 @@ impl StructuredWriter {
                 self.write_indent(out);
                 out.push_str("}\n");
             }
-            StructuredStmt::If { condition, then_body, else_body } => {
+            StructuredStmt::If {
+                condition,
+                then_body,
+                else_body,
+            } => {
                 self.write_indent(out);
                 out.push_str("if (");
                 out.push_str(condition);

@@ -35,15 +35,10 @@ fn stack_effect(cmd: &str, operand: &OperandNode) -> StackEffect {
         "push_array_int" | "push_array_string" => StackEffect { pops: 1, pushes: 1 },
 
         // Pop/discard: pops 1, pushes 0
-        "pop_int_local"
-        | "pop_string_local"
-        | "pop_long_local"
-        | "pop_var"
-        | "pop_varc_int"
-        | "pop_varc_string"
-        | "pop_int_discard"
-        | "pop_string_discard"
-        | "pop_long_discard" => StackEffect { pops: 1, pushes: 0 },
+        "pop_int_local" | "pop_string_local" | "pop_long_local" | "pop_var" | "pop_varc_int"
+        | "pop_varc_string" | "pop_int_discard" | "pop_string_discard" | "pop_long_discard" => {
+            StackEffect { pops: 1, pushes: 0 }
+        }
 
         // Array pop: pop value, pop index, store
         "pop_array_int" | "pop_array_string" => StackEffect { pops: 2, pushes: 0 },
@@ -60,7 +55,10 @@ fn stack_effect(cmd: &str, operand: &OperandNode) -> StackEffect {
         // String join: pops N, pushes 1
         "join_string" => {
             if let OperandNode::Count(n) = operand {
-                StackEffect { pops: *n, pushes: 1 }
+                StackEffect {
+                    pops: *n,
+                    pushes: 1,
+                }
             } else {
                 StackEffect { pops: 0, pushes: 1 }
             }
@@ -89,17 +87,22 @@ fn stack_effect(cmd: &str, operand: &OperandNode) -> StackEffect {
         "gosub_with_params" => StackEffect { pops: 1, pushes: 1 },
 
         // CC ops: various stack effects
-        "cc_delete" | "cc_deleteall" | "cc_find" | "cc_sendtofront" | "cc_sendtoback"
-        | "if_find" | "if_sendtofront" | "if_sendtoback" | "cc_setnoclickthrough"
-        | "cc_setscrollpos" | "cc_set2dangle" | "cc_settiling" => {
-            StackEffect { pops: 1, pushes: 0 }
-        }
+        "cc_delete"
+        | "cc_deleteall"
+        | "cc_find"
+        | "cc_sendtofront"
+        | "cc_sendtoback"
+        | "if_find"
+        | "if_sendtofront"
+        | "if_sendtoback"
+        | "cc_setnoclickthrough"
+        | "cc_setscrollpos"
+        | "cc_set2dangle"
+        | "cc_settiling" => StackEffect { pops: 1, pushes: 0 },
         "if_gettext" => StackEffect { pops: 1, pushes: 1 },
         "cc_settext" | "cc_setgraphic" | "cc_sethide" | "cc_setcolour" | "cc_setfill"
         | "cc_settrans" | "cc_setlinewid" | "cc_setmodel" | "cc_setaspect" | "cc_setposition"
-        | "cc_setsize" => {
-            StackEffect { pops: 2, pushes: 0 }
-        }
+        | "cc_setsize" => StackEffect { pops: 2, pushes: 0 },
 
         // Misc known ops
         "baseidkit" | "basecolour" | "setgender" | "setobj" | "cc_create" => {
@@ -109,8 +112,11 @@ fn stack_effect(cmd: &str, operand: &OperandNode) -> StackEffect {
         _ => {
             if cmd.starts_with("push_") {
                 StackEffect { pops: 0, pushes: 1 }
-            } else if cmd.starts_with("pop_") || cmd.starts_with("branch_")
-                || cmd.starts_with("long_branch_") || cmd.starts_with("cc_") || cmd.starts_with("if_")
+            } else if cmd.starts_with("pop_")
+                || cmd.starts_with("branch_")
+                || cmd.starts_with("long_branch_")
+                || cmd.starts_with("cc_")
+                || cmd.starts_with("if_")
             {
                 StackEffect { pops: 1, pushes: 0 }
             } else {
@@ -120,8 +126,8 @@ fn stack_effect(cmd: &str, operand: &OperandNode) -> StackEffect {
     }
 }
 
-pub struct ExprRecovery {
-    instructions: Vec<InstructionNode>,
+pub struct ExprRecovery<'a> {
+    instructions: &'a [InstructionNode],
     stack: Vec<Expression>,
     locals: std::collections::HashMap<String, Expression>,
 }
@@ -154,8 +160,8 @@ pub enum RecoveredStmt {
     Comment(String),
 }
 
-impl ExprRecovery {
-    pub fn new(instructions: Vec<InstructionNode>) -> Self {
+impl<'a> ExprRecovery<'a> {
+    pub fn new(instructions: &'a [InstructionNode]) -> Self {
         Self {
             instructions,
             stack: Vec::new(),
@@ -179,6 +185,9 @@ impl ExprRecovery {
         stmts
     }
 
+    // Process is a large match with many `if let` arms that need early
+    // return to avoid nested else branches. Converting to expression-
+    // based returns would obscure the opcode dispatch pattern.
     #[allow(clippy::needless_return)]
     fn process_instruction(
         &mut self,
@@ -192,22 +201,25 @@ impl ExprRecovery {
             // ── Push operations: build an expression and push onto stack ──
             "push_constant_int" => {
                 if let OperandNode::Int(v) = op {
-                    self.stack.push(Expression::NumberLiteral(NumberLiteral { value: *v }));
+                    self.stack
+                        .push(Expression::NumberLiteral(NumberLiteral { value: *v }));
                 }
                 None
             }
             "push_long_constant" => {
                 if let OperandNode::Long(v) = op {
-                    self.stack.push(Expression::BigIntLiteral(
-                        super::ast::BigIntLiteral { value: *v },
-                    ));
+                    self.stack
+                        .push(Expression::BigIntLiteral(super::ast::BigIntLiteral {
+                            value: *v,
+                        }));
                 }
                 None
             }
             "push_constant_string" => {
                 if let OperandNode::String(s) = op {
-                    self.stack
-                        .push(Expression::StringLiteral(StringLiteral { value: s.clone() }));
+                    self.stack.push(Expression::StringLiteral(StringLiteral {
+                        value: s.clone(),
+                    }));
                 } else if let OperandNode::Int(v) = op {
                     self.stack
                         .push(Expression::NumberLiteral(NumberLiteral { value: *v }));
@@ -225,9 +237,10 @@ impl ExprRecovery {
             }
             "push_varbit" | "pop_varbit" => {
                 if let OperandNode::VarBitRef(vbr) = op {
-                    let name = vbr.name.clone().unwrap_or_else(|| {
-                        format!("VARBITS.get({})", vbr.id)
-                    });
+                    let name = vbr
+                        .name
+                        .clone()
+                        .unwrap_or_else(|| format!("VARBITS.get({})", vbr.id));
                     self.stack.push(Expression::Identifier(Identifier { name }));
                 }
                 None
@@ -243,14 +256,14 @@ impl ExprRecovery {
             "push_array_int" | "push_array_string" => {
                 if let OperandNode::Array(id) = op {
                     let idx = self.pop_expr()?;
-                    let arr =
-                        Expression::Identifier(Identifier { name: format!("array_{id}") });
-                    self.stack.push(Expression::ArrayAccess(
-                        super::ast::ArrayAccess {
+                    let arr = Expression::Identifier(Identifier {
+                        name: format!("array_{id}"),
+                    });
+                    self.stack
+                        .push(Expression::ArrayAccess(super::ast::ArrayAccess {
                             array: Box::new(arr),
                             index: Box::new(idx),
-                        },
-                    ));
+                        }));
                 }
                 None
             }
@@ -313,9 +326,9 @@ impl ExprRecovery {
                             arguments: vec![],
                         })
                     });
-                    let idx = self.pop_expr().unwrap_or(Expression::NumberLiteral(NumberLiteral {
-                        value: 0,
-                    }));
+                    let idx = self
+                        .pop_expr()
+                        .unwrap_or(Expression::NumberLiteral(NumberLiteral { value: 0 }));
                     let idx_str = expr_str(&idx);
                     return Some(RecoveredStmt::Assignment {
                         target: format!("array_{id}[{idx_str}]"),
@@ -361,25 +374,23 @@ impl ExprRecovery {
             "and" => {
                 let right = self.pop_or_unknown();
                 let left = self.pop_or_unknown();
-                self.stack.push(Expression::BinaryOperation(
-                    super::ast::BinaryOperation {
+                self.stack
+                    .push(Expression::BinaryOperation(super::ast::BinaryOperation {
                         op: BinaryOp::And,
                         left: Box::new(left),
                         right: Box::new(right),
-                    },
-                ));
+                    }));
                 None
             }
             "or" => {
                 let right = self.pop_or_unknown();
                 let left = self.pop_or_unknown();
-                self.stack.push(Expression::BinaryOperation(
-                    super::ast::BinaryOperation {
+                self.stack
+                    .push(Expression::BinaryOperation(super::ast::BinaryOperation {
                         op: BinaryOp::Or,
                         left: Box::new(left),
                         right: Box::new(right),
-                    },
-                ));
+                    }));
                 None
             }
 
@@ -428,9 +439,8 @@ impl ExprRecovery {
             // ── String join ──
             "join_string" => {
                 if let OperandNode::Count(n) = op {
-                    let mut parts: Vec<Expression> = (0..*n)
-                        .map(|_| self.pop_or_unknown())
-                        .collect();
+                    let mut parts: Vec<Expression> =
+                        (0..*n).map(|_| self.pop_or_unknown()).collect();
                     parts.reverse();
                     let expr = Expression::Call(CallExpr {
                         callee: Box::new(Expression::Identifier(Identifier {
@@ -587,9 +597,7 @@ impl ExprRecovery {
                         callee: Box::new(Expression::Identifier(Identifier {
                             name: "UI.create".to_string(),
                         })),
-                        arguments: vec![Expression::NumberLiteral(NumberLiteral {
-                            value: *id,
-                        })],
+                        arguments: vec![Expression::NumberLiteral(NumberLiteral { value: *id })],
                     })));
                 }
                 None
@@ -666,9 +674,8 @@ impl ExprRecovery {
             }
             s if s.starts_with("cc_") || s.starts_with("if_") => {
                 // Pop whatever args the effect says, build a generic call
-                let mut args: Vec<Expression> = (0..effect.pops)
-                    .map(|_| self.pop_or_unknown())
-                    .collect();
+                let mut args: Vec<Expression> =
+                    (0..effect.pops).map(|_| self.pop_or_unknown()).collect();
                 args.reverse();
                 return Some(RecoveredStmt::Expression(Expression::Call(CallExpr {
                     callee: Box::new(Expression::Identifier(Identifier {
@@ -700,9 +707,8 @@ impl ExprRecovery {
                 } else {
                     // Unknown: emit as comment if it consumes or produces stack values
                     if effect.pops > 0 {
-                        let mut args: Vec<Expression> = (0..effect.pops)
-                            .map(|_| self.pop_or_unknown())
-                            .collect();
+                        let mut args: Vec<Expression> =
+                            (0..effect.pops).map(|_| self.pop_or_unknown()).collect();
                         args.reverse();
                         if effect.pushes > 0 {
                             let expr = Expression::Call(CallExpr {
@@ -763,15 +769,11 @@ fn local_type(cmd: &str) -> (&'static str, &'static str) {
 fn operand_expr(op: &OperandNode) -> Expression {
     match op {
         OperandNode::Int(v) => Expression::NumberLiteral(NumberLiteral { value: *v }),
-        OperandNode::Long(v) => Expression::BigIntLiteral(super::ast::BigIntLiteral {
-            value: *v,
+        OperandNode::Long(v) => Expression::BigIntLiteral(super::ast::BigIntLiteral { value: *v }),
+        OperandNode::String(s) => Expression::StringLiteral(StringLiteral { value: s.clone() }),
+        OperandNode::Local(idx) => Expression::Identifier(Identifier {
+            name: format!("local_{idx}"),
         }),
-        OperandNode::String(s) => Expression::StringLiteral(StringLiteral {
-            value: s.clone(),
-        }),
-        OperandNode::Local(idx) => {
-            Expression::Identifier(Identifier { name: format!("local_{idx}") })
-        }
         OperandNode::VarRef(vr) => {
             let name = vr
                 .name
@@ -787,7 +789,9 @@ fn operand_expr(op: &OperandNode) -> Expression {
             Expression::Identifier(Identifier { name })
         }
         OperandNode::Array(id) => {
-            let arr = Expression::Identifier(Identifier { name: format!("array_{id}") });
+            let arr = Expression::Identifier(Identifier {
+                name: format!("array_{id}"),
+            });
             Expression::ArrayAccess(super::ast::ArrayAccess {
                 array: Box::new(arr),
                 index: Box::new(Expression::Identifier(Identifier {
