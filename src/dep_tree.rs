@@ -10,18 +10,19 @@
 
 use crate::cache::FlatCache;
 use crate::config::{
-    EnumEntry, InvEntry, OpListEntry, ParamEntry, ScalarValue, SeqEntry, SpotEntry, StructEntry,
+    DbRowEntry, DbTableEntry, EnumEntry, InvEntry, OpListEntry, ParamEntry, ScalarValue, SeqEntry,
+    SpotEntry, StructEntry,
 };
 use crate::constants::{
     ARCHIVE_CLIENTSCRIPTS, ARCHIVE_CONFIG, ARCHIVE_ENUM_CONFIG, ARCHIVE_INTERFACES,
     ARCHIVE_LOC_CONFIG, ARCHIVE_NPC_CONFIG, ARCHIVE_OBJ_CONFIG, ARCHIVE_SEQ_CONFIG,
-    ARCHIVE_SPOT_CONFIG, ARCHIVE_STRUCT_CONFIG, CONFIG_GROUP_INV, CONFIG_GROUP_LOC_LEGACY,
-    CONFIG_GROUP_NPC_LEGACY, CONFIG_GROUP_OBJ_LEGACY, CONFIG_GROUP_SEQ, CONFIG_GROUP_SPOT,
-    CONFIG_GROUP_VAR_BIT, CONFIG_GROUP_VAR_CLAN, CONFIG_GROUP_VAR_CLAN_SETTING,
-    CONFIG_GROUP_VAR_CLIENT, CONFIG_GROUP_VAR_CONTROLLER, CONFIG_GROUP_VAR_GLOBAL,
-    CONFIG_GROUP_VAR_NPC, CONFIG_GROUP_VAR_OBJECT, CONFIG_GROUP_VAR_PLAYER,
-    CONFIG_GROUP_VAR_PLAYER_GROUP, CONFIG_GROUP_VAR_REGION, CONFIG_GROUP_VAR_SHARED,
-    CONFIG_GROUP_VAR_WORLD,
+    ARCHIVE_SPOT_CONFIG, ARCHIVE_STRUCT_CONFIG, CONFIG_GROUP_DBROW, CONFIG_GROUP_DBTABLE,
+    CONFIG_GROUP_INV, CONFIG_GROUP_LOC_LEGACY, CONFIG_GROUP_NPC_LEGACY, CONFIG_GROUP_OBJ_LEGACY,
+    CONFIG_GROUP_SEQ, CONFIG_GROUP_SPOT, CONFIG_GROUP_VAR_BIT, CONFIG_GROUP_VAR_CLAN,
+    CONFIG_GROUP_VAR_CLAN_SETTING, CONFIG_GROUP_VAR_CLIENT, CONFIG_GROUP_VAR_CONTROLLER,
+    CONFIG_GROUP_VAR_GLOBAL, CONFIG_GROUP_VAR_NPC, CONFIG_GROUP_VAR_OBJECT,
+    CONFIG_GROUP_VAR_PLAYER, CONFIG_GROUP_VAR_PLAYER_GROUP, CONFIG_GROUP_VAR_REGION,
+    CONFIG_GROUP_VAR_SHARED, CONFIG_GROUP_VAR_WORLD,
 };
 use crate::interface::{ComponentDeps, parse_component_deps};
 use crate::js5;
@@ -419,6 +420,8 @@ pub struct ResolverContext {
     pub seqs: BTreeMap<u32, SeqEntry>,
     pub spots: BTreeMap<u32, SpotEntry>,
     pub invs: BTreeMap<u32, InvEntry>,
+    pub dbtables: BTreeMap<u32, DbTableEntry>,
+    pub dbrows: BTreeMap<u32, DbRowEntry>,
 }
 
 impl ResolverContext {
@@ -665,6 +668,35 @@ impl ResolverContext {
             map
         };
 
+        // DB tables and rows — the embedded SQLite-like database system
+        let dbtables: BTreeMap<u32, DbTableEntry> = {
+            let mut map = BTreeMap::new();
+            if let Some(payload) = cache.get(ARCHIVE_CONFIG, CONFIG_GROUP_DBTABLE)? {
+                let config_index = cache.archive_index(ARCHIVE_CONFIG)?;
+                let entries = js5::unpack_group(&config_index, CONFIG_GROUP_DBTABLE, &payload)?;
+                for (id, data) in entries {
+                    if let Ok(entry) = crate::config::parse_dbtable(id, &data) {
+                        map.insert(id, entry);
+                    }
+                }
+            }
+            map
+        };
+
+        let dbrows: BTreeMap<u32, DbRowEntry> = {
+            let mut map = BTreeMap::new();
+            if let Some(payload) = cache.get(ARCHIVE_CONFIG, CONFIG_GROUP_DBROW)? {
+                let config_index = cache.archive_index(ARCHIVE_CONFIG)?;
+                let entries = js5::unpack_group(&config_index, CONFIG_GROUP_DBROW, &payload)?;
+                for (id, data) in entries {
+                    if let Ok(entry) = crate::config::parse_dbrow(id, &data) {
+                        map.insert(id, entry);
+                    }
+                }
+            }
+            map
+        };
+
         // ── Decode scripts ──
         let mut decoded_scripts = BTreeMap::new();
         for (&script_id, bytes) in &scripts {
@@ -704,6 +736,8 @@ impl ResolverContext {
             seqs,
             spots,
             invs,
+            dbtables,
+            dbrows,
         })
     }
 }

@@ -3436,6 +3436,7 @@ fn run_ts_export(
     export_loc_types(&ctx, out_dir)?;
     export_seq_types(&ctx, out_dir)?;
     export_spot_types(&ctx, out_dir)?;
+    export_db_types(&ctx, out_dir)?;
     export_index(out_dir)?;
 
     eprintln!("typescript definitions exported to {}", out_dir.display());
@@ -3481,6 +3482,7 @@ fn run_transpile_scripts(
         export_loc_types(&ctx, out_dir)?;
         export_seq_types(&ctx, out_dir)?;
         export_spot_types(&ctx, out_dir)?;
+        export_db_types(&ctx, out_dir)?;
         export_index(out_dir)?;
     }
 
@@ -4227,6 +4229,163 @@ fn extract_oplist_name(ops: &[String]) -> String {
         }
     }
     "null".to_string()
+}
+
+fn export_db_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
+    let mut lines = vec![
+        "// Auto-generated Database definitions".to_string(),
+        "// Source: RS3 cache DB tables and rows (archive 2, groups 40/41)".to_string(),
+        String::new(),
+        "export interface DbTableColumn {".to_string(),
+        "    column: number;".to_string(),
+        "    tupleTypes: number[];".to_string(),
+        "    defaults: (number | string)[][];".to_string(),
+        "}".to_string(),
+        String::new(),
+        "export interface DbTableEntry {".to_string(),
+        "    id: number;".to_string(),
+        "    columns: DbTableColumn[];".to_string(),
+        "}".to_string(),
+        String::new(),
+        "export interface DbRowColumn {".to_string(),
+        "    column: number;".to_string(),
+        "    tupleTypes: number[];".to_string(),
+        "    rows: (number | string)[][];".to_string(),
+        "}".to_string(),
+        String::new(),
+        "export interface DbRowEntry {".to_string(),
+        "    id: number;".to_string(),
+        "    table: number | null;".to_string(),
+        "    columns: DbRowColumn[];".to_string(),
+        "}".to_string(),
+        String::new(),
+    ];
+
+    // DB Tables (schemas)
+    if !ctx.dbtables.is_empty() {
+        let mut entries: Vec<_> = ctx.dbtables.values().collect();
+        entries.sort_by_key(|e| e.id);
+        lines.push(
+            "export const DB_TABLES: ReadonlyMap<number, DbTableEntry> = new Map([".to_string(),
+        );
+        for entry in &entries {
+            let cols_json: String = entry
+                .columns
+                .iter()
+                .map(|c| {
+                    let types = c
+                        .tuple_types
+                        .iter()
+                        .map(u16::to_string)
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let defaults: String = c
+                        .defaults
+                        .iter()
+                        .map(|row| {
+                            let vals = row
+                                .iter()
+                                .map(|v| match v {
+                                    crate::config::ScalarValue::Int(i) => i.to_string(),
+                                    crate::config::ScalarValue::Long(l) => l.to_string(),
+                                    crate::config::ScalarValue::Str(s) => {
+                                        format!("'{}'", escape_ts_string(s))
+                                    }
+                                })
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            format!("[{vals}]")
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!(
+                        "{{ column: {}, tupleTypes: [{}], defaults: [{}] }}",
+                        c.column, types, defaults
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            lines.push(format!(
+                "    [{id}, {{ id: {id}, columns: [{cols_json}] }}],",
+                id = entry.id
+            ));
+        }
+        lines.push("]);".to_string());
+        lines.push(String::new());
+    }
+    lines.push(format!(
+        "export const DB_TABLE_COUNT = {};",
+        ctx.dbtables.len()
+    ));
+
+    // DB Rows (data) — grouped by table ID for navigability
+    if !ctx.dbrows.is_empty() {
+        let mut by_table: BTreeMap<u32, Vec<&crate::config::DbRowEntry>> = BTreeMap::new();
+        for row in ctx.dbrows.values() {
+            if let Some(table) = row.table {
+                by_table.entry(table).or_default().push(row);
+            }
+        }
+        lines.push(String::new());
+        lines.push("// DB rows grouped by table ID. Key = tableId, value = rows.".to_string());
+        lines.push(
+            "export const DB_ROWS: ReadonlyMap<number, DbRowEntry[]> = new Map([".to_string(),
+        );
+        for (table_id, rows) in &by_table {
+            let rows_json: String = rows
+                .iter()
+                .map(|r| {
+                    let cols_json: String = r
+                        .columns
+                        .iter()
+                        .map(|c| {
+                            let types = c
+                                .tuple_types
+                                .iter()
+                                .map(u16::to_string)
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            let row_data: String = c
+                                .rows
+                                .iter()
+                                .map(|row| {
+                                    let vals = row
+                                        .iter()
+                                        .map(|v| match v {
+                                            crate::config::ScalarValue::Int(i) => i.to_string(),
+                                            crate::config::ScalarValue::Long(l) => l.to_string(),
+                                            crate::config::ScalarValue::Str(s) => {
+                                                format!("'{}'", escape_ts_string(s))
+                                            }
+                                        })
+                                        .collect::<Vec<_>>()
+                                        .join(", ");
+                                    format!("[{vals}]")
+                                })
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            format!(
+                                "{{ column: {}, tupleTypes: [{}], rows: [{}] }}",
+                                c.column, types, row_data
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!(
+                        "{{ id: {}, table: {}, columns: [{}] }}",
+                        r.id, table_id, cols_json
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            lines.push(format!("    [{table_id}, [{rows_json}]],"));
+        }
+        lines.push("]);".to_string());
+        lines.push(String::new());
+    }
+    lines.push(format!("export const DB_ROW_COUNT = {};", ctx.dbrows.len()));
+
+    write_text(&out_dir.join("dbtables.ts"), &lines.join("\n"))
 }
 
 fn export_interface_ids(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
