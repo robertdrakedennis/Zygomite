@@ -2,13 +2,14 @@ pub mod ast;
 pub mod cfg;
 pub mod codegen;
 pub mod diagnostics;
+pub mod expr_recovery;
 pub mod scope;
 pub mod sema;
 pub mod structured_writer;
 pub mod writer;
 
 pub use ast::*;
-pub use cfg::{Block, StructuredStatement, SwitchCase, build_cfg, generate_structured};
+pub use cfg::{Block, StructuredStmt, SwitchCaseStmt, build_cfg, emit_structured};
 pub use codegen::{CodeGen, generate_program};
 pub use diagnostics::{Diagnostic, Diagnostics, Severity, Span};
 pub use scope::{LocalType, Scope, Scopes, Symbol, SymbolKind, SymbolTable};

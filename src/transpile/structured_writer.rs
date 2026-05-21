@@ -1,5 +1,5 @@
 use super::ast::{Declaration, TypeAnnotation};
-use super::cfg::{StructuredStatement, build_cfg, generate_structured};
+use super::cfg::{build_cfg, emit_structured, StructuredStmt};
 use std::fmt::Write as _;
 
 pub struct StructuredWriter {
@@ -26,153 +26,105 @@ impl StructuredWriter {
             &mut out,
             "// script_{}: locals(int={}, obj={}, long={}) args(int={}, obj={}, long={})\n",
             decl.script_id,
-            decl.locals
-                .iter()
-                .filter(|l| matches!(l.type_annotation, TypeAnnotation::Number))
-                .count(),
-            decl.locals
-                .iter()
-                .filter(|l| matches!(l.type_annotation, TypeAnnotation::String))
-                .count(),
-            decl.locals
-                .iter()
-                .filter(|l| matches!(l.type_annotation, TypeAnnotation::BigInt))
-                .count(),
-            decl.arguments
-                .iter()
-                .filter(|l| matches!(l.type_annotation, TypeAnnotation::Number))
-                .count(),
-            decl.arguments
-                .iter()
-                .filter(|l| matches!(l.type_annotation, TypeAnnotation::String))
-                .count(),
-            decl.arguments
-                .iter()
-                .filter(|l| matches!(l.type_annotation, TypeAnnotation::BigInt))
-                .count(),
+            decl.locals.iter().filter(|l| matches!(l.type_annotation, TypeAnnotation::Number)).count(),
+            decl.locals.iter().filter(|l| matches!(l.type_annotation, TypeAnnotation::String)).count(),
+            decl.locals.iter().filter(|l| matches!(l.type_annotation, TypeAnnotation::BigInt)).count(),
+            decl.arguments.iter().filter(|l| matches!(l.type_annotation, TypeAnnotation::Number)).count(),
+            decl.arguments.iter().filter(|l| matches!(l.type_annotation, TypeAnnotation::String)).count(),
+            decl.arguments.iter().filter(|l| matches!(l.type_annotation, TypeAnnotation::BigInt)).count(),
         );
 
         out.push_str("const ");
-        let mut locals_parts: Vec<String> = Vec::new();
-        for arg in &decl.arguments {
-            locals_parts.push(format!("{}: {}", arg.name, arg.type_annotation.as_str()));
-        }
-        for local in &decl.locals {
-            locals_parts.push(format!(
-                "{}: {}",
-                local.name,
-                local.type_annotation.as_str()
-            ));
-        }
-        out.push_str(&locals_parts.join(", "));
+        let mut locals: Vec<String> = decl.arguments.iter()
+            .map(|v| format!("{}: {}", v.name, v.type_annotation.as_str()))
+            .collect();
+        locals.extend(decl.locals.iter().map(|v| format!("{}: {}", v.name, v.type_annotation.as_str())));
+        out.push_str(&locals.join(", "));
         out.push_str(";\n\n");
 
         let blocks = build_cfg(decl.instructions.clone());
-        let structured = generate_structured(blocks);
+        let structured = emit_structured(blocks);
 
         self.write_structured(&structured, &mut out);
 
         out
     }
 
-    fn write_structured(&mut self, stmts: &[StructuredStatement], out: &mut String) {
+    fn write_structured(&mut self, stmts: &[StructuredStmt], out: &mut String) {
         for stmt in stmts {
-            self.write_structured_stmt(stmt, out);
+            self.write_stmt(stmt, out);
         }
     }
 
-    fn write_structured_stmt(&mut self, stmt: &StructuredStatement, out: &mut String) {
+    fn write_stmt(&mut self, stmt: &StructuredStmt, out: &mut String) {
         match stmt {
-            StructuredStatement::While { condition, body } => {
+            StructuredStmt::While { body } => {
                 self.write_indent(out);
-                if condition == "true" {
-                    out.push_str("while (true) {\n");
-                } else {
-                    out.push_str("while (");
-                    out.push_str(condition);
-                    out.push_str(") {\n");
-                }
+                out.push_str("while (true) {\n");
                 self.indent += 1;
                 self.write_structured(body, out);
                 self.indent -= 1;
                 self.write_indent(out);
-                out.push('}');
-                out.push('\n');
+                out.push_str("}\n");
             }
-            StructuredStatement::If {
-                condition,
-                then_case,
-                else_case,
-            } => {
+            StructuredStmt::If { condition, then_body, else_body } => {
                 self.write_indent(out);
                 out.push_str("if (");
                 out.push_str(condition);
                 out.push_str(") {\n");
                 self.indent += 1;
-                self.write_structured(then_case, out);
+                self.write_structured(then_body, out);
                 self.indent -= 1;
-                self.write_indent(out);
-                out.push('}');
-                if let Some(else_body) = else_case {
-                    out.push_str(" else {\n");
-                    self.indent += 1;
-                    self.write_structured(else_body, out);
-                    self.indent -= 1;
+                if let Some(else_b) = else_body {
                     self.write_indent(out);
-                    out.push('}');
+                    out.push_str("} else {\n");
+                    self.indent += 1;
+                    self.write_structured(else_b, out);
+                    self.indent -= 1;
                 }
-                out.push('\n');
+                self.write_indent(out);
+                out.push_str("}\n");
             }
-            StructuredStatement::Switch {
-                expression,
-                cases,
-                default,
-            } => {
+            StructuredStmt::Switch { expr, cases } => {
                 self.write_indent(out);
                 out.push_str("switch (");
-                out.push_str(expression);
+                out.push_str(expr);
                 out.push_str(") {\n");
                 self.indent += 1;
                 for case_ in cases {
                     self.write_indent(out);
                     out.push_str("case ");
                     out.push_str(&case_.value.to_string());
-                    out.push('\n');
+                    out.push_str(":\n");
                     self.indent += 1;
                     self.write_structured(&case_.body, out);
                     self.write_indent(out);
                     out.push_str("break;\n");
                     self.indent -= 1;
                 }
-                if let Some(default_body) = default {
-                    self.write_indent(out);
-                    out.push_str("default:\n");
-                    self.indent += 1;
-                    self.write_structured(default_body, out);
-                    self.indent -= 1;
-                }
                 self.indent -= 1;
                 self.write_indent(out);
-                out.push('}');
-                out.push('\n');
+                out.push_str("}\n");
             }
-            StructuredStatement::Assignment { target, value } => {
+            StructuredStmt::Assignment { target, value } => {
                 self.write_indent(out);
                 out.push_str(target);
                 out.push_str(" = ");
                 out.push_str(value);
                 out.push_str(";\n");
             }
-            StructuredStatement::Expression { expr } => {
+            StructuredStmt::Expr { expr } => {
                 self.write_indent(out);
                 out.push_str(expr);
                 out.push_str(";\n");
             }
-            StructuredStatement::Goto { target } => {
+            StructuredStmt::Goto { target } => {
                 self.write_indent(out);
-                let _ = writeln!(out, "goto({target}); // block_{target}");
+                out.push_str("goto(");
+                out.push_str(&target.to_string());
+                out.push_str(");\n");
             }
-            StructuredStatement::Return { value } => {
+            StructuredStmt::Return { value } => {
                 self.write_indent(out);
                 out.push_str("return");
                 if let Some(v) = value {
@@ -181,7 +133,15 @@ impl StructuredWriter {
                 }
                 out.push_str(";\n");
             }
-            StructuredStatement::Comment(text) => {
+            StructuredStmt::Break => {
+                self.write_indent(out);
+                out.push_str("break;\n");
+            }
+            StructuredStmt::Continue => {
+                self.write_indent(out);
+                out.push_str("continue;\n");
+            }
+            StructuredStmt::Comment(text) => {
                 self.write_indent(out);
                 out.push_str("// ");
                 out.push_str(text);

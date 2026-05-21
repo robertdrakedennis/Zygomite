@@ -169,6 +169,8 @@ pub enum BinaryOp {
     Le,
     Gt,
     Ge,
+    And,
+    Or,
 }
 
 impl BinaryOp {
@@ -185,6 +187,8 @@ impl BinaryOp {
             Self::Le => "<=",
             Self::Gt => ">",
             Self::Ge => ">=",
+            Self::And => "&&",
+            Self::Or => "||",
         }
     }
 }
