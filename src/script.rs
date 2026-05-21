@@ -353,11 +353,8 @@ fn decode_operand(
         | "push_array_int_leave_index_on_stack"
         | "push_array_int_and_index"
         | "pop_array_int_leave_value_on_stack" => Ok(Operand::Array(packet.g4s()?)),
-        // Unknown commands in builds before MIN_SCRIPT_BUILD: read a 4-byte
-        // signed int as operand (most common operand size). This lets the
-        // instruction count stay aligned even when we don't know the command.
-        _ if version < MIN_SCRIPT_BUILD => Ok(Operand::Int(packet.g4s()?)),
-        // Unknown commands in supported builds: read 1 byte.
+        // Unknown commands: read 1 byte operand (RuneScriptKt generic format).
+        // For build 910+, commands not in our opcode table use writeShort+writeByte.
         _ => Ok(Operand::Byte(packet.g1()?)),
     }
 }

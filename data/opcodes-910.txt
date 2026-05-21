@@ -25,11 +25,14 @@ pop_varc_int,43
 define_array,44
 push_array_int,45
 pop_array_int,46
+push_varc_string,47
+pop_varc_string,48
 push_varc_string,49
 pop_varc_string,50
 push_varc_long,51
 pop_varc_long,52
 push_long_constant,54
+pop_long_discard,55
 switch,60
 push_constant_long,61
 pop_long_discard,62
@@ -46,9 +49,14 @@ push_varclansetting,74
 push_varclan,76
 branch_if_true,86
 branch_if_false,87
+cc_create,100
+cc_delete,101
+cc_deleteall,102
+push_varclan,106
 push_varclanbit,107
 push_varclan_long,108
 push_varclan_string,109
+push_varclansetting,112
 push_varclansettingbit,113
 push_varclansetting_long,114
 push_varclansetting_string,115
@@ -145,7 +153,6 @@ cc_setonop,1409
 cc_setondragcomplete,1410
 cc_setonclickrepeat,1411
 cc_setonmouserepeat,1412
-cc_setondragcancel,1413
 if_setondragcancel,1413
 cc_setoninvtransmit,1414
 cc_setonstattransmit,1415
@@ -336,7 +343,7 @@ if_getop,2801
 if_getopbase,2802
 mes,3100
 anim,3101
-if_setsidepanel,3102
+mes_typed,3102
 if_close,3103
 resume_countdialog,3104
 resume_namedialog,3105
@@ -506,7 +513,6 @@ setbit,4008
 clearbit,4009
 testbit,4010
 mod,4011
-modulo,4011
 pow,4012
 invpow,4013
 and,4014
@@ -896,7 +902,6 @@ unknown_command_7212,7212
 unknown_command_7213,7213
 unknown_command_7214,7214
 unknown_command_7215,7215
-unknown_command_7201,7301
 unknown_command_7301,7301
 unknown_command_7302,7302
 unknown_command_7303,7303
