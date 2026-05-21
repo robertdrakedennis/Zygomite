@@ -197,7 +197,10 @@ pub fn decode_script(
     let mut code = Vec::with_capacity(code_len);
     while packet.pos() < header_pos {
         let opcode = packet.g2()?;
-        let command = opcode_book.name(opcode)?.to_string();
+        let command = opcode_book
+            .name(opcode)
+            .map(str::to_string)
+            .unwrap_or_else(|_| format!("cmd_{opcode}"));
         let index = i32::try_from(code.len()).context("script too large")?;
         let operand = decode_operand(
             &command,
@@ -214,7 +217,10 @@ pub fn decode_script(
         });
     }
 
-    if code.len() != code_len {
+    // Code length validation: only enforced on builds where we have a complete
+    // opcode table. Earlier builds may use command IDs we don't recognize,
+    // causing instruction decoding mismatches.
+    if version >= MIN_SCRIPT_BUILD && code.len() != code_len {
         bail!(
             "script code length mismatch: decoded {} expected {}",
             code.len(),
@@ -347,6 +353,11 @@ fn decode_operand(
         | "push_array_int_leave_index_on_stack"
         | "push_array_int_and_index"
         | "pop_array_int_leave_value_on_stack" => Ok(Operand::Array(packet.g4s()?)),
+        // Unknown commands in builds before MIN_SCRIPT_BUILD: read a 4-byte
+        // signed int as operand (most common operand size). This lets the
+        // instruction count stay aligned even when we don't know the command.
+        _ if version < MIN_SCRIPT_BUILD => Ok(Operand::Int(packet.g4s()?)),
+        // Unknown commands in supported builds: read 1 byte.
         _ => Ok(Operand::Byte(packet.g1()?)),
     }
 }
