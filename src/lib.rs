@@ -29,6 +29,7 @@ pub mod cli;
 pub mod config;
 pub mod constants;
 pub mod cutscene2d;
+pub mod dep_tree;
 pub mod fixture;
 pub mod interface;
 pub mod js5;

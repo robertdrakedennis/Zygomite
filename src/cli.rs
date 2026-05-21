@@ -40,6 +40,7 @@ use crate::constants::{
     DEFAULTS_GROUP_WEARPOS, DEFAULTS_GROUP_WORLDMAP, SUBBUILD,
 };
 use crate::cutscene2d::decode as decode_cutscene2d;
+use crate::dep_tree::{EntityRef, EntityType, ResolverContext, build_tree};
 use crate::fixture::{default_tar_path, ensure_archive_complete, open_cache};
 use crate::interface::render_interface_group;
 use crate::map::decode_map_square;
@@ -125,6 +126,50 @@ pub enum Command {
         #[arg(long)]
         max_audio_files: Option<usize>,
     },
+    DepTreeInterface {
+        #[arg(long)]
+        id: u32,
+        #[arg(long, default_value_t = 50)]
+        max_depth: u32,
+        #[arg(long)]
+        out_file: PathBuf,
+    },
+    DepTreeScript {
+        #[arg(long)]
+        id: u32,
+        #[arg(long, default_value_t = 50)]
+        max_depth: u32,
+        #[arg(long)]
+        out_file: PathBuf,
+    },
+    DepTreeVarp {
+        #[arg(long)]
+        id: u32,
+        #[arg(long)]
+        domain: VarDomainArg,
+        #[arg(long, default_value_t = 50)]
+        max_depth: u32,
+        #[arg(long)]
+        out_file: PathBuf,
+    },
+    DepTreeVarbit {
+        #[arg(long)]
+        id: u32,
+        #[arg(long, default_value_t = 50)]
+        max_depth: u32,
+        #[arg(long)]
+        out_file: PathBuf,
+    },
+    DepTreeConfig {
+        #[arg(long)]
+        kind: ConfigKindArg,
+        #[arg(long)]
+        id: u32,
+        #[arg(long, default_value_t = 50)]
+        max_depth: u32,
+        #[arg(long)]
+        out_file: PathBuf,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -186,6 +231,151 @@ impl VarDomainArg {
             Self::Controller => CONTROLLER,
             Self::Global => GLOBAL,
             Self::PlayerGroup => PLAYER_GROUP,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub enum ConfigKindArg {
+    Param,
+    Enum,
+    DbTable,
+    DbRow,
+    Loc,
+    Npc,
+    Obj,
+    Seq,
+    Spot,
+    Struct,
+    Inv,
+    Cursor,
+    Idk,
+    Bas,
+    Mel,
+    Water,
+    Achievement,
+    Material,
+    Quest,
+    SeqGroup,
+    Headbar,
+    Hitmark,
+    Light,
+    SkyBox,
+    WorldArea,
+    Billboard,
+    ParticleEmitter,
+    ParticleEffector,
+    Texture,
+    Stylesheet,
+    Controller,
+    Category,
+    Area,
+    Hunt,
+    MesAnim,
+    ItemCode,
+    GameLogEvent,
+    BugTemplate,
+    QuickChatCat,
+    QuickChatPhrase,
+    Underlay,
+    Overlay,
+    Msi,
+}
+
+impl ConfigKindArg {
+    fn entity_type(self) -> EntityType {
+        match self {
+            Self::Param => EntityType::Param,
+            Self::Enum => EntityType::Enum,
+            Self::DbTable => EntityType::DbTable,
+            Self::DbRow => EntityType::DbRow,
+            Self::Loc => EntityType::Loc,
+            Self::Npc => EntityType::Npc,
+            Self::Obj => EntityType::Obj,
+            Self::Seq => EntityType::Seq,
+            Self::Spot => EntityType::Spot,
+            Self::Struct => EntityType::Struct,
+            Self::Inv => EntityType::Inv,
+            Self::Cursor => EntityType::Cursor,
+            Self::Idk => EntityType::Idk,
+            Self::Bas => EntityType::Bas,
+            Self::Mel => EntityType::Mel,
+            Self::Water => EntityType::Water,
+            Self::Achievement => EntityType::Achievement,
+            Self::Material => EntityType::Material,
+            Self::Quest => EntityType::Quest,
+            Self::SeqGroup => EntityType::SeqGroup,
+            Self::Headbar => EntityType::Headbar,
+            Self::Hitmark => EntityType::Hitmark,
+            Self::Light => EntityType::Light,
+            Self::SkyBox => EntityType::SkyBox,
+            Self::WorldArea => EntityType::WorldArea,
+            Self::Billboard => EntityType::Billboard,
+            Self::ParticleEmitter => EntityType::ParticleEmitter,
+            Self::ParticleEffector => EntityType::ParticleEffector,
+            Self::Texture => EntityType::Texture,
+            Self::Stylesheet => EntityType::Stylesheet,
+            Self::Controller => EntityType::ControllerConfig,
+            Self::Category => EntityType::Category,
+            Self::Area => EntityType::Area,
+            Self::Hunt => EntityType::Hunt,
+            Self::MesAnim => EntityType::MesAnim,
+            Self::ItemCode => EntityType::ItemCode,
+            Self::GameLogEvent => EntityType::GameLogEvent,
+            Self::BugTemplate => EntityType::BugTemplate,
+            Self::QuickChatCat => EntityType::QuickChatCat,
+            Self::QuickChatPhrase => EntityType::QuickChatPhrase,
+            Self::Underlay => EntityType::Underlay,
+            Self::Overlay => EntityType::Overlay,
+            Self::Msi => EntityType::Msi,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Param => "param",
+            Self::Enum => "enum",
+            Self::DbTable => "dbtable",
+            Self::DbRow => "dbrow",
+            Self::Loc => "loc",
+            Self::Npc => "npc",
+            Self::Obj => "obj",
+            Self::Seq => "seq",
+            Self::Spot => "spot",
+            Self::Struct => "struct",
+            Self::Inv => "inv",
+            Self::Cursor => "cursor",
+            Self::Idk => "idk",
+            Self::Bas => "bas",
+            Self::Mel => "mel",
+            Self::Water => "water",
+            Self::Achievement => "achievement",
+            Self::Material => "material",
+            Self::Quest => "quest",
+            Self::SeqGroup => "seqgroup",
+            Self::Headbar => "headbar",
+            Self::Hitmark => "hitmark",
+            Self::Light => "light",
+            Self::SkyBox => "skybox",
+            Self::WorldArea => "worldarea",
+            Self::Billboard => "billboard",
+            Self::ParticleEmitter => "particle_emitter",
+            Self::ParticleEffector => "particle_effector",
+            Self::Texture => "texture",
+            Self::Stylesheet => "stylesheet",
+            Self::Controller => "controller",
+            Self::Category => "category",
+            Self::Area => "area",
+            Self::Hunt => "hunt",
+            Self::MesAnim => "mesanim",
+            Self::ItemCode => "itemcode",
+            Self::GameLogEvent => "gamelogevent",
+            Self::BugTemplate => "bugtemplate",
+            Self::QuickChatCat => "quickchatcat",
+            Self::QuickChatPhrase => "quickchatphrase",
+            Self::Underlay => "underlay",
+            Self::Overlay => "overlay",
+            Self::Msi => "msi",
         }
     }
 }
@@ -358,6 +548,75 @@ pub fn run(cli: Cli) -> Result<()> {
                 skip_audio,
                 max_audio_files,
             },
+            version,
+        ),
+        Command::DepTreeInterface {
+            id,
+            max_depth,
+            out_file,
+        } => run_dep_tree_interface(
+            &cache,
+            &tar_path,
+            &cli.data_dir,
+            id,
+            max_depth,
+            &out_file,
+            version,
+        ),
+        Command::DepTreeScript {
+            id,
+            max_depth,
+            out_file,
+        } => run_dep_tree_script(
+            &cache,
+            &tar_path,
+            &cli.data_dir,
+            id,
+            max_depth,
+            &out_file,
+            version,
+        ),
+        Command::DepTreeVarp {
+            id,
+            domain,
+            max_depth,
+            out_file,
+        } => run_dep_tree_varp(
+            &cache,
+            &tar_path,
+            &cli.data_dir,
+            id,
+            domain,
+            max_depth,
+            &out_file,
+            version,
+        ),
+        Command::DepTreeVarbit {
+            id,
+            max_depth,
+            out_file,
+        } => run_dep_tree_varbit(
+            &cache,
+            &tar_path,
+            &cli.data_dir,
+            id,
+            max_depth,
+            &out_file,
+            version,
+        ),
+        Command::DepTreeConfig {
+            kind,
+            id,
+            max_depth,
+            out_file,
+        } => run_dep_tree_config(
+            &cache,
+            &tar_path,
+            &cli.data_dir,
+            kind,
+            id,
+            max_depth,
+            &out_file,
             version,
         ),
     }
@@ -2986,6 +3245,140 @@ fn print_json<T: Serialize>(value: &T) -> Result<()> {
     println!(
         "{}",
         serde_json::to_string_pretty(value).context("failed to encode summary json")?
+    );
+    Ok(())
+}
+
+fn run_dep_tree_interface(
+    cache: &FlatCache,
+    tar_path: &Path,
+    data_dir: &Path,
+    id: u32,
+    max_depth: u32,
+    out_file: &Path,
+    version: RuntimeVersion,
+) -> Result<()> {
+    let ctx = ResolverContext::load(cache, tar_path, data_dir, version.build, version.subbuild)?;
+    let root = EntityRef::new(EntityType::Interface, id);
+    let tree = build_tree(&ctx, &root, max_depth);
+    write_json(out_file, &tree)?;
+    eprintln!(
+        "dependency tree written to {} (nodes={}, cycles={}, depth_hits={})",
+        out_file.display(),
+        tree.total_nodes,
+        tree.cycles_detected,
+        tree.max_depth_hits
+    );
+    Ok(())
+}
+
+fn run_dep_tree_script(
+    cache: &FlatCache,
+    tar_path: &Path,
+    data_dir: &Path,
+    id: u32,
+    max_depth: u32,
+    out_file: &Path,
+    version: RuntimeVersion,
+) -> Result<()> {
+    let ctx = ResolverContext::load(cache, tar_path, data_dir, version.build, version.subbuild)?;
+    let root = EntityRef::new(EntityType::Script, id);
+    let tree = build_tree(&ctx, &root, max_depth);
+    write_json(out_file, &tree)?;
+    eprintln!(
+        "dependency tree written to {} (nodes={}, cycles={}, depth_hits={})",
+        out_file.display(),
+        tree.total_nodes,
+        tree.cycles_detected,
+        tree.max_depth_hits
+    );
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_dep_tree_varp(
+    cache: &FlatCache,
+    tar_path: &Path,
+    data_dir: &Path,
+    id: u32,
+    domain: VarDomainArg,
+    max_depth: u32,
+    out_file: &Path,
+    version: RuntimeVersion,
+) -> Result<()> {
+    let ctx = ResolverContext::load(cache, tar_path, data_dir, version.build, version.subbuild)?;
+    let entity_type = match domain {
+        VarDomainArg::Player => EntityType::VarPlayer,
+        VarDomainArg::Npc => EntityType::VarNpc,
+        VarDomainArg::Client => EntityType::VarClient,
+        VarDomainArg::World => EntityType::VarWorld,
+        VarDomainArg::Region => EntityType::VarRegion,
+        VarDomainArg::Object => EntityType::VarObject,
+        VarDomainArg::Clan => EntityType::VarClan,
+        VarDomainArg::ClanSetting => EntityType::VarClanSetting,
+        VarDomainArg::Controller => EntityType::VarController,
+        VarDomainArg::Global => EntityType::VarGlobal,
+        VarDomainArg::PlayerGroup => EntityType::VarPlayerGroup,
+        VarDomainArg::All => bail!("dep-tree-varp requires a specific domain, not 'all'"),
+    };
+    let root = EntityRef::new(entity_type, id);
+    let tree = build_tree(&ctx, &root, max_depth);
+    write_json(out_file, &tree)?;
+    eprintln!(
+        "dependency tree written to {} (nodes={}, cycles={}, depth_hits={})",
+        out_file.display(),
+        tree.total_nodes,
+        tree.cycles_detected,
+        tree.max_depth_hits
+    );
+    Ok(())
+}
+
+fn run_dep_tree_varbit(
+    cache: &FlatCache,
+    tar_path: &Path,
+    data_dir: &Path,
+    id: u32,
+    max_depth: u32,
+    out_file: &Path,
+    version: RuntimeVersion,
+) -> Result<()> {
+    let ctx = ResolverContext::load(cache, tar_path, data_dir, version.build, version.subbuild)?;
+    let root = EntityRef::new(EntityType::VarBit, id);
+    let tree = build_tree(&ctx, &root, max_depth);
+    write_json(out_file, &tree)?;
+    eprintln!(
+        "dependency tree written to {} (nodes={}, cycles={}, depth_hits={})",
+        out_file.display(),
+        tree.total_nodes,
+        tree.cycles_detected,
+        tree.max_depth_hits
+    );
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_dep_tree_config(
+    cache: &FlatCache,
+    tar_path: &Path,
+    data_dir: &Path,
+    kind: ConfigKindArg,
+    id: u32,
+    max_depth: u32,
+    out_file: &Path,
+    version: RuntimeVersion,
+) -> Result<()> {
+    let ctx = ResolverContext::load(cache, tar_path, data_dir, version.build, version.subbuild)?;
+    let entity_type = kind.entity_type();
+    let root = EntityRef::new(entity_type, id).labeled(kind.label());
+    let tree = build_tree(&ctx, &root, max_depth);
+    write_json(out_file, &tree)?;
+    eprintln!(
+        "dependency tree written to {} (nodes={}, cycles={}, depth_hits={})",
+        out_file.display(),
+        tree.total_nodes,
+        tree.cycles_detected,
+        tree.max_depth_hits
     );
     Ok(())
 }
