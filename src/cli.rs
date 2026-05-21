@@ -3468,7 +3468,7 @@ fn run_transpile_scripts(
     let mut errors = 0;
 
     for (&script_id_raw, data) in &ctx.scripts {
-        let script_id = script_id_raw as i32;
+        let script_id = crate::transpile::ScriptId(script_id_raw as i32);
 
         if let Some(filter) = filter_script {
             let name = transpiler.script_name_for(script_id);

@@ -1,3 +1,4 @@
+use super::ast::ScriptId;
 use crate::vars::VarDomain;
 use std::collections::HashMap;
 
@@ -7,7 +8,7 @@ pub enum SymbolKind {
     VarBit { id: u16 },
     Enum { id: u32 },
     Param { id: u32 },
-    Script { id: i32 },
+    Script { id: ScriptId },
     Local { index: usize, type_: LocalType },
     Argument { index: usize, type_: LocalType },
 }
@@ -121,7 +122,7 @@ pub struct SymbolTable {
     pub varbit_map: HashMap<u16, String>,
     pub enum_map: HashMap<u32, String>,
     pub param_map: HashMap<u32, String>,
-    pub script_names: HashMap<i32, String>,
+    pub script_names: HashMap<ScriptId, String>,
 }
 
 impl SymbolTable {
@@ -164,7 +165,7 @@ impl SymbolTable {
         self
     }
 
-    pub fn with_script_names(mut self, names: HashMap<i32, String>) -> Self {
+    pub fn with_script_names(mut self, names: HashMap<ScriptId, String>) -> Self {
         self.script_names = names;
         self
     }
@@ -177,7 +178,7 @@ impl SymbolTable {
         self.varbit_map.get(&id)
     }
 
-    pub fn script_name(&self, id: i32) -> Option<&String> {
+    pub fn script_name(&self, id: ScriptId) -> Option<&String> {
         self.script_names.get(&id)
     }
 

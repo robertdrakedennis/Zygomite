@@ -8,6 +8,33 @@ pub struct StackEffect {
     pub pushes: usize,
 }
 
+/// Classifies opcode commands by semantic prefix for dispatch in
+/// catch-all arms. Specific opcodes are matched by exact name first.
+enum OpcodeCategory {
+    Push,
+    Pop,
+    Branch,
+    CC,
+    IF,
+    Other,
+}
+
+fn categorize(cmd: &str) -> OpcodeCategory {
+    if cmd.starts_with("push_") {
+        OpcodeCategory::Push
+    } else if cmd.starts_with("pop_") {
+        OpcodeCategory::Pop
+    } else if cmd.starts_with("branch_") || cmd.starts_with("long_branch_") {
+        OpcodeCategory::Branch
+    } else if cmd.starts_with("cc_") {
+        OpcodeCategory::CC
+    } else if cmd.starts_with("if_") {
+        OpcodeCategory::IF
+    } else {
+        OpcodeCategory::Other
+    }
+}
+
 fn stack_effect(cmd: &str, operand: &OperandNode) -> StackEffect {
     match cmd {
         // Push: pops 0, pushes 1
@@ -109,27 +136,15 @@ fn stack_effect(cmd: &str, operand: &OperandNode) -> StackEffect {
             StackEffect { pops: 0, pushes: 0 }
         }
 
-        _ => {
-            if cmd.starts_with("push_") {
-                StackEffect { pops: 0, pushes: 1 }
-            } else if cmd.starts_with("pop_")
-                || cmd.starts_with("branch_")
-                || cmd.starts_with("long_branch_")
-                || cmd.starts_with("cc_")
-                || cmd.starts_with("if_")
-            {
-                StackEffect { pops: 1, pushes: 0 }
-            } else {
-                StackEffect { pops: 0, pushes: 0 }
-            }
-        }
+        _ => match categorize(cmd) {
+            OpcodeCategory::Push => StackEffect { pops: 0, pushes: 1 },
+            OpcodeCategory::Pop
+            | OpcodeCategory::Branch
+            | OpcodeCategory::CC
+            | OpcodeCategory::IF => StackEffect { pops: 1, pushes: 0 },
+            OpcodeCategory::Other => StackEffect { pops: 0, pushes: 0 },
+        },
     }
-}
-
-pub struct ExprRecovery<'a> {
-    instructions: &'a [InstructionNode],
-    stack: Vec<Expression>,
-    locals: std::collections::HashMap<String, Expression>,
 }
 
 #[derive(Debug, Clone)]
@@ -158,6 +173,12 @@ pub enum RecoveredStmt {
     },
     Return(Option<Expression>),
     Comment(String),
+}
+
+pub struct ExprRecovery<'a> {
+    instructions: &'a [InstructionNode],
+    stack: Vec<Expression>,
+    locals: std::collections::HashMap<String, Expression>,
 }
 
 impl<'a> ExprRecovery<'a> {
@@ -267,17 +288,8 @@ impl<'a> ExprRecovery<'a> {
                 }
                 None
             }
-            s if s.starts_with("push_varclan") || s.starts_with("push_varc") => {
-                let expr = operand_expr(op);
-                self.stack.push(expr);
-                None
-            }
-
             // ── Pop operations: pop from stack, produce assignment or discard ──
-            s if s.starts_with("pop_int_local")
-                || s.starts_with("pop_string_local")
-                || s.starts_with("pop_long_local") =>
-            {
+            "pop_int_local" | "pop_string_local" | "pop_long_local" => {
                 if let OperandNode::Local(idx) = op {
                     let value = self.pop_expr().unwrap_or_else(|| {
                         Expression::Call(CallExpr {
@@ -672,67 +684,68 @@ impl<'a> ExprRecovery<'a> {
                     arguments: vec![id, size],
                 })));
             }
-            s if s.starts_with("cc_") || s.starts_with("if_") => {
-                // Pop whatever args the effect says, build a generic call
-                let mut args: Vec<Expression> =
-                    (0..effect.pops).map(|_| self.pop_or_unknown()).collect();
-                args.reverse();
-                return Some(RecoveredStmt::Expression(Expression::Call(CallExpr {
-                    callee: Box::new(Expression::Identifier(Identifier {
-                        name: format!("UI.{}", sanitize_camel(&cmd[3..])),
-                    })),
-                    arguments: args,
-                })));
-            }
-
-            // ── Other ops ──
-            "define_array" => {
-                if let OperandNode::Array(id) = op {
-                    return Some(RecoveredStmt::Expression(Expression::Call(CallExpr {
-                        callee: Box::new(Expression::Identifier(Identifier {
-                            name: format!("define_array_{id}"),
-                        })),
-                        arguments: vec![],
-                    })));
-                }
-                None
-            }
-
-            // ── Fallback: push/pop by prefix pattern ──
             _ => {
-                if cmd.starts_with("push_") {
-                    self.stack.push(operand_expr(op));
-                } else if cmd.starts_with("pop_") {
-                    let _val = self.stack.pop();
-                } else {
-                    // Unknown: emit as comment if it consumes or produces stack values
-                    if effect.pops > 0 {
+                match categorize(cmd) {
+                    OpcodeCategory::CC | OpcodeCategory::IF => {
                         let mut args: Vec<Expression> =
                             (0..effect.pops).map(|_| self.pop_or_unknown()).collect();
                         args.reverse();
-                        if effect.pushes > 0 {
-                            let expr = Expression::Call(CallExpr {
-                                callee: Box::new(Expression::Identifier(Identifier {
-                                    name: sanitize_command(cmd),
-                                })),
-                                arguments: args,
-                            });
-                            self.stack.push(expr);
-                        } else {
+                        return Some(RecoveredStmt::Expression(Expression::Call(CallExpr {
+                            callee: Box::new(Expression::Identifier(Identifier {
+                                name: format!("UI.{}", sanitize_camel(&cmd[3..])),
+                            })),
+                            arguments: args,
+                        })));
+                    }
+                    OpcodeCategory::Push => {
+                        self.stack.push(operand_expr(op));
+                    }
+                    OpcodeCategory::Pop => {
+                        let _val = self.stack.pop();
+                    }
+                    OpcodeCategory::Branch | OpcodeCategory::Other => {
+                        // define_array is a known op that falls through to Other
+                        if let OperandNode::Array(id) = op
+                            && cmd == "define_array"
+                        {
                             return Some(RecoveredStmt::Expression(Expression::Call(CallExpr {
                                 callee: Box::new(Expression::Identifier(Identifier {
-                                    name: sanitize_command(cmd),
+                                    name: format!("define_array_{id}"),
                                 })),
-                                arguments: args,
+                                arguments: vec![],
                             })));
                         }
-                    } else if effect.pushes > 0 {
-                        self.stack.push(Expression::Call(CallExpr {
-                            callee: Box::new(Expression::Identifier(Identifier {
-                                name: sanitize_command(cmd),
-                            })),
-                            arguments: vec![],
-                        }));
+                        // Unknown: emit as call if it consumes or produces stack values
+                        if effect.pops > 0 {
+                            let mut args: Vec<Expression> =
+                                (0..effect.pops).map(|_| self.pop_or_unknown()).collect();
+                            args.reverse();
+                            if effect.pushes > 0 {
+                                let expr = Expression::Call(CallExpr {
+                                    callee: Box::new(Expression::Identifier(Identifier {
+                                        name: sanitize_command(cmd),
+                                    })),
+                                    arguments: args,
+                                });
+                                self.stack.push(expr);
+                            } else {
+                                return Some(RecoveredStmt::Expression(Expression::Call(
+                                    CallExpr {
+                                        callee: Box::new(Expression::Identifier(Identifier {
+                                            name: sanitize_command(cmd),
+                                        })),
+                                        arguments: args,
+                                    },
+                                )));
+                            }
+                        } else if effect.pushes > 0 {
+                            self.stack.push(Expression::Call(CallExpr {
+                                callee: Box::new(Expression::Identifier(Identifier {
+                                    name: sanitize_command(cmd),
+                                })),
+                                arguments: vec![],
+                            }));
+                        }
                     }
                 }
                 None

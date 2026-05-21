@@ -1,6 +1,7 @@
 use super::ast::{
     ArgumentVariable, Declaration, ImportStatement, InstructionNode, LocalVariable, OperandNode,
-    Program, Statement, SwitchCase, TypeAnnotation, VarBitRefNode, VarRefNode,
+    Program, ScriptId, Statement, SwitchCase, TypeAnnotation, VarBitId, VarBitRefNode, VarId,
+    VarRefNode,
 };
 use super::scope::SymbolTable;
 use crate::script::{CompiledScript, Instruction, Operand, VarBitRef, VarRef};
@@ -15,7 +16,7 @@ impl CodeGen {
         Self { symbol_table }
     }
 
-    pub fn generate(&self, script: &CompiledScript, script_id: i32) -> Declaration {
+    pub fn generate(&self, script: &CompiledScript, script_id: ScriptId) -> Declaration {
         let arguments = self.build_arguments(script);
         let locals = self.build_locals(script);
         let instructions = self.build_instructions(script);
@@ -128,7 +129,7 @@ impl CodeGen {
     fn convert_var_ref(&self, vr: &VarRef) -> VarRefNode {
         VarRefNode {
             domain: vr.domain,
-            id: vr.id,
+            id: VarId(vr.id),
             name: self.symbol_table.var_name(vr.domain, vr.id).cloned(),
             is_transmog: vr.transmog,
         }
@@ -136,7 +137,7 @@ impl CodeGen {
 
     fn convert_varbit_ref(&self, vbr: &VarBitRef) -> VarBitRefNode {
         VarBitRefNode {
-            id: vbr.id,
+            id: VarBitId(vbr.id),
             name: self.symbol_table.varbit_name(vbr.id).cloned(),
             is_transmog: vbr.transmog,
         }

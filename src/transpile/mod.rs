@@ -86,14 +86,14 @@ impl Transpiler {
             if let Ok(script) = decode_script(data, opcode_book, version)
                 && let Some(name) = &script.name
             {
-                names.insert(script_id as i32, name.clone());
+                names.insert(ScriptId(script_id as i32), name.clone());
             }
         }
         self.symbol_table.script_names = names;
         self
     }
 
-    pub fn script_name_for(&self, script_id: i32) -> Option<String> {
+    pub fn script_name_for(&self, script_id: ScriptId) -> Option<String> {
         self.symbol_table.script_names.get(&script_id).cloned()
     }
 
@@ -102,17 +102,17 @@ impl Transpiler {
         data: &[u8],
         opcode_book: &OpcodeBook,
         version: u32,
-        script_id: i32,
+        script_id: ScriptId,
     ) -> Result<TranspiledScript> {
         let script = decode_script(data, opcode_book, version)?;
         Ok(self.transpile(&script, script_id))
     }
 
-    pub fn transpile(&self, script: &CompiledScript, script_id: i32) -> TranspiledScript {
+    pub fn transpile(&self, script: &CompiledScript, script_id: ScriptId) -> TranspiledScript {
         self.transpile_structured(script, script_id)
     }
 
-    pub fn transpile_to_ast(&self, script: &CompiledScript, script_id: i32) -> Declaration {
+    pub fn transpile_to_ast(&self, script: &CompiledScript, script_id: ScriptId) -> Declaration {
         let codegen = CodeGen::new(self.symbol_table.clone());
         codegen.generate(script, script_id)
     }
@@ -120,7 +120,7 @@ impl Transpiler {
     pub fn transpile_structured(
         &self,
         script: &CompiledScript,
-        script_id: i32,
+        script_id: ScriptId,
     ) -> TranspiledScript {
         let codegen = CodeGen::new(self.symbol_table.clone());
         let decl = codegen.generate(script, script_id);
@@ -147,7 +147,7 @@ pub struct TranspiledScript {
     pub referenced_vars: Vec<(VarDomain, u16)>,
     pub referenced_varbits: Vec<u16>,
     pub referenced_enums: Vec<u32>,
-    pub referenced_scripts: Vec<i32>,
+    pub referenced_scripts: Vec<ScriptId>,
 }
 
 fn collect_var_refs(script: &CompiledScript) -> Vec<(VarDomain, u16)> {
@@ -182,11 +182,11 @@ fn collect_enum_refs(script: &CompiledScript) -> Vec<u32> {
     refs
 }
 
-fn collect_script_refs(script: &CompiledScript) -> Vec<i32> {
+fn collect_script_refs(script: &CompiledScript) -> Vec<ScriptId> {
     let mut refs = Vec::new();
     for instruction in &script.code {
         if let crate::script::Operand::Script(id) = &instruction.operand {
-            refs.push(*id);
+            refs.push(ScriptId(*id));
         }
     }
     refs

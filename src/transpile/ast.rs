@@ -1,5 +1,36 @@
 use crate::vars::VarDomain;
 
+// ── ID newtypes ──
+/// Identifies a CS2 compiled script by its index in the script table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ScriptId(pub i32);
+
+impl std::fmt::Display for ScriptId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+/// Identifies a variable by its domain and numeric ID within that domain.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct VarId(pub u16);
+
+impl std::fmt::Display for VarId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+/// Identifies a varbit by its numeric ID in the varbit table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct VarBitId(pub u16);
+
+impl std::fmt::Display for VarBitId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum TypeScriptNode {
     Program(Program),
@@ -231,7 +262,7 @@ pub struct GotoExpr {
 
 #[derive(Debug, Clone)]
 pub struct Declaration {
-    pub script_id: i32,
+    pub script_id: ScriptId,
     pub name: Option<String>,
     pub locals: Vec<LocalVariable>,
     pub arguments: Vec<ArgumentVariable>,
@@ -279,14 +310,14 @@ pub enum OperandNode {
 #[derive(Debug, Clone)]
 pub struct VarRefNode {
     pub domain: VarDomain,
-    pub id: u16,
+    pub id: VarId,
     pub name: Option<String>,
     pub is_transmog: bool,
 }
 
 #[derive(Debug, Clone)]
 pub struct VarBitRefNode {
-    pub id: u16,
+    pub id: VarBitId,
     pub name: Option<String>,
     pub is_transmog: bool,
 }
