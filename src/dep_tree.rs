@@ -792,17 +792,9 @@ fn resolve_component_deps(
 ) -> DependencyNode {
     let mut deps = Vec::new();
 
-    for child in &comp_deps.children {
-        let child_ref = EntityRef::with_sub(EntityType::Component, interface_id, *child);
-        deps.push(resolve(
-            ctx,
-            &child_ref,
-            visited,
-            depth + 1,
-            max_depth,
-            stats,
-        ));
-    }
+    // Note: comp_deps.children contains the parent layer ID, not child IDs.
+    // This is a structural relationship, not a true dependency, so we don't
+    // traverse it to avoid false cycle detection from shared parents.
 
     for &script_id in &comp_deps.scripts {
         let script_ref = EntityRef::new(EntityType::Script, script_id);

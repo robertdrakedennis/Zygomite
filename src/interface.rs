@@ -1446,7 +1446,7 @@ pub struct ComponentDeps {
     pub enums: HashSet<u32>,
 }
 
-pub fn parse_component_deps(_component_id: u32, data: &[u8], build: u32) -> Result<ComponentDeps> {
+pub fn parse_component_deps(component_id: u32, data: &[u8], build: u32) -> Result<ComponentDeps> {
     let mut packet = Packet::new(data);
     let mut deps = ComponentDeps {
         component_type: "unknown".to_string(),
@@ -1514,149 +1514,176 @@ pub fn parse_component_deps(_component_id: u32, data: &[u8], build: u32) -> Resu
 
     let _flags = packet.g1()?;
 
-    match if_type {
-        0 => {
-            let _scroll_width = packet.g2()?;
-            let _scroll_height = packet.g2()?;
-            if version == -1 && build >= 495 {
+    // Use a closure to catch errors and return partial results
+    let parse_result = (|| -> Result<()> {
+        let parsed_body = match if_type {
+            6 => {
+                collect_model_deps(
+                    &mut deps,
+                    &mut packet,
+                    build,
+                    width_mode != 0,
+                    height_mode != 0,
+                )?;
+                true
+            }
+            0 => {
+                let _scroll_width = packet.g2()?;
+                let _scroll_height = packet.g2()?;
+                if version == -1 && build >= 495 {
+                    let _ = packet.g1()?;
+                } else if version >= 9 || version >= 6 {
+                    if version >= 9 {
+                        let _ = [packet.g1()?, packet.g1()?, packet.g1()?, packet.g1()?];
+                    } else {
+                        let _ = [packet.g2()?, packet.g2()?, packet.g2()?, packet.g2()?];
+                    }
+                }
+                true
+            }
+            3 => {
+                let _ = packet.g4s()?;
                 let _ = packet.g1()?;
-            } else if version >= 9 || version >= 6 {
+                let _ = packet.g1()?;
+                true
+            }
+            4 => {
+                collect_text_deps(&mut deps, &mut packet, version, build)?;
+                true
+            }
+            5 => {
+                collect_graphic_deps(&mut deps, &mut packet, version, build)?;
+                true
+            }
+            9 => {
+                let _ = packet.g1()?;
+                let _ = packet.g4s()?;
+                if build >= 493 {
+                    let _ = packet.g1()?;
+                }
+                true
+            }
+            10 => {
+                let _ = packet.g1()?;
+                let _ = packet.g1()?;
+                let _ = packet.g1()?;
+                let _ = packet.g1()?;
+                let _ = packet.g1()?;
+                let _ = [packet.g1()?, packet.g1()?, packet.g1()?, packet.g1()?];
+                let _ = packet.g1()?;
+                let _ = packet.g4s()?;
+                collect_sprite_part_deps(&mut deps, &mut packet, version, build)?;
+                collect_text_part_deps(&mut deps, &mut packet, version, build)?;
+                true
+            }
+            11 => {
+                let _ = packet.g2()?;
+                let _ = packet.g2()?;
+                let _ = packet.g1()?;
+                let _ = packet.g1()?;
+                true
+            }
+            12 => {
+                let _ = packet.g1()?;
+                let _ = packet.g1()?;
+                let _ = packet.g1()?;
+                let _ = packet.g1()?;
+                let _ = packet.g1()?;
+                let _ = packet.g4s()?;
+                collect_sprite_part_deps(&mut deps, &mut packet, version, build)?;
+                collect_text_part_deps(&mut deps, &mut packet, version, build)?;
+                true
+            }
+            13 => {
+                let _ = packet.g1()?;
+                let _ = packet.g1()?;
+                let _ = packet.g1()?;
+                let _ = packet.g2()?;
                 if version >= 9 {
                     let _ = [packet.g1()?, packet.g1()?, packet.g1()?, packet.g1()?];
-                } else {
-                    let _ = [packet.g2()?, packet.g2()?, packet.g2()?, packet.g2()?];
                 }
-            }
-        }
-        3 => {
-            let _ = packet.g4s()?;
-            let _ = packet.g1()?;
-            let _ = packet.g1()?;
-        }
-        4 => {
-            collect_text_deps(&mut deps, &mut packet, version, build)?;
-        }
-        5 => {
-            collect_graphic_deps(&mut deps, &mut packet, version, build)?;
-        }
-        6 => {
-            collect_model_deps(
-                &mut deps,
-                &mut packet,
-                build,
-                width_mode != 0,
-                height_mode != 0,
-            )?;
-        }
-        9 => {
-            let _ = packet.g1()?;
-            let _ = packet.g4s()?;
-            if build >= 493 {
+                if version >= 7 {
+                    let _ = packet.g1()?;
+                }
                 let _ = packet.g1()?;
-            }
-        }
-        10 => {
-            let _ = packet.g1()?;
-            let _ = packet.g1()?;
-            let _ = packet.g1()?;
-            let _ = packet.g1()?;
-            let _ = packet.g1()?;
-            let _ = [packet.g1()?, packet.g1()?, packet.g1()?, packet.g1()?];
-            let _ = packet.g1()?;
-            let _ = packet.g4s()?;
-            collect_sprite_part_deps(&mut deps, &mut packet, version, build)?;
-            collect_text_part_deps(&mut deps, &mut packet, version, build)?;
-        }
-        11 => {
-            let _ = packet.g2()?;
-            let _ = packet.g2()?;
-            let _ = packet.g1()?;
-            let _ = packet.g1()?;
-        }
-        12 => {
-            let _ = packet.g1()?;
-            let _ = packet.g1()?;
-            let _ = packet.g1()?;
-            let _ = packet.g1()?;
-            let _ = packet.g1()?;
-            let _ = packet.g4s()?;
-            collect_sprite_part_deps(&mut deps, &mut packet, version, build)?;
-            collect_text_part_deps(&mut deps, &mut packet, version, build)?;
-        }
-        13 => {
-            let _ = packet.g1()?;
-            let _ = packet.g1()?;
-            let _ = packet.g1()?;
-            let _ = packet.g2()?;
-            if version >= 9 {
-                let _ = [packet.g1()?, packet.g1()?, packet.g1()?, packet.g1()?];
-            }
-            if version >= 7 {
-                let _ = packet.g1()?;
-            }
-            let _ = packet.g1()?;
-            let _ = packet.g4s()?;
-            collect_sprite_part_deps(&mut deps, &mut packet, version, build)?;
-            collect_text_part_deps(&mut deps, &mut packet, version, build)?;
-            collect_scrollbar_deps(&mut deps, &mut packet, version, build)?;
-        }
-        15 => {
-            let _ = packet.g2()?;
-            let _ = packet.g2()?;
-            let _ = packet.g1()?;
-            let _ = packet.g2()?;
-            let _ = packet.g2()?;
-            let _ = packet.g1()?;
-        }
-        16 => {
-            let _ = packet.g1()?;
-            let _ = packet.g1()?;
-            let _ = packet.g1()?;
-            let _ = packet.g1()?;
-            if version >= 9 {
-                let _ = packet.g1()?;
-            }
-            let _ = packet.g1()?;
-            let _ = packet.g1()?;
-            for _ in 0..packet.g2()? {
-                let _ = packet.gjstr()?;
-            }
-            for _ in 0..packet.g2()? {
                 let _ = packet.g4s()?;
+                collect_sprite_part_deps(&mut deps, &mut packet, version, build)?;
+                collect_text_part_deps(&mut deps, &mut packet, version, build)?;
+                collect_scrollbar_deps(&mut deps, &mut packet, version, build)?;
+                true
             }
-            for _ in 0..packet.g2()? {
+            15 => {
                 let _ = packet.g2()?;
-            }
-            if version >= 9 {
-                let _ = [packet.g1()?, packet.g1()?, packet.g1()?, packet.g1()?];
-                let _ = [packet.g1()?, packet.g1()?, packet.g1()?, packet.g1()?];
-            }
-            let _ = packet.g1()?;
-            let _ = packet.g4s()?;
-            collect_sprite_part_deps(&mut deps, &mut packet, version, build)?;
-            collect_sprite_part_deps(&mut deps, &mut packet, version, build)?;
-            collect_sprite_part_deps(&mut deps, &mut packet, version, build)?;
-            collect_text_part_deps(&mut deps, &mut packet, version, build)?;
-            collect_scrollbar_deps(&mut deps, &mut packet, version, build)?;
-        }
-        26 => {
-            let _ = packet.g1()?;
-            for _ in 0..packet.g2()? {
                 let _ = packet.g2()?;
+                let _ = packet.g1()?;
+                let _ = packet.g2()?;
+                let _ = packet.g2()?;
+                let _ = packet.g1()?;
+                true
             }
-            let _ = packet.gjstr()?;
-            let _ = packet.g1()?;
-            for _ in 0..packet.g2()? {
-                let _ = packet.gjstr()?;
-            }
-            for _ in 0..packet.g2()? {
+            16 => {
+                let _ = packet.g1()?;
+                let _ = packet.g1()?;
+                let _ = packet.g1()?;
+                let _ = packet.g1()?;
+                if version >= 9 {
+                    let _ = packet.g1()?;
+                }
+                let _ = packet.g1()?;
+                let _ = packet.g1()?;
+                for _ in 0..packet.g2()? {
+                    let _ = packet.gjstr()?;
+                }
+                for _ in 0..packet.g2()? {
+                    let _ = packet.g4s()?;
+                }
+                for _ in 0..packet.g2()? {
+                    let _ = packet.g2()?;
+                }
+                if version >= 9 {
+                    let _ = [packet.g1()?, packet.g1()?, packet.g1()?, packet.g1()?];
+                    let _ = [packet.g1()?, packet.g1()?, packet.g1()?, packet.g1()?];
+                }
                 let _ = packet.g4s()?;
+                collect_sprite_part_deps(&mut deps, &mut packet, version, build)?;
+                collect_sprite_part_deps(&mut deps, &mut packet, version, build)?;
+                collect_sprite_part_deps(&mut deps, &mut packet, version, build)?;
+                collect_text_part_deps(&mut deps, &mut packet, version, build)?;
+                collect_scrollbar_deps(&mut deps, &mut packet, version, build)?;
+                true
             }
-        }
-        _ => {}
-    }
+            26 => {
+                let _ = packet.g1()?;
+                for _ in 0..packet.g2()? {
+                    let _ = packet.g2()?;
+                }
+                let _ = packet.gjstr()?;
+                let _ = packet.g1()?;
+                for _ in 0..packet.g2()? {
+                    let _ = packet.gjstr()?;
+                }
+                for _ in 0..packet.g2()? {
+                    let _ = packet.g4s()?;
+                }
+                true
+            }
+            _ => false,
+        };
 
-    collect_common_tail_deps(&mut deps, &mut packet, version, build)?;
+        if parsed_body {
+            collect_common_tail_deps(&mut deps, &mut packet, version, build)?;
+        }
+
+        Ok(())
+    })();
+
+    // Return partial results even if parsing failed
+    if let Err(e) = parse_result {
+        eprintln!(
+            "parse_component_deps partial failure for comp {component_id} (type={}): {e}",
+            deps.component_type
+        );
+    }
 
     Ok(deps)
 }
@@ -1683,8 +1710,8 @@ fn collect_model_deps(
     deps: &mut ComponentDeps,
     packet: &mut Packet<'_>,
     build: u32,
-    _has_width_mode: bool,
-    _has_height_mode: bool,
+    has_width_mode: bool,
+    has_height_mode: bool,
 ) -> Result<()> {
     let model = if build < 681 {
         packet.g2null()?
@@ -1748,6 +1775,13 @@ fn collect_model_deps(
         }
     }
 
+    if has_width_mode {
+        let _ = packet.g2()?;
+    }
+    if has_height_mode {
+        let _ = packet.g2()?;
+    }
+
     Ok(())
 }
 
@@ -1799,7 +1833,6 @@ fn collect_sprite_part_deps(
         deps.graphics.insert(graphic as u32);
     }
     let _ = packet.g2()?;
-    let _ = packet.g1()?;
     let _ = packet.g1()?;
     let _ = packet.g1()?;
     let _ = packet.g1()?;
@@ -1958,7 +1991,6 @@ fn collect_common_tail_deps(
         collect_hook_deps(deps, packet)?;
     }
 
-    collect_hook_deps(deps, packet)?;
     collect_hook_deps(deps, packet)?;
     collect_hook_deps(deps, packet)?;
     collect_hook_deps(deps, packet)?;

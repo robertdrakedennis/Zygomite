@@ -51,6 +51,28 @@ impl VarDomain {
             Self::Global => "global",
         }
     }
+
+    pub fn type_str(&self) -> &'static str {
+        match self {
+            Self::Player
+            | Self::Npc
+            | Self::Client
+            | Self::World
+            | Self::Region
+            | Self::Object
+            | Self::Clan
+            | Self::ClanSetting
+            | Self::Controller
+            | Self::PlayerGroup
+            | Self::Global => "number",
+        }
+    }
+}
+
+impl From<VarDomain> for u64 {
+    fn from(domain: VarDomain) -> Self {
+        domain as Self
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]

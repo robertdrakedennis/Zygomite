@@ -19,7 +19,9 @@
     clippy::module_name_repetitions,
     clippy::must_use_candidate,
     clippy::option_if_let_else,
-    clippy::too_many_lines
+    clippy::return_self_not_must_use,
+    clippy::too_many_lines,
+    clippy::unused_self
 )]
 
 pub mod animator;
@@ -37,5 +39,7 @@ pub mod map;
 pub mod model;
 pub mod packet;
 pub mod script;
+pub mod script_transpile;
+pub mod transpile;
 pub mod vars;
 pub mod vfx;

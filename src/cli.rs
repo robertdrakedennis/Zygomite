@@ -46,6 +46,7 @@ use crate::interface::render_interface_group;
 use crate::map::decode_map_square;
 use crate::model::Model;
 use crate::script::{CompiledScript, Instruction, OpcodeBook, Operand, decode_script};
+use crate::script_transpile::Transpiler;
 use crate::vars::{VarDomain, parse_var, parse_varbit};
 use crate::vfx::decode as decode_vfx;
 use anyhow::{Context, Result, bail};
@@ -169,6 +170,18 @@ pub enum Command {
         max_depth: u32,
         #[arg(long)]
         out_file: PathBuf,
+    },
+    TsExport {
+        #[arg(long)]
+        out_dir: PathBuf,
+    },
+    TranspileScripts {
+        #[arg(long)]
+        out_dir: PathBuf,
+        #[arg(long)]
+        filter_script: Option<String>,
+        #[arg(long, default_value_t = 100)]
+        max_scripts: usize,
     },
 }
 
@@ -617,6 +630,22 @@ pub fn run(cli: Cli) -> Result<()> {
             id,
             max_depth,
             &out_file,
+            version,
+        ),
+        Command::TsExport { out_dir } => {
+            run_ts_export(&cache, &tar_path, &cli.data_dir, &out_dir, version)
+        }
+        Command::TranspileScripts {
+            out_dir,
+            filter_script,
+            max_scripts,
+        } => run_transpile_scripts(
+            &cache,
+            &tar_path,
+            &cli.data_dir,
+            &out_dir,
+            filter_script.as_deref(),
+            max_scripts,
             version,
         ),
     }
@@ -3381,6 +3410,677 @@ fn run_dep_tree_config(
         tree.max_depth_hits
     );
     Ok(())
+}
+
+fn run_ts_export(
+    cache: &FlatCache,
+    tar_path: &Path,
+    data_dir: &Path,
+    out_dir: &Path,
+    version: RuntimeVersion,
+) -> Result<()> {
+    let ctx = ResolverContext::load(cache, tar_path, data_dir, version.build, version.subbuild)?;
+    fs::create_dir_all(out_dir)?;
+
+    export_var_types(&ctx, out_dir)?;
+    export_varbit_types(&ctx, out_dir)?;
+    export_enum_types(&ctx, out_dir)?;
+    export_struct_types(&ctx, out_dir)?;
+    export_param_types(&ctx, out_dir)?;
+    export_interface_ids(&ctx, out_dir)?;
+    export_inv_types(&ctx, out_dir)?;
+    export_obj_types(&ctx, out_dir)?;
+    export_npc_types(&ctx, out_dir)?;
+    export_loc_types(&ctx, out_dir)?;
+    export_seq_types(&ctx, out_dir)?;
+    export_spot_types(&ctx, out_dir)?;
+    export_index(out_dir)?;
+
+    eprintln!("typescript definitions exported to {}", out_dir.display());
+    Ok(())
+}
+
+fn run_transpile_scripts(
+    cache: &FlatCache,
+    tar_path: &Path,
+    data_dir: &Path,
+    out_dir: &Path,
+    filter_script: Option<&str>,
+    max_scripts: usize,
+    version: RuntimeVersion,
+) -> Result<()> {
+    let ctx = ResolverContext::load(cache, tar_path, data_dir, version.build, version.subbuild)?;
+
+    let opcode_book = OpcodeBook::load(data_dir, version.build, version.subbuild)?;
+
+    let transpiler = Transpiler::new()
+        .with_enums(&ctx.enums)
+        .with_vars(&ctx.varps_by_domain)
+        .with_varbits(&ctx.varbits)
+        .with_params(&ctx.params)
+        .with_script_names(&ctx.scripts, &opcode_book, version.build);
+
+    fs::create_dir_all(out_dir)?;
+
+    let mut script_count = 0;
+    let mut errors = 0;
+
+    for (&script_id_raw, data) in &ctx.scripts {
+        let script_id = script_id_raw as i32;
+
+        if let Some(filter) = filter_script {
+            let name = transpiler.script_name_for(script_id);
+            if name.map(|n| !n.contains(filter)).unwrap_or(true) {
+                continue;
+            }
+        }
+
+        match transpiler.transpile_from_bytes(data, &opcode_book, version.build, script_id) {
+            Ok(ts) => {
+                let script_name = transpiler
+                    .script_name_for(script_id)
+                    .unwrap_or_else(|| format!("script_{script_id}"));
+                let filename = format!("{}.ts", sanitize_file_component(&script_name));
+                let out_path = out_dir.join(&filename);
+                fs::write(&out_path, &ts.source)?;
+                script_count += 1;
+                if script_count >= max_scripts {
+                    break;
+                }
+            }
+            Err(e) => {
+                eprintln!("failed to transpile script_{script_id}: {e}");
+                errors += 1;
+            }
+        }
+    }
+
+    eprintln!(
+        "transpiled {script_count} scripts ({errors} errors) to {}",
+        out_dir.display()
+    );
+    Ok(())
+}
+
+fn export_var_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
+    let mut entries: Vec<_> = ctx
+        .varps_by_domain
+        .iter()
+        .flat_map(|(domain, vars)| {
+            vars.values().map(|entry| VarTypeEntry {
+                id: entry.id,
+                domain: *domain,
+                var_name: entry.var_name.clone(),
+                type_id: entry.type_id,
+                lifetime: entry.lifetime,
+                transmit_level: entry.transmit_level,
+                client_code: entry.client_code,
+                domain_default: entry.domain_default,
+                wiki_sync: entry.wiki_sync,
+            })
+        })
+        .collect();
+
+    entries.sort_by_key(|e| (e.domain as u8, e.id));
+
+    let mut lines = vec![
+        "// Auto-generated Var definitions".to_string(),
+        "// Source: RS3 cache var config".to_string(),
+        String::new(),
+        "export type VarDomain = 'player' | 'npc' | 'client' | 'world' | 'region' | 'object' | 'clan' | 'clan_setting' | 'controller' | 'player_group' | 'global';".to_string(),
+        "export type VarType = 'int' | 'long' | 'string' | 'unknown';".to_string(),
+        "export type VarLifetime = 'temp' | 'perm' | 'serverperm' | 'unknown';".to_string(),
+        "export type VarTransmitLevel = 'never' | 'on_set_different' | 'on_set_always' | 'unknown';".to_string(),
+        String::new(),
+        "export interface VarEntry {".to_string(),
+        "    id: number;".to_string(),
+        "    domain: VarDomain;".to_string(),
+        "    name: string;".to_string(),
+        "    type: VarType;".to_string(),
+        "    lifetime: VarLifetime;".to_string(),
+        "    transmitLevel: VarTransmitLevel;".to_string(),
+        "    clientCode: number | null;".to_string(),
+        "    domainDefault: boolean;".to_string(),
+        "    wikiSync: boolean;".to_string(),
+        "}".to_string(),
+        String::new(),
+        // Use composite key: domain_id * 1000000 + var_id
+        "export const VARS: ReadonlyMap<number, VarEntry> = new Map([".to_string(),
+    ];
+    for entry in &entries {
+        let type_str = match entry.type_id {
+            Some(0) => "'int'",
+            Some(1) => "'long'",
+            Some(2) => "'string'",
+            _ => "'unknown'",
+        };
+        let lifetime = entry.lifetime.unwrap_or("unknown");
+        let transmit = entry.transmit_level.unwrap_or("unknown");
+        let client_code = match entry.client_code {
+            Some(c) => c.to_string(),
+            None => "null".to_string(),
+        };
+        let domain_label = entry.domain.as_label();
+        let composite_key = (u64::from(entry.domain) * 1_000_000) + u64::from(entry.id);
+        lines.push(format!(
+            "    [{}, {{ id: {}, domain: '{}', name: '{}', type: {}, lifetime: '{}', transmitLevel: '{}', clientCode: {}, domainDefault: {}, wikiSync: {} }}],",
+            composite_key,
+            entry.id,
+            domain_label,
+            escape_ts_string(&entry.var_name),
+            type_str,
+            lifetime,
+            transmit,
+            client_code,
+            entry.domain_default,
+            entry.wiki_sync
+        ));
+    }
+    lines.push("]);".to_string());
+    lines.push(String::new());
+    lines.push(format!("export const VAR_COUNT = {};", entries.len()));
+
+    write_text(&out_dir.join("vars.ts"), &lines.join("\n"))
+}
+
+struct VarTypeEntry {
+    id: u32,
+    domain: crate::vars::VarDomain,
+    var_name: String,
+    type_id: Option<u8>,
+    lifetime: Option<&'static str>,
+    transmit_level: Option<&'static str>,
+    client_code: Option<u16>,
+    domain_default: bool,
+    wiki_sync: bool,
+}
+
+fn export_varbit_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
+    let mut lines = vec![
+        "// Auto-generated VarBit definitions".to_string(),
+        "// Source: RS3 cache varbit config".to_string(),
+        String::new(),
+        "export interface VarBitEntry {".to_string(),
+        "    id: number;".to_string(),
+        "    name: string;".to_string(),
+        "    domain: string | null;".to_string(),
+        "    baseVar: number | null;".to_string(),
+        "    startBit: number | null;".to_string(),
+        "    endBit: number | null;".to_string(),
+        "    wikiSync: boolean;".to_string(),
+        "}".to_string(),
+        String::new(),
+    ];
+
+    let mut entries: Vec<_> = ctx.varbits.values().cloned().collect();
+    entries.sort_by_key(|e| e.id);
+
+    lines.push("export const VARBITS: ReadonlyMap<number, VarBitEntry> = new Map([".to_string());
+    for entry in &entries {
+        let domain_str = match entry.domain {
+            Some(d) => format!("'{}'", d.as_label()),
+            None => "null".to_string(),
+        };
+        let base_var = entry
+            .base_var
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "null".to_string());
+        let start_bit = entry
+            .start_bit
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "null".to_string());
+        let end_bit = entry
+            .end_bit
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "null".to_string());
+        lines.push(format!(
+            "    [{}, {{ id: {}, name: '{}', domain: {}, baseVar: {}, startBit: {}, endBit: {}, wikiSync: {} }}],",
+            entry.id,
+            entry.id,
+            escape_ts_string(&entry.varbit_name),
+            domain_str,
+            base_var,
+            start_bit,
+            end_bit,
+            entry.wiki_sync
+        ));
+    }
+    lines.push("]);".to_string());
+    lines.push(String::new());
+    lines.push(format!("export const VARBIT_COUNT = {};", entries.len()));
+
+    write_text(&out_dir.join("varbits.ts"), &lines.join("\n"))
+}
+
+fn export_enum_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
+    let mut entries: Vec<_> = ctx.enums.values().cloned().collect();
+    entries.sort_by_key(|e| e.id);
+
+    let mut lines = vec![
+        "// Auto-generated Enum definitions".to_string(),
+        "// Source: RS3 cache enum config".to_string(),
+        String::new(),
+        "export interface EnumPair {".to_string(),
+        "    key: number;".to_string(),
+        "    value: number | string;".to_string(),
+        "    dense: boolean;".to_string(),
+        "}".to_string(),
+        String::new(),
+        "export interface EnumEntry {".to_string(),
+        "    id: number;".to_string(),
+        "    inputType: string;".to_string(),
+        "    outputType: string;".to_string(),
+        "    default: number | string | null;".to_string(),
+        "    values: EnumPair[];".to_string(),
+        "}".to_string(),
+        String::new(),
+    ];
+
+    lines.push("export const ENUMS: ReadonlyMap<number, EnumEntry> = new Map([".to_string());
+    for entry in &entries {
+        let input_type = match entry.input_type_char {
+            Some(b'i') => "'int'",
+            Some(b's') => "'string'",
+            _ => "'unknown'",
+        };
+        let output_type = match entry.output_type_char {
+            Some(b'i') => "'int'",
+            Some(b's') => "'string'",
+            _ => "'unknown'",
+        };
+        let default = match &entry.default {
+            Some(crate::config::ScalarValue::Int(i)) => i.to_string(),
+            Some(crate::config::ScalarValue::Long(l)) => l.to_string(),
+            Some(crate::config::ScalarValue::Str(s)) => format!("'{}'", escape_ts_string(s)),
+            None => "null".to_string(),
+        };
+        let values_json: String = entry
+            .values
+            .iter()
+            .map(|pair| {
+                let val_str = match &pair.value {
+                    crate::config::ScalarValue::Int(i) => i.to_string(),
+                    crate::config::ScalarValue::Long(l) => l.to_string(),
+                    crate::config::ScalarValue::Str(s) => format!("'{}'", escape_ts_string(s)),
+                };
+                format!(
+                    "{{ key: {}, value: {}, dense: {} }}",
+                    pair.key, val_str, pair.dense
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        lines.push(format!(
+            "    [{}, {{ id: {}, inputType: {}, outputType: {}, default: {}, values: [{}] }}],",
+            entry.id, entry.id, input_type, output_type, default, values_json
+        ));
+    }
+    lines.push("]);".to_string());
+    lines.push(String::new());
+    lines.push(format!("export const ENUM_COUNT = {};", entries.len()));
+
+    write_text(&out_dir.join("enums.ts"), &lines.join("\n"))
+}
+
+fn export_struct_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
+    let mut lines = vec![
+        "// Auto-generated Struct definitions".to_string(),
+        "// Source: RS3 cache struct config".to_string(),
+        String::new(),
+        "export interface StructParamEntry {".to_string(),
+        "    id: number;".to_string(),
+        "    value: number | string;".to_string(),
+        "}".to_string(),
+        String::new(),
+        "export interface StructEntry {".to_string(),
+        "    id: number;".to_string(),
+        "    params: StructParamEntry[];".to_string(),
+        "}".to_string(),
+        String::new(),
+    ];
+
+    let mut entries: Vec<_> = ctx.structs.values().cloned().collect();
+    entries.sort_by_key(|e| e.id);
+
+    lines.push("export const STRUCTS: ReadonlyMap<number, StructEntry> = new Map([".to_string());
+    for entry in &entries {
+        let params_json = entry
+            .params
+            .iter()
+            .map(|p| {
+                format!(
+                    "{{ id: {}, value: {} }}",
+                    p.param_id,
+                    format_scalar_value(&p.value)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        lines.push(format!(
+            "    [{}, {{ id: {}, params: [{}] }}],",
+            entry.id, entry.id, params_json
+        ));
+    }
+    lines.push("]);".to_string());
+    lines.push(String::new());
+    lines.push(format!("export const STRUCT_COUNT = {};", entries.len()));
+
+    write_text(&out_dir.join("structs.ts"), &lines.join("\n"))
+}
+
+fn format_scalar_value(value: &crate::config::ScalarValue) -> String {
+    match value {
+        crate::config::ScalarValue::Int(i) => i.to_string(),
+        crate::config::ScalarValue::Long(l) => l.to_string(),
+        crate::config::ScalarValue::Str(s) => format!("'{}'", escape_ts_string(s)),
+    }
+}
+
+fn export_param_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
+    let mut entries: Vec<_> = ctx.params.values().cloned().collect();
+    entries.sort_by_key(|e| e.id);
+
+    let mut lines = vec![
+        "// Auto-generated Param definitions".to_string(),
+        "// Source: RS3 cache param config".to_string(),
+        String::new(),
+        "export interface ParamEntry {".to_string(),
+        "    id: number;".to_string(),
+        "    typeChar: string | null;".to_string(),
+        "    typeId: number | null;".to_string(),
+        "    defaultInt: number | null;".to_string(),
+        "    defaultString: string | null;".to_string(),
+        "    autoDisable: boolean;".to_string(),
+        "}".to_string(),
+        String::new(),
+        "export type ParamValue = number | string;".to_string(),
+        String::new(),
+    ];
+
+    lines.push("export const PARAMS: ReadonlyMap<number, ParamEntry> = new Map([".to_string());
+    for entry in &entries {
+        let type_char = entry
+            .type_char
+            .map(|c| format!("'{}'", c as char))
+            .unwrap_or_else(|| "null".to_string());
+        let type_id = entry
+            .type_id
+            .map(|t| t.to_string())
+            .unwrap_or_else(|| "null".to_string());
+        let (default_int, default_string) = match &entry.default {
+            Some(crate::config::ScalarValue::Int(i)) => (i.to_string(), "null".to_string()),
+            Some(crate::config::ScalarValue::Long(l)) => (l.to_string(), "null".to_string()),
+            Some(crate::config::ScalarValue::Str(s)) => {
+                ("null".to_string(), format!("'{}'", escape_ts_string(s)))
+            }
+            None => ("null".to_string(), "null".to_string()),
+        };
+        lines.push(format!(
+            "    [{}, {{ id: {}, typeChar: {}, typeId: {}, defaultInt: {}, defaultString: {}, autoDisable: {} }}],",
+            entry.id, entry.id, type_char, type_id, default_int, default_string, entry.autodisable
+        ));
+    }
+    lines.push("]);".to_string());
+    lines.push(String::new());
+    lines.push(format!("export const PARAM_COUNT = {};", entries.len()));
+
+    write_text(&out_dir.join("params.ts"), &lines.join("\n"))
+}
+
+fn export_inv_types(_ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
+    // TODO: populate from cache inv config archive
+    let lines = vec![
+        "// Auto-generated Inventory definitions".to_string(),
+        "// Source: RS3 cache inv config".to_string(),
+        String::new(),
+        "export interface InvEntry {".to_string(),
+        "    id: number;".to_string(),
+        "    name: string;".to_string(),
+        "    size: number;".to_string(),
+        "}".to_string(),
+        String::new(),
+        "// Inventories define container slots for items".to_string(),
+    ];
+
+    write_text(&out_dir.join("invs.ts"), &lines.join("\n"))
+}
+
+fn export_obj_types(_ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
+    // TODO: populate from cache obj config archive
+    let lines = vec![
+        "// Auto-generated Item (Obj) definitions".to_string(),
+        "// Source: RS3 cache obj config".to_string(),
+        String::new(),
+        "export interface ObjEntry {".to_string(),
+        "    id: number;".to_string(),
+        "    name: string;".to_string(),
+        "    members: boolean;".to_string(),
+        "    cost: number;".to_string(),
+        "    weight: number;".to_string(),
+        "    stackable: boolean;".to_string(),
+        "    noted: boolean;".to_string(),
+        "    noteId: number;".to_string(),
+        "    inventoryModel: number;".to_string(),
+        "    zoom: number;".to_string(),
+        "    rotationX: number;".to_string(),
+        "    rotationY: number;".to_string(),
+        "    rotationZ: number;".to_string(),
+        "    offsetX: number;".to_string(),
+        "    offsetY: number;".to_string(),
+        "    options: (string | null)[];".to_string(),
+        "    interfaceOptions: (string | null)[];".to_string(),
+        "    params: Map<number, number | string>;".to_string(),
+        "}".to_string(),
+        String::new(),
+        "// Items are the core game objects that players can interact with".to_string(),
+    ];
+
+    write_text(&out_dir.join("objs.ts"), &lines.join("\n"))
+}
+
+fn export_npc_types(_ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
+    // TODO: populate from cache npc config archive
+    let lines = vec![
+        "// Auto-generated NPC definitions".to_string(),
+        "// Source: RS3 cache npc config".to_string(),
+        String::new(),
+        "export interface NpcEntry {".to_string(),
+        "    id: number;".to_string(),
+        "    name: string;".to_string(),
+        "    size: number;".to_string(),
+        "    combatLevel: number;".to_string(),
+        "    options: (string | null)[];".to_string(),
+        "    interfaceOptions: (string | null)[];".to_string(),
+        "    params: Map<number, number | string>;".to_string(),
+        "}".to_string(),
+        String::new(),
+        "// NPCs are non-player characters in the game world".to_string(),
+    ];
+
+    write_text(&out_dir.join("npcs.ts"), &lines.join("\n"))
+}
+
+fn export_loc_types(_ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
+    // TODO: populate from cache loc config archive
+    let lines = vec![
+        "// Auto-generated Loc (Object) definitions".to_string(),
+        "// Source: RS3 cache loc config".to_string(),
+        String::new(),
+        "export interface LocEntry {".to_string(),
+        "    id: number;".to_string(),
+        "    name: string;".to_string(),
+        "    type: number;".to_string(),
+        "    sizeX: number;".to_string(),
+        "    sizeY: number;".to_string(),
+        "    interactive: number;".to_string(),
+        "    obstructive: number;".to_string(),
+        "    options: (string | null)[];".to_string(),
+        "    params: Map<number, number | string>;".to_string(),
+        "}".to_string(),
+        String::new(),
+        "// Locs are world objects (walls, doors, decorations, etc.)".to_string(),
+    ];
+
+    write_text(&out_dir.join("locs.ts"), &lines.join("\n"))
+}
+
+fn export_seq_types(_ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
+    // TODO: populate from cache seq config archive
+    let lines = vec![
+        "// Auto-generated Sequence (Animation) definitions".to_string(),
+        "// Source: RS3 cache seq config".to_string(),
+        String::new(),
+        "export interface SeqEntry {".to_string(),
+        "    id: number;".to_string(),
+        "    name: string;".to_string(),
+        "    frameCount: number;".to_string(),
+        "    frameLengths: number[];".to_string(),
+        "    frameIds: number[];".to_string(),
+        "    interleaveLeave: number[];".to_string(),
+        "    stretches: boolean;".to_string(),
+        "    forcedPriority: number;".to_string(),
+        "    leftHandItem: number;".to_string(),
+        "    rightHandItem: number;".to_string(),
+        "    maxLoops: number;".to_string(),
+        "    delayType: number;".to_string(),
+        "    animationKind: number;".to_string(),
+        "    restoreGrowth: boolean;".to_string(),
+        "    shielding: boolean;".to_string(),
+        "    weaponType: number;".to_string(),
+        "    runAnim: number;".to_string(),
+        "    walkAnim: number;".to_string(),
+        "    turn180Anim: number;".to_string(),
+        "    turn90CWAnim: number;".to_string(),
+        "    turn90CCWAnim: number;".to_string(),
+        "    crawlAnim: number;".to_string(),
+        "}".to_string(),
+        String::new(),
+        "// Sequences define animation frames and timing".to_string(),
+    ];
+
+    write_text(&out_dir.join("seqs.ts"), &lines.join("\n"))
+}
+
+fn export_spot_types(_ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
+    // TODO: populate from cache spot config archive
+    let lines = vec![
+        "// Auto-generated Spotanim (Graphic) definitions".to_string(),
+        "// Source: RS3 cache spot config".to_string(),
+        String::new(),
+        "export interface SpotEntry {".to_string(),
+        "    id: number;".to_string(),
+        "    name: string;".to_string(),
+        "    model: number;".to_string(),
+        "    animation: number;".to_string(),
+        "    rotation: number;".to_string(),
+        "    width: number;".to_string(),
+        "    height: number;".to_string(),
+        "    orientation: number;".to_string(),
+        "    ambient: number;".to_string(),
+        "    contrast: number;".to_string(),
+        "}".to_string(),
+        String::new(),
+        "// Spotanims are graphics/effects played at a location".to_string(),
+    ];
+
+    write_text(&out_dir.join("spots.ts"), &lines.join("\n"))
+}
+
+fn export_interface_ids(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
+    let interface_ids: Vec<u32> = ctx.interfaces.keys().copied().collect();
+    let mut lines = vec![
+        "// Auto-generated Interface IDs".to_string(),
+        "// Source: RS3 cache interfaces archive".to_string(),
+        String::new(),
+        "// All known interface parent IDs in the cache".to_string(),
+        String::new(),
+        "export const INTERFACE_IDS: ReadonlyArray<number> = [".to_string(),
+    ];
+
+    for chunk in interface_ids.chunks(20) {
+        lines.push(format!(
+            "    {},",
+            chunk
+                .iter()
+                .map(u32::to_string)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+
+    lines.push("];".to_string());
+    lines.push(String::new());
+    lines.push(format!(
+        "export const INTERFACE_ID_COUNT = {};",
+        interface_ids.len()
+    ));
+
+    write_text(&out_dir.join("interfaces.ts"), &lines.join("\n"))
+}
+
+fn export_index(out_dir: &Path) -> Result<()> {
+    let lines = vec![
+        "// Auto-generated index file".to_string(),
+        "// Source: RS3 cache ts-export".to_string(),
+        String::new(),
+        "export {".to_string(),
+        "    VARS,".to_string(),
+        "    VAR_COUNT,".to_string(),
+        "    type VarEntry,".to_string(),
+        "    type VarDomain,".to_string(),
+        "    type VarType,".to_string(),
+        "    type VarLifetime,".to_string(),
+        "    type VarTransmitLevel,".to_string(),
+        "} from './vars';".to_string(),
+        String::new(),
+        "export {".to_string(),
+        "    VARBITS,".to_string(),
+        "    VARBIT_COUNT,".to_string(),
+        "    type VarBitEntry,".to_string(),
+        "} from './varbits';".to_string(),
+        String::new(),
+        "export {".to_string(),
+        "    ENUMS,".to_string(),
+        "    ENUM_COUNT,".to_string(),
+        "    type EnumEntry,".to_string(),
+        "    type EnumPair,".to_string(),
+        "} from './enums';".to_string(),
+        String::new(),
+        "export {".to_string(),
+        "    STRUCTS,".to_string(),
+        "    STRUCT_COUNT,".to_string(),
+        "    type StructEntry,".to_string(),
+        "    type StructParamEntry,".to_string(),
+        "} from './structs';".to_string(),
+        String::new(),
+        "export {".to_string(),
+        "    PARAMS,".to_string(),
+        "    PARAM_COUNT,".to_string(),
+        "    type ParamEntry,".to_string(),
+        "    type ParamValue,".to_string(),
+        "} from './params';".to_string(),
+        String::new(),
+        "export {".to_string(),
+        "    INTERFACE_IDS,".to_string(),
+        "    INTERFACE_ID_COUNT,".to_string(),
+        "} from './interfaces';".to_string(),
+        "export { type InvEntry } from './invs';".to_string(),
+        "export { type ObjEntry } from './objs';".to_string(),
+        "export { type NpcEntry } from './npcs';".to_string(),
+        "export { type LocEntry } from './locs';".to_string(),
+        "export { type SeqEntry } from './seqs';".to_string(),
+        "export { type SpotEntry } from './spots';".to_string(),
+    ];
+
+    write_text(&out_dir.join("index.ts"), &lines.join("\n"))
+}
+
+fn escape_ts_string(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('\'', "\\'")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+        .replace('\t', "\\t")
 }
 
 #[cfg(test)]
