@@ -4422,21 +4422,30 @@ fn export_db_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
     }
     lines.push(format!("export const DB_ROW_COUNT = {};", ctx.dbrows.len()));
 
-    // ── Typed item definitions (table 163) ──
+    // ── Typed wrappers for key tables ──
     lines.push(String::new());
-    lines.push("// ── Typed wrappers for key tables ──".to_string());
-    lines.push(String::new());
+
+    // ItemEntry (table 163 — 5,237 items)
     lines.push("export interface ItemEntry {".to_string());
     lines.push("    id: number;".to_string());
     lines.push("    name: string | null;".to_string());
     lines.push("    description: string | null;".to_string());
+    lines.push("    /** Shop / GE price. */".to_string());
     lines.push("    value: number;".to_string());
-    lines.push("    stackable: number;".to_string());
+    lines.push("    /** Non-zero means stackable. */".to_string());
+    lines.push("    stackable: boolean;".to_string());
     lines.push("    membersOnly: boolean;".to_string());
     lines.push("    categoryId: number | null;".to_string());
+    lines.push("    parentId: number | null;".to_string());
     lines.push("    modelId: number | null;".to_string());
+    lines.push("    /** RGBA tint (e.g. 16832257). */".to_string());
     lines.push("    color: number | null;".to_string());
     lines.push("    paramId: number | null;".to_string());
+    lines.push("    soundId: number | null;".to_string());
+    lines.push("    /** Key→value pairs for linked param configs. */".to_string());
+    lines.push("    params: Array<{ key: number; value: number | string }>;".to_string());
+    lines.push("    /** Equipment stat overrides (only 2 items). */".to_string());
+    lines.push("    equipmentOverrides: number[] | null;".to_string());
     lines.push("}".to_string());
     lines.push(String::new());
 
@@ -4452,28 +4461,31 @@ fn export_db_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
             let name = row_column_str(row, 2);
             let desc = row_column_str(row, 3);
             let value = row_column_int(row, 6).unwrap_or(99);
-            let stackable = row_column_int(row, 8).unwrap_or(1);
+            let stackable = row_column_int(row, 8).unwrap_or(1) != 0;
             let members = row_column_bool(row, 11);
-            let category = row_column_int(row, 13)
-                .map(|v| v.to_string())
-                .unwrap_or_else(|| "null".to_string());
-            let model = row_column_int(row, 23)
-                .map(|v| v.to_string())
-                .unwrap_or_else(|| "null".to_string());
-            let color = row_column_int(row, 26)
-                .map(|v| v.to_string())
-                .unwrap_or_else(|| "null".to_string());
-            let param = row_column_int(row, 4)
-                .map(|v| v.to_string())
-                .unwrap_or_else(|| "null".to_string());
+            let category = row_column_int_or_null(row, 13);
+            let parent = row_column_int_or_null(row, 1);
+            let model = row_column_int_or_null(row, 23);
+            let color = row_column_int_or_null(row, 26);
+            let param = row_column_int_or_null(row, 4);
+            let sound = row_column_int_or_null(row, 31);
+            let eq_overrides = row_column_int_array(row, 30);
             let name_str = name
                 .map(|n| format!("'{n}'"))
                 .unwrap_or_else(|| "null".to_string());
             let desc_str = desc
                 .map(|d| format!("'{d}'"))
                 .unwrap_or_else(|| "null".to_string());
+            let eq_str = eq_overrides
+                .map(|a| {
+                    format!(
+                        "[{}]",
+                        a.iter().map(i32::to_string).collect::<Vec<_>>().join(", ")
+                    )
+                })
+                .unwrap_or_else(|| "null".to_string());
             lines.push(format!(
-                "    [{id}, {{ id: {id}, name: {name_str}, description: {desc_str}, value: {value}, stackable: {stackable}, membersOnly: {members}, categoryId: {category}, modelId: {model}, color: {color}, paramId: {param} }}],",
+                "    [{id}, {{ id: {id}, name: {name_str}, description: {desc_str}, value: {value}, stackable: {stackable}, membersOnly: {members}, categoryId: {category}, parentId: {parent}, modelId: {model}, color: {color}, paramId: {param}, soundId: {sound}, params: [], equipmentOverrides: {eq_str} }}],",
             ));
         }
         lines.push("]);".to_string());
@@ -4481,7 +4493,7 @@ fn export_db_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
     }
     lines.push(format!("export const ITEM_COUNT = {};", items.len()));
 
-    // ── Typed NPC stats (table 29) ──
+    // NpcStatEntry (table 29 — 105 NPCs)
     lines.push(String::new());
     lines.push("export interface NpcStatEntry {".to_string());
     lines.push("    id: number;".to_string());
@@ -4490,8 +4502,10 @@ fn export_db_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
     lines.push("    hitpoints: number;".to_string());
     lines.push("    attack: number;".to_string());
     lines.push("    defence: number;".to_string());
+    lines.push("    accuracy: number;".to_string());
     lines.push("    size: number;".to_string());
     lines.push("    respawnMs: number | null;".to_string());
+    lines.push("    modelIds: number[];".to_string());
     lines.push("}".to_string());
     lines.push(String::new());
 
@@ -4511,15 +4525,26 @@ fn export_db_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
             let hp = row_column_int(row, 10).unwrap_or(0);
             let atk = row_column_int(row, 14).unwrap_or(0);
             let def = row_column_int(row, 17).unwrap_or(0);
+            let acc = row_column_int(row, 18).unwrap_or(0);
             let size = row_column_int(row, 7).unwrap_or(1);
-            let respawn = row_column_int(row, 13)
-                .map(|v| v.to_string())
-                .unwrap_or_else(|| "null".to_string());
+            let respawn = row_column_int_or_null(row, 13);
+            let models: Vec<i32> = [1, 2, 3]
+                .iter()
+                .filter_map(|&c| row_column_int(row, c))
+                .collect();
             let name_str = name
                 .map(|n| format!("'{n}'"))
                 .unwrap_or_else(|| "null".to_string());
+            let model_str = format!(
+                "[{}]",
+                models
+                    .iter()
+                    .map(i32::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
             lines.push(format!(
-                "    [{id}, {{ id: {id}, name: {name_str}, combatLevel: {combat}, hitpoints: {hp}, attack: {atk}, defence: {def}, size: {size}, respawnMs: {respawn} }}],",
+                "    [{id}, {{ id: {id}, name: {name_str}, combatLevel: {combat}, hitpoints: {hp}, attack: {atk}, defence: {def}, accuracy: {acc}, size: {size}, respawnMs: {respawn}, modelIds: {model_str} }}],",
             ));
         }
         lines.push("]);".to_string());
@@ -4530,10 +4555,11 @@ fn export_db_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
         npc_stats.len()
     ));
 
-    // ── Typed clue scroll locations (table 7) ──
+    // ClueLocationEntry (table 7 — 62 clue scroll locations)
     lines.push(String::new());
     lines.push("export interface ClueLocationEntry {".to_string());
     lines.push("    id: number;".to_string());
+    lines.push("    /** Difficulty tier (1-5). */".to_string());
     lines.push("    tier: number;".to_string());
     lines.push("    description: string | null;".to_string());
     lines.push("}".to_string());
@@ -4563,6 +4589,120 @@ fn export_db_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
         "export const CLUE_LOCATION_COUNT = {};",
         clue_rows.len()
     ));
+
+    // ItemCategoryEntry (table 4 — 83 item categories)
+    lines.push(String::new());
+    lines.push("export interface ItemCategoryEntry {".to_string());
+    lines.push("    id: number;".to_string());
+    lines.push("    name: string | null;".to_string());
+    lines.push("    modelId: number | null;".to_string());
+    lines.push("    iconId: number | null;".to_string());
+    lines.push("}".to_string());
+    lines.push(String::new());
+
+    let categories: Vec<_> = ctx.dbrows.values().filter(|r| r.table == Some(4)).collect();
+    if !categories.is_empty() {
+        lines.push(
+            "export const ITEM_CATEGORIES: ReadonlyMap<number, ItemCategoryEntry> = new Map(["
+                .to_string(),
+        );
+        for row in &categories {
+            let id = row_column_int(row, 0).unwrap_or(0);
+            let name = row_column_str(row, 1);
+            let model = row_column_int_or_null(row, 4);
+            let icon = row_column_int_or_null(row, 5);
+            let name_str = name
+                .map(|n| format!("'{n}'"))
+                .unwrap_or_else(|| "null".to_string());
+            lines.push(format!(
+                "    [{id}, {{ id: {id}, name: {name_str}, modelId: {model}, iconId: {icon} }}],",
+            ));
+        }
+        lines.push("]);".to_string());
+        lines.push(String::new());
+    }
+    lines.push(format!(
+        "export const ITEM_CATEGORY_COUNT = {};",
+        categories.len()
+    ));
+
+    // ItemSetEntry (table 5 — 160 outfits/sets)
+    lines.push(String::new());
+    lines.push("export interface ItemSetEntry {".to_string());
+    lines.push("    id: number;".to_string());
+    lines.push("    name: string | null;".to_string());
+    lines.push("    description: string | null;".to_string());
+    lines.push("    representativeItemId: number | null;".to_string());
+    lines.push("}".to_string());
+    lines.push(String::new());
+
+    let sets: Vec<_> = ctx.dbrows.values().filter(|r| r.table == Some(5)).collect();
+    if !sets.is_empty() {
+        lines.push(
+            "export const ITEM_SETS: ReadonlyMap<number, ItemSetEntry> = new Map([".to_string(),
+        );
+        for row in &sets {
+            let id = row_column_int(row, 0).unwrap_or(0);
+            let name = row_column_str(row, 1);
+            let desc = row_column_str(row, 2);
+            let rep_item = row_column_int_or_null(row, 5);
+            let name_str = name
+                .map(|n| format!("'{n}'"))
+                .unwrap_or_else(|| "null".to_string());
+            let desc_str = desc
+                .map(|d| format!("'{d}'"))
+                .unwrap_or_else(|| "null".to_string());
+            lines.push(format!(
+                "    [{id}, {{ id: {id}, name: {name_str}, description: {desc_str}, representativeItemId: {rep_item} }}],",
+            ));
+        }
+        lines.push("]);".to_string());
+        lines.push(String::new());
+    }
+    lines.push(format!("export const ITEM_SET_COUNT = {};", sets.len()));
+
+    // ── Column index constants for named access ──
+    lines.push(String::new());
+    lines.push("// Named column indices for table 163 (items).".to_string());
+    lines.push("// Example: row.columns[ItemColumn.NAME]".to_string());
+    lines.push("export const ItemColumn = {".to_string());
+    lines.push("    ID: 0,".to_string());
+    lines.push("    PARENT_ID: 1,".to_string());
+    lines.push("    NAME: 2,".to_string());
+    lines.push("    DESCRIPTION: 3,".to_string());
+    lines.push("    PARAM_ID: 4,".to_string());
+    lines.push("    TYPE_ID: 5,".to_string());
+    lines.push("    VALUE: 6,".to_string());
+    lines.push("    FLAGS: 7,".to_string());
+    lines.push("    STACKABLE: 8,".to_string());
+    lines.push("    MEMBERS_ONLY: 11,".to_string());
+    lines.push("    CATEGORY_ID: 13,".to_string());
+    lines.push("    MODEL_ID: 23,".to_string());
+    lines.push("    MODEL_ID2: 24,".to_string());
+    lines.push("    COLOR: 26,".to_string());
+    lines.push("    EQUIPMENT_OVERRIDES: 30,".to_string());
+    lines.push("    SOUND_ID: 31,".to_string());
+    lines.push("} as const;".to_string());
+    lines
+        .push("export type ItemColumn = (typeof ItemColumn)[keyof typeof ItemColumn];".to_string());
+    lines.push(String::new());
+
+    lines.push("// Named column indices for table 29 (NPC stats).".to_string());
+    lines.push("export const NpcColumn = {".to_string());
+    lines.push("    ID: 0,".to_string());
+    lines.push("    MODEL_ID1: 1,".to_string());
+    lines.push("    MODEL_ID2: 2,".to_string());
+    lines.push("    MODEL_ID3: 3,".to_string());
+    lines.push("    NAME: 5,".to_string());
+    lines.push("    SIZE: 7,".to_string());
+    lines.push("    COMBAT_LEVEL: 9,".to_string());
+    lines.push("    HITPOINTS: 10,".to_string());
+    lines.push("    RESPAWN_MS: 13,".to_string());
+    lines.push("    ATTACK: 14,".to_string());
+    lines.push("    DEFENCE: 17,".to_string());
+    lines.push("    ACCURACY: 18,".to_string());
+    lines.push("} as const;".to_string());
+    lines.push("export type NpcColumn = (typeof NpcColumn)[keyof typeof NpcColumn];".to_string());
 
     write_text(&out_dir.join("dbtables.ts"), &lines.join("\n"))
 }
@@ -4596,6 +4736,29 @@ fn row_column_str(row: &crate::config::DbRowEntry, col: u8) -> Option<String> {
 /// Extract a boolean from a specific column (0=false, non-zero=true).
 fn row_column_bool(row: &crate::config::DbRowEntry, col: u8) -> bool {
     row_column_int(row, col).unwrap_or(0) != 0
+}
+
+/// Extract an int as a TS null-or-number string.
+fn row_column_int_or_null(row: &crate::config::DbRowEntry, col: u8) -> String {
+    row_column_int(row, col)
+        .map(|v| v.to_string())
+        .unwrap_or_else(|| "null".to_string())
+}
+
+/// Extract all ints from a tuple column as a Vec (equipment overrides etc.).
+fn row_column_int_array(row: &crate::config::DbRowEntry, col: u8) -> Option<Vec<i32>> {
+    row.columns
+        .iter()
+        .find(|c| c.column == col)
+        .and_then(|c| c.rows.first())
+        .map(|r| {
+            r.iter()
+                .filter_map(|v| match v {
+                    crate::config::ScalarValue::Int(i) => Some(*i),
+                    _ => None,
+                })
+                .collect()
+        })
 }
 
 fn export_interface_ids(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
@@ -4793,9 +4956,13 @@ fn export_index(out_dir: &Path) -> Result<()> {
         "export {{ type LocEntry, LOCS, LOC_COUNT }} from './locs';".to_string(),
         "export {{ type SeqEntry, SEQS, SEQ_COUNT }} from './seqs';".to_string(),
         "export {{ type SpotEntry, SPOTS, SPOT_COUNT }} from './spots';".to_string(),
-        "export {{ type ItemEntry, ITEMS, ITEM_COUNT }} from './dbtables';".to_string(),
-        "export {{ type NpcStatEntry, NPC_STATS, NPC_STAT_COUNT }} from './dbtables';".to_string(),
-        "export {{ type ClueLocationEntry, CLUE_LOCATIONS, CLUE_LOCATION_COUNT }} from './dbtables';".to_string(),
+        "export {{ type ItemEntry, ITEMS, ITEM_COUNT,".to_string(),
+        "    type ItemCategoryEntry, ITEM_CATEGORIES, ITEM_CATEGORY_COUNT,".to_string(),
+        "    type ItemSetEntry, ITEM_SETS, ITEM_SET_COUNT,".to_string(),
+        "    type NpcStatEntry, NPC_STATS, NPC_STAT_COUNT,".to_string(),
+        "    type ClueLocationEntry, CLUE_LOCATIONS, CLUE_LOCATION_COUNT,".to_string(),
+        "    ItemColumn, type ItemColumn, NpcColumn, type NpcColumn,".to_string(),
+        "}} from './dbtables';".to_string(),
         "export {{ DB_TABLES, DB_TABLE_COUNT, DB_ROWS, DB_ROW_COUNT,".to_string(),
         "    type DbTableEntry, type DbRowEntry, type DbTableColumn, type DbRowColumn }} from './dbtables';".to_string(),
     ];
