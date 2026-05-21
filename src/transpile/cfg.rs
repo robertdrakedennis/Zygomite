@@ -43,9 +43,15 @@ impl CfgBuilder {
         instructions: Vec<super::ast::InstructionNode>,
         component_names: &std::collections::HashMap<u32, String, S>,
         enum_value_names: &std::collections::HashMap<i32, String, S>,
+        script_signatures: &std::collections::HashMap<super::ScriptId, super::ScriptSignature, S>,
     ) -> Self {
-        let recovered =
-            ExprRecovery::new(&instructions, component_names, enum_value_names).recover();
+        let recovered = ExprRecovery::new(
+            &instructions,
+            component_names,
+            enum_value_names,
+            script_signatures,
+        )
+        .recover();
         Self {
             instructions,
             recovered,
@@ -325,8 +331,15 @@ pub fn build_cfg<S: std::hash::BuildHasher>(
     instructions: Vec<super::ast::InstructionNode>,
     component_names: &std::collections::HashMap<u32, String, S>,
     enum_value_names: &std::collections::HashMap<i32, String, S>,
+    script_signatures: &std::collections::HashMap<super::ScriptId, super::ScriptSignature, S>,
 ) -> Vec<Block> {
-    CfgBuilder::new(instructions, component_names, enum_value_names).build()
+    CfgBuilder::new(
+        instructions,
+        component_names,
+        enum_value_names,
+        script_signatures,
+    )
+    .build()
 }
 
 pub fn expr_to_string(expr: &Expression) -> String {
@@ -804,4 +817,49 @@ fn is_loop_back_stmt(stmt: &RecoveredStmt, loop_target: usize) -> bool {
 
 pub fn emit_structured(blocks: Vec<Block>) -> Vec<StructuredStmt> {
     StructuredEmitter::new(blocks).emit()
+}
+
+/// Scan structured statements for `Return` nodes to determine the
+/// function return type.
+pub fn detect_return_type(stmts: &[StructuredStmt]) -> &'static str {
+    let mut has_value_return = false;
+    let mut has_void_return = false;
+    scan_for_returns(stmts, &mut has_value_return, &mut has_void_return);
+    match (has_value_return, has_void_return) {
+        (true, false) => "number",
+        (false, true) => "void",
+        (true, true) => "number | void",
+        (false, false) => "void",
+    }
+}
+
+fn scan_for_returns(stmts: &[StructuredStmt], has_val: &mut bool, has_void: &mut bool) {
+    for stmt in stmts {
+        match stmt {
+            StructuredStmt::Return { value } => {
+                if value.is_some() {
+                    *has_val = true;
+                } else {
+                    *has_void = true;
+                }
+            }
+            StructuredStmt::While { body } => scan_for_returns(body, has_val, has_void),
+            StructuredStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                scan_for_returns(then_body, has_val, has_void);
+                if let Some(else_b) = else_body {
+                    scan_for_returns(else_b, has_val, has_void);
+                }
+            }
+            StructuredStmt::Switch { cases, .. } => {
+                for case in cases {
+                    scan_for_returns(&case.body, has_val, has_void);
+                }
+            }
+            _ => {}
+        }
+    }
 }

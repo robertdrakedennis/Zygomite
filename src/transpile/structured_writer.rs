@@ -1,22 +1,28 @@
+use super::ScriptId;
+use super::ScriptSignature;
 use super::ast::{Declaration, TypeAnnotation};
-use super::cfg::{StructuredStmt, build_cfg, emit_structured};
+use super::cfg::{StructuredStmt, build_cfg, detect_return_type, emit_structured};
+use std::collections::HashMap;
 use std::fmt::Write as _;
 
 pub struct StructuredWriter {
     indent: usize,
-    component_names: std::collections::HashMap<u32, String>,
-    enum_value_names: std::collections::HashMap<i32, String>,
+    component_names: HashMap<u32, String>,
+    enum_value_names: HashMap<i32, String>,
+    script_signatures: HashMap<ScriptId, ScriptSignature>,
 }
 
 impl StructuredWriter {
     pub fn new(
-        component_names: std::collections::HashMap<u32, String>,
-        enum_value_names: std::collections::HashMap<i32, String>,
+        component_names: HashMap<u32, String>,
+        enum_value_names: HashMap<i32, String>,
+        script_signatures: HashMap<ScriptId, ScriptSignature>,
     ) -> Self {
         Self {
             indent: 0,
             component_names,
             enum_value_names,
+            script_signatures,
         }
     }
 
@@ -63,6 +69,7 @@ impl StructuredWriter {
             decl.instructions.clone(),
             &self.component_names,
             &self.enum_value_names,
+            &self.script_signatures,
         );
         let structured = emit_structured(blocks);
 
@@ -122,10 +129,11 @@ impl StructuredWriter {
         }
         out.push('\n');
 
-        // ── Function signature ──
+        // ── Function signature with detected return type ──
+        let return_type = detect_return_type(&structured);
         let _ = writeln!(
             &mut out,
-            "export function script_{id}({args}): void {{",
+            "export function script_{id}({args}): {return_type} {{",
             id = decl.script_id,
             args = decl
                 .arguments
@@ -254,9 +262,6 @@ impl StructuredWriter {
 
 impl Default for StructuredWriter {
     fn default() -> Self {
-        Self::new(
-            std::collections::HashMap::new(),
-            std::collections::HashMap::new(),
-        )
+        Self::new(HashMap::new(), HashMap::new(), HashMap::new())
     }
 }

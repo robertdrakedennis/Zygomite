@@ -3462,6 +3462,7 @@ fn run_transpile_scripts(
         .with_varbits(&ctx.varbits)
         .with_params(&ctx.params)
         .with_script_names(&ctx.scripts, &opcode_book, version.build)
+        .with_script_signatures(&ctx.scripts, &opcode_book, version.build)
         .with_components(&ctx.parsed_components);
 
     fs::create_dir_all(out_dir)?;

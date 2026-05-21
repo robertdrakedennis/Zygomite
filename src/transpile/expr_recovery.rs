@@ -183,6 +183,8 @@ pub struct ExprRecovery<'a, S: std::hash::BuildHasher = std::collections::hash_m
     component_names: &'a std::collections::HashMap<u32, String, S>,
     /// Maps enum key values to qualified names (e.g. 0 → "`Enum_1234.ATTACK`").
     enum_value_names: &'a std::collections::HashMap<i32, String, S>,
+    /// Maps script IDs to their parameter/return types for cross-script calls.
+    script_signatures: &'a std::collections::HashMap<super::ScriptId, super::ScriptSignature, S>,
 }
 
 impl<'a, S: std::hash::BuildHasher> ExprRecovery<'a, S> {
@@ -190,6 +192,11 @@ impl<'a, S: std::hash::BuildHasher> ExprRecovery<'a, S> {
         instructions: &'a [InstructionNode],
         component_names: &'a std::collections::HashMap<u32, String, S>,
         enum_value_names: &'a std::collections::HashMap<i32, String, S>,
+        script_signatures: &'a std::collections::HashMap<
+            super::ScriptId,
+            super::ScriptSignature,
+            S,
+        >,
     ) -> Self {
         Self {
             instructions,
@@ -197,6 +204,7 @@ impl<'a, S: std::hash::BuildHasher> ExprRecovery<'a, S> {
             locals: std::collections::HashMap::new(),
             component_names,
             enum_value_names,
+            script_signatures,
         }
     }
 
@@ -625,12 +633,20 @@ impl<'a, S: std::hash::BuildHasher> ExprRecovery<'a, S> {
             // ── Script call ──
             "gosub_with_params" => {
                 if let OperandNode::Script(id) = op {
-                    let arg = self.pop_or_unknown();
+                    let sid = super::ScriptId(*id);
+                    let total_args = self
+                        .script_signatures
+                        .get(&sid)
+                        .map(super::ScriptSignature::total_args)
+                        .unwrap_or(1);
+                    let mut args: Vec<Expression> =
+                        (0..total_args).map(|_| self.pop_or_unknown()).collect();
+                    args.reverse();
                     let expr = Expression::Call(CallExpr {
                         callee: Box::new(Expression::Identifier(Identifier {
                             name: format!("script_{id}"),
                         })),
-                        arguments: vec![arg],
+                        arguments: args,
                     });
                     self.stack.push(expr);
                 }

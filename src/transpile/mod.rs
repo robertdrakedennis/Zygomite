@@ -9,7 +9,9 @@ pub mod structured_writer;
 pub mod writer;
 
 pub use ast::*;
-pub use cfg::{Block, StructuredStmt, SwitchCaseStmt, build_cfg, emit_structured};
+pub use cfg::{
+    Block, StructuredStmt, SwitchCaseStmt, build_cfg, detect_return_type, emit_structured,
+};
 pub use codegen::{CodeGen, generate_program};
 pub use diagnostics::{Diagnostic, Diagnostics, Severity, Span};
 pub use scope::{LocalType, Scope, Scopes, Symbol, SymbolKind, SymbolTable};
@@ -23,14 +25,31 @@ use crate::vars::VarDomain;
 use anyhow::Result;
 use std::collections::{BTreeMap, HashMap};
 
+/// Describes a script's parameter and return types for cross-script call typing.
+#[derive(Debug, Clone)]
+pub struct ScriptSignature {
+    pub arg_count_int: u16,
+    pub arg_count_obj: u16,
+    pub arg_count_long: u16,
+    pub return_type: String,
+}
+
+impl ScriptSignature {
+    pub fn total_args(&self) -> usize {
+        self.arg_count_int as usize + self.arg_count_obj as usize + self.arg_count_long as usize
+    }
+}
+
 pub struct Transpiler {
     symbol_table: SymbolTable,
+    script_signatures: HashMap<ScriptId, ScriptSignature>,
 }
 
 impl Transpiler {
     pub fn new() -> Self {
         Self {
             symbol_table: SymbolTable::new(),
+            script_signatures: HashMap::new(),
         }
     }
 
@@ -132,6 +151,36 @@ impl Transpiler {
         self
     }
 
+    /// Preload all script argument counts for cross-script call typing.
+    /// Decodes every script to extract parameter counts so that
+    /// `gosub_with_params` can emit typed calls.
+    pub fn with_script_signatures(
+        mut self,
+        scripts: &BTreeMap<u32, Vec<u8>>,
+        opcode_book: &OpcodeBook,
+        version: u32,
+    ) -> Self {
+        for (&id, data) in scripts {
+            if let Ok(script) = decode_script(data, opcode_book, version) {
+                self.script_signatures.insert(
+                    ScriptId(id as i32),
+                    ScriptSignature {
+                        arg_count_int: script.argument_count_int,
+                        arg_count_obj: script.argument_count_object,
+                        arg_count_long: script.argument_count_long,
+                        return_type: String::new(),
+                    },
+                );
+            }
+        }
+        self
+    }
+
+    /// Get a script's signature for cross-script call typing.
+    pub fn script_signature(&self, id: ScriptId) -> Option<&ScriptSignature> {
+        self.script_signatures.get(&id)
+    }
+
     pub fn script_name_for(&self, script_id: ScriptId) -> Option<String> {
         self.symbol_table.script_names.get(&script_id).cloned()
     }
@@ -166,6 +215,7 @@ impl Transpiler {
         let mut writer = StructuredWriter::new(
             self.symbol_table.component_names.clone(),
             self.symbol_table.enum_value_names.clone(),
+            self.script_signatures.clone(),
         );
         let source = writer.write_declaration(&decl);
         TranspiledScript {
