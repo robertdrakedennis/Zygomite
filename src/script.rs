@@ -6,6 +6,11 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
+// Minimum build for standard RS3 opcode numbering (IDs 0-200 range).
+// Builds before 947 use a different encoding (`RuneScriptKt` opcode IDs).
+// Config type exports work on all builds; script transpilation requires >= 947.
+pub const MIN_SCRIPT_BUILD: u32 = 947;
+
 #[derive(Clone, Debug, Serialize)]
 pub struct OpcodeBook {
     pub by_id: Vec<Option<String>>,
