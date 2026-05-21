@@ -4422,7 +4422,180 @@ fn export_db_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
     }
     lines.push(format!("export const DB_ROW_COUNT = {};", ctx.dbrows.len()));
 
+    // ── Typed item definitions (table 163) ──
+    lines.push(String::new());
+    lines.push("// ── Typed wrappers for key tables ──".to_string());
+    lines.push(String::new());
+    lines.push("export interface ItemEntry {".to_string());
+    lines.push("    id: number;".to_string());
+    lines.push("    name: string | null;".to_string());
+    lines.push("    description: string | null;".to_string());
+    lines.push("    value: number;".to_string());
+    lines.push("    stackable: number;".to_string());
+    lines.push("    membersOnly: boolean;".to_string());
+    lines.push("    categoryId: number | null;".to_string());
+    lines.push("    modelId: number | null;".to_string());
+    lines.push("    color: number | null;".to_string());
+    lines.push("    paramId: number | null;".to_string());
+    lines.push("}".to_string());
+    lines.push(String::new());
+
+    let items: Vec<_> = ctx
+        .dbrows
+        .values()
+        .filter(|r| r.table == Some(163))
+        .collect();
+    if !items.is_empty() {
+        lines.push("export const ITEMS: ReadonlyMap<number, ItemEntry> = new Map([".to_string());
+        for row in &items {
+            let id = row_column_int(row, 0).unwrap_or(0);
+            let name = row_column_str(row, 2);
+            let desc = row_column_str(row, 3);
+            let value = row_column_int(row, 6).unwrap_or(99);
+            let stackable = row_column_int(row, 8).unwrap_or(1);
+            let members = row_column_bool(row, 11);
+            let category = row_column_int(row, 13)
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "null".to_string());
+            let model = row_column_int(row, 23)
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "null".to_string());
+            let color = row_column_int(row, 26)
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "null".to_string());
+            let param = row_column_int(row, 4)
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "null".to_string());
+            let name_str = name
+                .map(|n| format!("'{n}'"))
+                .unwrap_or_else(|| "null".to_string());
+            let desc_str = desc
+                .map(|d| format!("'{d}'"))
+                .unwrap_or_else(|| "null".to_string());
+            lines.push(format!(
+                "    [{id}, {{ id: {id}, name: {name_str}, description: {desc_str}, value: {value}, stackable: {stackable}, membersOnly: {members}, categoryId: {category}, modelId: {model}, color: {color}, paramId: {param} }}],",
+            ));
+        }
+        lines.push("]);".to_string());
+        lines.push(String::new());
+    }
+    lines.push(format!("export const ITEM_COUNT = {};", items.len()));
+
+    // ── Typed NPC stats (table 29) ──
+    lines.push(String::new());
+    lines.push("export interface NpcStatEntry {".to_string());
+    lines.push("    id: number;".to_string());
+    lines.push("    name: string | null;".to_string());
+    lines.push("    combatLevel: number;".to_string());
+    lines.push("    hitpoints: number;".to_string());
+    lines.push("    attack: number;".to_string());
+    lines.push("    defence: number;".to_string());
+    lines.push("    size: number;".to_string());
+    lines.push("    respawnMs: number | null;".to_string());
+    lines.push("}".to_string());
+    lines.push(String::new());
+
+    let npc_stats: Vec<_> = ctx
+        .dbrows
+        .values()
+        .filter(|r| r.table == Some(29))
+        .collect();
+    if !npc_stats.is_empty() {
+        lines.push(
+            "export const NPC_STATS: ReadonlyMap<number, NpcStatEntry> = new Map([".to_string(),
+        );
+        for row in &npc_stats {
+            let id = row_column_int(row, 0).unwrap_or(0);
+            let name = row_column_str(row, 5);
+            let combat = row_column_int(row, 9).unwrap_or(0);
+            let hp = row_column_int(row, 10).unwrap_or(0);
+            let atk = row_column_int(row, 14).unwrap_or(0);
+            let def = row_column_int(row, 17).unwrap_or(0);
+            let size = row_column_int(row, 7).unwrap_or(1);
+            let respawn = row_column_int(row, 13)
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "null".to_string());
+            let name_str = name
+                .map(|n| format!("'{n}'"))
+                .unwrap_or_else(|| "null".to_string());
+            lines.push(format!(
+                "    [{id}, {{ id: {id}, name: {name_str}, combatLevel: {combat}, hitpoints: {hp}, attack: {atk}, defence: {def}, size: {size}, respawnMs: {respawn} }}],",
+            ));
+        }
+        lines.push("]);".to_string());
+        lines.push(String::new());
+    }
+    lines.push(format!(
+        "export const NPC_STAT_COUNT = {};",
+        npc_stats.len()
+    ));
+
+    // ── Typed clue scroll locations (table 7) ──
+    lines.push(String::new());
+    lines.push("export interface ClueLocationEntry {".to_string());
+    lines.push("    id: number;".to_string());
+    lines.push("    tier: number;".to_string());
+    lines.push("    description: string | null;".to_string());
+    lines.push("}".to_string());
+    lines.push(String::new());
+
+    let clue_rows: Vec<_> = ctx.dbrows.values().filter(|r| r.table == Some(7)).collect();
+    if !clue_rows.is_empty() {
+        lines.push(
+            "export const CLUE_LOCATIONS: ReadonlyMap<number, ClueLocationEntry> = new Map(["
+                .to_string(),
+        );
+        for row in &clue_rows {
+            let id = row_column_int(row, 0).unwrap_or(0);
+            let tier = row_column_int(row, 1).unwrap_or(1);
+            let desc = row_column_str(row, 2);
+            let desc_str = desc
+                .map(|d| format!("'{d}'"))
+                .unwrap_or_else(|| "null".to_string());
+            lines.push(format!(
+                "    [{id}, {{ id: {id}, tier: {tier}, description: {desc_str} }}],",
+            ));
+        }
+        lines.push("]);".to_string());
+        lines.push(String::new());
+    }
+    lines.push(format!(
+        "export const CLUE_LOCATION_COUNT = {};",
+        clue_rows.len()
+    ));
+
     write_text(&out_dir.join("dbtables.ts"), &lines.join("\n"))
+}
+
+/// Extract the first int value from a specific column in a DB row.
+fn row_column_int(row: &crate::config::DbRowEntry, col: u8) -> Option<i32> {
+    row.columns
+        .iter()
+        .find(|c| c.column == col)
+        .and_then(|c| c.rows.first())
+        .and_then(|r| r.first())
+        .and_then(|v| match v {
+            crate::config::ScalarValue::Int(i) => Some(*i),
+            _ => None,
+        })
+}
+
+/// Extract the first string value from a specific column in a DB row.
+fn row_column_str(row: &crate::config::DbRowEntry, col: u8) -> Option<String> {
+    row.columns
+        .iter()
+        .find(|c| c.column == col)
+        .and_then(|c| c.rows.first())
+        .and_then(|r| r.first())
+        .and_then(|v| match v {
+            crate::config::ScalarValue::Str(s) => Some(escape_ts_string(s)),
+            _ => None,
+        })
+}
+
+/// Extract a boolean from a specific column (0=false, non-zero=true).
+fn row_column_bool(row: &crate::config::DbRowEntry, col: u8) -> bool {
+    row_column_int(row, col).unwrap_or(0) != 0
 }
 
 fn export_interface_ids(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
@@ -4620,6 +4793,11 @@ fn export_index(out_dir: &Path) -> Result<()> {
         "export {{ type LocEntry, LOCS, LOC_COUNT }} from './locs';".to_string(),
         "export {{ type SeqEntry, SEQS, SEQ_COUNT }} from './seqs';".to_string(),
         "export {{ type SpotEntry, SPOTS, SPOT_COUNT }} from './spots';".to_string(),
+        "export {{ type ItemEntry, ITEMS, ITEM_COUNT }} from './dbtables';".to_string(),
+        "export {{ type NpcStatEntry, NPC_STATS, NPC_STAT_COUNT }} from './dbtables';".to_string(),
+        "export {{ type ClueLocationEntry, CLUE_LOCATIONS, CLUE_LOCATION_COUNT }} from './dbtables';".to_string(),
+        "export {{ DB_TABLES, DB_TABLE_COUNT, DB_ROWS, DB_ROW_COUNT,".to_string(),
+        "    type DbTableEntry, type DbRowEntry, type DbTableColumn, type DbRowColumn }} from './dbtables';".to_string(),
     ];
 
     write_text(&out_dir.join("index.ts"), &lines.join("\n"))
