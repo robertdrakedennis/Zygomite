@@ -39,8 +39,11 @@ pub struct CfgBuilder {
 }
 
 impl CfgBuilder {
-    pub fn new(instructions: Vec<super::ast::InstructionNode>) -> Self {
-        let recovered = ExprRecovery::new(&instructions).recover();
+    pub fn new<S: std::hash::BuildHasher>(
+        instructions: Vec<super::ast::InstructionNode>,
+        component_names: &std::collections::HashMap<u32, String, S>,
+    ) -> Self {
+        let recovered = ExprRecovery::new(&instructions, component_names).recover();
         Self {
             instructions,
             recovered,
@@ -316,8 +319,11 @@ fn is_cond_flag_instr(cmd: &str) -> bool {
     )
 }
 
-pub fn build_cfg(instructions: Vec<super::ast::InstructionNode>) -> Vec<Block> {
-    CfgBuilder::new(instructions).build()
+pub fn build_cfg<S: std::hash::BuildHasher>(
+    instructions: Vec<super::ast::InstructionNode>,
+    component_names: &std::collections::HashMap<u32, String, S>,
+) -> Vec<Block> {
+    CfgBuilder::new(instructions, component_names).build()
 }
 
 pub fn expr_to_string(expr: &Expression) -> String {

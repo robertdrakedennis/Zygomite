@@ -175,18 +175,24 @@ pub enum RecoveredStmt {
     Comment(String),
 }
 
-pub struct ExprRecovery<'a> {
+pub struct ExprRecovery<'a, S: std::hash::BuildHasher = std::collections::hash_map::RandomState> {
     instructions: &'a [InstructionNode],
     stack: Vec<Expression>,
     locals: std::collections::HashMap<String, Expression>,
+    /// Maps component IDs to their RS3 names (e.g. 5 → "`chat_box`").
+    component_names: &'a std::collections::HashMap<u32, String, S>,
 }
 
-impl<'a> ExprRecovery<'a> {
-    pub fn new(instructions: &'a [InstructionNode]) -> Self {
+impl<'a, S: std::hash::BuildHasher> ExprRecovery<'a, S> {
+    pub fn new(
+        instructions: &'a [InstructionNode],
+        component_names: &'a std::collections::HashMap<u32, String, S>,
+    ) -> Self {
         Self {
             instructions,
             stack: Vec::new(),
             locals: std::collections::HashMap::new(),
+            component_names,
         }
     }
 
@@ -609,7 +615,7 @@ impl<'a> ExprRecovery<'a> {
                         callee: Box::new(Expression::Identifier(Identifier {
                             name: "UI.create".to_string(),
                         })),
-                        arguments: vec![Expression::NumberLiteral(NumberLiteral { value: *id })],
+                        arguments: vec![self.component_ref(*id as u32)],
                     })));
                 }
                 None
@@ -766,6 +772,22 @@ impl<'a> ExprRecovery<'a> {
                 arguments: vec![],
             })
         })
+    }
+
+    /// Converts a component ID to a TypeScript expression.
+    /// If the component has a known name, emits `ComponentId.name`;
+    /// otherwise emits the raw number.
+    fn component_ref(&self, id: u32) -> Expression {
+        if let Some(name) = self.component_names.get(&id) {
+            Expression::PropertyAccess(super::ast::PropertyAccess {
+                object: Box::new(Expression::Identifier(Identifier {
+                    name: "ComponentId".to_string(),
+                })),
+                property: name.clone(),
+            })
+        } else {
+            Expression::NumberLiteral(NumberLiteral { value: id as i32 })
+        }
     }
 }
 

@@ -93,6 +93,22 @@ impl Transpiler {
         self
     }
 
+    pub fn with_components(
+        mut self,
+        parsed_components: &BTreeMap<u32, BTreeMap<u32, crate::interface::ComponentDeps>>,
+    ) -> Self {
+        let mut names = HashMap::new();
+        for group in parsed_components.values() {
+            for (&id, deps) in group {
+                if let Some(ref name) = deps.name {
+                    names.insert(id, name.clone());
+                }
+            }
+        }
+        self.symbol_table.component_names = names;
+        self
+    }
+
     pub fn script_name_for(&self, script_id: ScriptId) -> Option<String> {
         self.symbol_table.script_names.get(&script_id).cloned()
     }
@@ -124,7 +140,7 @@ impl Transpiler {
     ) -> TranspiledScript {
         let codegen = CodeGen::new(self.symbol_table.clone());
         let decl = codegen.generate(script, script_id);
-        let mut writer = StructuredWriter::new();
+        let mut writer = StructuredWriter::new(self.symbol_table.component_names.clone());
         let source = writer.write_declaration(&decl);
         TranspiledScript {
             source,

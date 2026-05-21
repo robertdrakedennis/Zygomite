@@ -123,6 +123,8 @@ pub struct SymbolTable {
     pub enum_map: HashMap<u32, String>,
     pub param_map: HashMap<u32, String>,
     pub script_names: HashMap<ScriptId, String>,
+    /// Maps interface component IDs to their RS3 names (e.g. 5 → "`chat_box`").
+    pub component_names: HashMap<u32, String>,
 }
 
 impl SymbolTable {
@@ -170,6 +172,11 @@ impl SymbolTable {
         self
     }
 
+    pub fn with_component_names(mut self, names: HashMap<u32, String>) -> Self {
+        self.component_names = names;
+        self
+    }
+
     pub fn var_name(&self, domain: VarDomain, id: u16) -> Option<&String> {
         self.var_map.get(&(domain, id))
     }
@@ -180,6 +187,10 @@ impl SymbolTable {
 
     pub fn script_name(&self, id: ScriptId) -> Option<&String> {
         self.script_names.get(&id)
+    }
+
+    pub fn component_name(&self, id: u32) -> Option<&String> {
+        self.component_names.get(&id)
     }
 
     pub fn resolve_var_ref(&self, domain: VarDomain, id: u16) -> String {

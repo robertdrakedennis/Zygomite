@@ -4,11 +4,15 @@ use std::fmt::Write as _;
 
 pub struct StructuredWriter {
     indent: usize,
+    component_names: std::collections::HashMap<u32, String>,
 }
 
 impl StructuredWriter {
-    pub fn new() -> Self {
-        Self { indent: 0 }
+    pub fn new(component_names: std::collections::HashMap<u32, String>) -> Self {
+        Self {
+            indent: 0,
+            component_names,
+        }
     }
 
     pub fn write_declaration(&mut self, decl: &Declaration) -> String {
@@ -50,7 +54,7 @@ impl StructuredWriter {
         );
 
         // ── Build function body ──
-        let blocks = build_cfg(decl.instructions.clone());
+        let blocks = build_cfg(decl.instructions.clone(), &self.component_names);
         let structured = emit_structured(blocks);
 
         let mut body = String::new();
@@ -74,9 +78,10 @@ impl StructuredWriter {
         let needs_varbits = body.contains("VARBITS.");
         let needs_enums = body.contains("ENUMS.");
         let needs_params = body.contains("PARAMS.");
+        let needs_components = body.contains("ComponentId.");
 
         // ── Emit imports ──
-        if needs_vars || needs_varbits || needs_enums || needs_params {
+        if needs_vars || needs_varbits || needs_enums || needs_params || needs_components {
             let mut imports = Vec::new();
             if needs_vars {
                 imports.push("VARS");
@@ -89,6 +94,9 @@ impl StructuredWriter {
             }
             if needs_params {
                 imports.push("PARAMS");
+            }
+            if needs_components {
+                imports.push("ComponentId");
             }
             let _ = writeln!(
                 &mut out,
@@ -230,6 +238,6 @@ impl StructuredWriter {
 
 impl Default for StructuredWriter {
     fn default() -> Self {
-        Self::new()
+        Self::new(std::collections::HashMap::new())
     }
 }

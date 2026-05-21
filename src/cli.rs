@@ -3460,7 +3460,8 @@ fn run_transpile_scripts(
         .with_vars(&ctx.varps_by_domain)
         .with_varbits(&ctx.varbits)
         .with_params(&ctx.params)
-        .with_script_names(&ctx.scripts, &opcode_book, version.build);
+        .with_script_names(&ctx.scripts, &opcode_book, version.build)
+        .with_components(&ctx.parsed_components);
 
     fs::create_dir_all(out_dir)?;
 
@@ -3471,6 +3472,7 @@ fn run_transpile_scripts(
         export_varbit_types(&ctx, out_dir)?;
         export_enum_types(&ctx, out_dir)?;
         export_param_types(&ctx, out_dir)?;
+        export_interface_ids(&ctx, out_dir)?;
         export_index(out_dir)?;
     }
 
@@ -4017,35 +4019,143 @@ fn export_spot_types(_ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
 }
 
 fn export_interface_ids(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
-    let interface_ids: Vec<u32> = ctx.interfaces.keys().copied().collect();
+    // Flatten all component deps into a single map: component_id → ComponentDeps
+    let all_components: std::collections::BTreeMap<u32, &crate::interface::ComponentDeps> = ctx
+        .parsed_components
+        .values()
+        .flat_map(|group| group.iter())
+        .map(|(&id, deps)| (id, deps))
+        .collect();
+
     let mut lines = vec![
-        "// Auto-generated Interface IDs".to_string(),
-        "// Source: RS3 cache interfaces archive".to_string(),
+        "// Auto-generated Interface Component definitions".to_string(),
+        "// Source: RS3 cache interfaces archive (parsed component deps)".to_string(),
         String::new(),
-        "// All known interface parent IDs in the cache".to_string(),
-        String::new(),
-        "export const INTERFACE_IDS: ReadonlyArray<number> = [".to_string(),
     ];
 
-    for chunk in interface_ids.chunks(20) {
-        lines.push(format!(
-            "    {},",
-            chunk
-                .iter()
-                .map(u32::to_string)
-                .collect::<Vec<_>>()
-                .join(", ")
-        ));
+    // ── Named component ID constants ──
+    let mut named_entries: Vec<(String, u32, &str)> = Vec::new();
+    for (&id, deps) in &all_components {
+        if let Some(ref name) = deps.name {
+            let prop = sanitize_ts_prop(name);
+            if !prop.is_empty() {
+                named_entries.push((prop, id, &deps.component_type));
+            }
+        }
+    }
+    // Deduplicate by property name (keep first occurrence)
+    named_entries.sort_by(|a, b| a.0.cmp(&b.0));
+    named_entries.dedup_by(|a, b| a.0 == b.0);
+    named_entries.sort_by_key(|e| e.1);
+
+    if !named_entries.is_empty() {
+        lines.push("// Named component IDs with their numeric values.".to_string());
+        lines.push("export const ComponentId = {".to_string());
+        for (prop, id, comp_type) in &named_entries {
+            lines.push(format!("    /** {comp_type} (id={id}) */"));
+            lines.push(format!("    {prop}: {id},"));
+        }
+        lines.push("} as const;".to_string());
+        lines.push(String::new());
+        lines.push(
+            "export type ComponentId = (typeof ComponentId)[keyof typeof ComponentId];".to_string(),
+        );
+        lines.push(String::new());
     }
 
-    lines.push("];".to_string());
+    // ── ComponentInfo interface and data ──
+    lines.push("export interface ComponentInfo {".to_string());
+    lines.push("    id: number;".to_string());
+    lines.push("    type: string;".to_string());
+    lines.push("    name: string | null;".to_string());
+    lines.push("    children: number[];".to_string());
+    lines.push("    scripts: number[];".to_string());
+    lines.push("    varps: Array<{domain: string; id: number}>;".to_string());
+    lines.push("    varbits: number[];".to_string());
+    lines.push("    enums: number[];".to_string());
+    lines.push("    params: number[];".to_string());
+    lines.push("    invs: number[];".to_string());
+    lines.push("    models: number[];".to_string());
+    lines.push("    seqs: number[];".to_string());
+    lines.push("}".to_string());
+    lines.push(String::new());
+
+    lines.push(
+        "export const ALL_COMPONENTS: ReadonlyMap<number, ComponentInfo> = new Map([".to_string(),
+    );
+    for (&id, deps) in &all_components {
+        let varp_items: Vec<String> = deps
+            .varps
+            .iter()
+            .map(|v| {
+                let (domain, id) = match v {
+                    crate::interface::VarTransmitRef::Player(id) => ("player", *id),
+                    crate::interface::VarTransmitRef::Npc(id) => ("npc", *id),
+                    crate::interface::VarTransmitRef::Client(id) => ("client", *id),
+                    crate::interface::VarTransmitRef::World(id) => ("world", *id),
+                    crate::interface::VarTransmitRef::Region(id) => ("region", *id),
+                    crate::interface::VarTransmitRef::Object(id) => ("object", *id),
+                    crate::interface::VarTransmitRef::Clan(id) => ("clan", *id),
+                    crate::interface::VarTransmitRef::ClanSetting(id) => ("clan_setting", *id),
+                    crate::interface::VarTransmitRef::Controller(id) => ("controller", *id),
+                    crate::interface::VarTransmitRef::Global(id) => ("global", *id),
+                    crate::interface::VarTransmitRef::PlayerGroup(id) => ("player_group", *id),
+                    crate::interface::VarTransmitRef::VarClientString(id) => ("client", *id),
+                };
+                format!("{{domain:'{domain}',id:{id}}}")
+            })
+            .collect();
+        let scripts_json = set_to_json(&deps.scripts);
+        let varbits_json = set_to_json(&deps.varbits);
+        let enums_json = set_to_json(&deps.enums);
+        let params_json = set_to_json(&deps.params);
+        let invs_json = set_to_json(&deps.invs);
+        let models_json = set_to_json(&deps.models);
+        let seqs_json = set_to_json(&deps.seqs);
+        let children_json: String = deps
+            .children
+            .iter()
+            .map(u32::to_string)
+            .collect::<Vec<_>>()
+            .join(", ");
+        let name_str = match &deps.name {
+            Some(n) => format!("'{}'", escape_ts_string(n)),
+            None => "null".to_string(),
+        };
+        lines.push(format!(
+            "    [{id}, {{ id:{id}, type:'{type}', name:{name}, children:[{children}], scripts:[{scripts}], varps:[{varps}], varbits:[{varbits}], enums:[{enums}], params:[{params}], invs:[{invs}], models:[{models}], seqs:[{seqs}] }}],",
+            id = id,
+            type = deps.component_type,
+            name = name_str,
+            children = children_json,
+            scripts = scripts_json,
+            varps = varp_items.join(", "),
+            varbits = varbits_json,
+            enums = enums_json,
+            params = params_json,
+            invs = invs_json,
+            models = models_json,
+            seqs = seqs_json,
+        ));
+    }
+    lines.push("]);".to_string());
     lines.push(String::new());
     lines.push(format!(
-        "export const INTERFACE_ID_COUNT = {};",
-        interface_ids.len()
+        "export const COMPONENT_COUNT = {};",
+        all_components.len()
     ));
 
     write_text(&out_dir.join("interfaces.ts"), &lines.join("\n"))
+}
+
+fn set_to_json(set: &std::collections::HashSet<u32>) -> String {
+    let mut items: Vec<u32> = set.iter().copied().collect();
+    items.sort_unstable();
+    items
+        .iter()
+        .map(u32::to_string)
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn export_index(out_dir: &Path) -> Result<()> {
@@ -4091,8 +4201,10 @@ fn export_index(out_dir: &Path) -> Result<()> {
         "} from './params';".to_string(),
         String::new(),
         "export {".to_string(),
-        "    INTERFACE_IDS,".to_string(),
-        "    INTERFACE_ID_COUNT,".to_string(),
+        "    ComponentId,".to_string(),
+        "    ALL_COMPONENTS,".to_string(),
+        "    COMPONENT_COUNT,".to_string(),
+        "    type ComponentInfo,".to_string(),
         "} from './interfaces';".to_string(),
         "export { type InvEntry } from './invs';".to_string(),
         "export { type ObjEntry } from './objs';".to_string(),
@@ -4111,6 +4223,30 @@ fn escape_ts_string(s: &str) -> String {
         .replace('\n', "\\n")
         .replace('\r', "\\r")
         .replace('\t', "\\t")
+}
+
+/// Convert a RS3 interface component name (`snake_case` or kebab-case)
+/// to a valid TypeScript object property name (also `snake_case`, but
+/// with hyphens and spaces replaced by underscores).
+fn sanitize_ts_prop(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    for c in name.chars() {
+        if c.is_ascii_alphanumeric() || c == '_' {
+            out.push(c);
+        } else if c == '-' || c == ' ' || c == '/' {
+            out.push('_');
+        }
+        // drop other chars
+    }
+    // Property can't start with a digit
+    if out.starts_with(|c: char| c.is_ascii_digit()) {
+        out.insert(0, '_');
+    }
+    // Can't be empty
+    if out.is_empty() {
+        out.push_str("unnamed");
+    }
+    out
 }
 
 #[cfg(test)]
