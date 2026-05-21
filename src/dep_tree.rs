@@ -9,14 +9,19 @@
 )]
 
 use crate::cache::FlatCache;
-use crate::config::{EnumEntry, ParamEntry, ScalarValue, StructEntry};
+use crate::config::{
+    EnumEntry, InvEntry, OpListEntry, ParamEntry, ScalarValue, SeqEntry, SpotEntry, StructEntry,
+};
 use crate::constants::{
     ARCHIVE_CLIENTSCRIPTS, ARCHIVE_CONFIG, ARCHIVE_ENUM_CONFIG, ARCHIVE_INTERFACES,
-    ARCHIVE_STRUCT_CONFIG, CONFIG_GROUP_VAR_BIT, CONFIG_GROUP_VAR_CLAN,
-    CONFIG_GROUP_VAR_CLAN_SETTING, CONFIG_GROUP_VAR_CLIENT, CONFIG_GROUP_VAR_CONTROLLER,
-    CONFIG_GROUP_VAR_GLOBAL, CONFIG_GROUP_VAR_NPC, CONFIG_GROUP_VAR_OBJECT,
-    CONFIG_GROUP_VAR_PLAYER, CONFIG_GROUP_VAR_PLAYER_GROUP, CONFIG_GROUP_VAR_REGION,
-    CONFIG_GROUP_VAR_SHARED, CONFIG_GROUP_VAR_WORLD,
+    ARCHIVE_LOC_CONFIG, ARCHIVE_NPC_CONFIG, ARCHIVE_OBJ_CONFIG, ARCHIVE_SEQ_CONFIG,
+    ARCHIVE_SPOT_CONFIG, ARCHIVE_STRUCT_CONFIG, CONFIG_GROUP_INV, CONFIG_GROUP_LOC_LEGACY,
+    CONFIG_GROUP_NPC_LEGACY, CONFIG_GROUP_OBJ_LEGACY, CONFIG_GROUP_SEQ, CONFIG_GROUP_SPOT,
+    CONFIG_GROUP_VAR_BIT, CONFIG_GROUP_VAR_CLAN, CONFIG_GROUP_VAR_CLAN_SETTING,
+    CONFIG_GROUP_VAR_CLIENT, CONFIG_GROUP_VAR_CONTROLLER, CONFIG_GROUP_VAR_GLOBAL,
+    CONFIG_GROUP_VAR_NPC, CONFIG_GROUP_VAR_OBJECT, CONFIG_GROUP_VAR_PLAYER,
+    CONFIG_GROUP_VAR_PLAYER_GROUP, CONFIG_GROUP_VAR_REGION, CONFIG_GROUP_VAR_SHARED,
+    CONFIG_GROUP_VAR_WORLD,
 };
 use crate::interface::{ComponentDeps, parse_component_deps};
 use crate::js5;
@@ -408,6 +413,12 @@ pub struct ResolverContext {
     pub structs: BTreeMap<u32, StructEntry>,
     pub decoded_scripts: BTreeMap<u32, CompiledScript>,
     pub parsed_components: BTreeMap<u32, BTreeMap<u32, ComponentDeps>>,
+    pub npcs: BTreeMap<u32, OpListEntry>,
+    pub objs: BTreeMap<u32, OpListEntry>,
+    pub locs: BTreeMap<u32, OpListEntry>,
+    pub seqs: BTreeMap<u32, SeqEntry>,
+    pub spots: BTreeMap<u32, SpotEntry>,
+    pub invs: BTreeMap<u32, InvEntry>,
 }
 
 impl ResolverContext {
@@ -531,6 +542,130 @@ impl ResolverContext {
             }
         }
 
+        // ── Load npcs, objs, locs, seqs, spots, invs from their config archives ──
+        let load_config_archive = |archive: u32,
+                                   bit_shift: u32,
+                                   legacy_group: u32,
+                                   parser: fn(u32, &[u8]) -> Result<OpListEntry>|
+         -> Result<BTreeMap<u32, OpListEntry>> {
+            if crate::fixture::ensure_archive_complete(cache.root(), tar_path, archive).is_ok() {
+                let c2 = FlatCache::open(cache.root())?;
+                let idx = c2.archive_index(archive)?;
+                let mut map = BTreeMap::new();
+                for group in &idx.group_id {
+                    let files = c2.group_files_with_index(&idx, archive, *group)?;
+                    for (file, data) in files {
+                        let id = (group << bit_shift) | file;
+                        if let Ok(entry) = parser(id, &data) {
+                            map.insert(id, entry);
+                        }
+                    }
+                }
+                return Ok(map);
+            }
+            if let Some(payload) = cache.get(ARCHIVE_CONFIG, legacy_group)? {
+                let config_index = cache.archive_index(ARCHIVE_CONFIG)?;
+                let entries = js5::unpack_group(&config_index, legacy_group, &payload)?;
+                return Ok(entries
+                    .into_iter()
+                    .filter_map(|(id, data)| parser(id, &data).ok().map(|e| (id, e)))
+                    .collect());
+            }
+            Ok(BTreeMap::new())
+        };
+
+        let npcs = load_config_archive(
+            ARCHIVE_NPC_CONFIG,
+            7,
+            CONFIG_GROUP_NPC_LEGACY,
+            crate::config::parse_npc,
+        )?;
+        let objs = load_config_archive(
+            ARCHIVE_OBJ_CONFIG,
+            8,
+            CONFIG_GROUP_OBJ_LEGACY,
+            crate::config::parse_obj,
+        )?;
+        let locs = load_config_archive(
+            ARCHIVE_LOC_CONFIG,
+            8,
+            CONFIG_GROUP_LOC_LEGACY,
+            crate::config::parse_loc,
+        )?;
+
+        // Sequences and spots use dedicated archives
+        let seqs: BTreeMap<u32, SeqEntry> = {
+            let mut map = BTreeMap::new();
+            if crate::fixture::ensure_archive_complete(cache.root(), tar_path, ARCHIVE_SEQ_CONFIG)
+                .is_ok()
+            {
+                let c2 = FlatCache::open(cache.root())?;
+                let idx = c2.archive_index(ARCHIVE_SEQ_CONFIG)?;
+                for group in &idx.group_id {
+                    let files = c2.group_files_with_index(&idx, ARCHIVE_SEQ_CONFIG, *group)?;
+                    for (file, data) in files {
+                        let id = (group << 7) | file;
+                        if let Ok(entry) = crate::config::parse_seq(id, &data) {
+                            map.insert(id, entry);
+                        }
+                    }
+                }
+            } else if let Some(payload) = cache.get(ARCHIVE_CONFIG, CONFIG_GROUP_SEQ)? {
+                let config_index = cache.archive_index(ARCHIVE_CONFIG)?;
+                let entries = js5::unpack_group(&config_index, CONFIG_GROUP_SEQ, &payload)?;
+                for (id, data) in entries {
+                    if let Ok(entry) = crate::config::parse_seq(id, &data) {
+                        map.insert(id, entry);
+                    }
+                }
+            }
+            map
+        };
+
+        let spots: BTreeMap<u32, SpotEntry> = {
+            let mut map = BTreeMap::new();
+            if crate::fixture::ensure_archive_complete(cache.root(), tar_path, ARCHIVE_SPOT_CONFIG)
+                .is_ok()
+            {
+                let c2 = FlatCache::open(cache.root())?;
+                let idx = c2.archive_index(ARCHIVE_SPOT_CONFIG)?;
+                for group in &idx.group_id {
+                    let files = c2.group_files_with_index(&idx, ARCHIVE_SPOT_CONFIG, *group)?;
+                    for (file, data) in files {
+                        let id = (group << 8) | file;
+                        if let Ok(entry) = crate::config::parse_spot(id, &data) {
+                            map.insert(id, entry);
+                        }
+                    }
+                }
+            } else if let Some(payload) = cache.get(ARCHIVE_CONFIG, CONFIG_GROUP_SPOT)? {
+                let config_index = cache.archive_index(ARCHIVE_CONFIG)?;
+                let entries = js5::unpack_group(&config_index, CONFIG_GROUP_SPOT, &payload)?;
+                for (id, data) in entries {
+                    if let Ok(entry) = crate::config::parse_spot(id, &data) {
+                        map.insert(id, entry);
+                    }
+                }
+            }
+            map
+        };
+
+        // Inventories: CONFIG_GROUP_INV within ARCHIVE_CONFIG
+        let invs: BTreeMap<u32, InvEntry> = {
+            let mut map = BTreeMap::new();
+            if let Some(payload) = cache.get(ARCHIVE_CONFIG, CONFIG_GROUP_INV)? {
+                let config_index = cache.archive_index(ARCHIVE_CONFIG)?;
+                let entries = js5::unpack_group(&config_index, CONFIG_GROUP_INV, &payload)?;
+                for (id, data) in entries {
+                    if let Ok(entry) = crate::config::parse_inv(id, &data) {
+                        map.insert(id, entry);
+                    }
+                }
+            }
+            map
+        };
+
+        // ── Decode scripts ──
         let mut decoded_scripts = BTreeMap::new();
         for (&script_id, bytes) in &scripts {
             if let Ok(script) = decode_script(bytes, &opcode_book, build) {
@@ -563,6 +698,12 @@ impl ResolverContext {
             structs,
             decoded_scripts,
             parsed_components,
+            npcs,
+            objs,
+            locs,
+            seqs,
+            spots,
+            invs,
         })
     }
 }

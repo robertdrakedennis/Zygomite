@@ -3475,6 +3475,12 @@ fn run_transpile_scripts(
         export_enum_types(&ctx, out_dir)?;
         export_param_types(&ctx, out_dir)?;
         export_interface_ids(&ctx, out_dir)?;
+        export_inv_types(&ctx, out_dir)?;
+        export_obj_types(&ctx, out_dir)?;
+        export_npc_types(&ctx, out_dir)?;
+        export_loc_types(&ctx, out_dir)?;
+        export_seq_types(&ctx, out_dir)?;
+        export_spot_types(&ctx, out_dir)?;
         export_index(out_dir)?;
     }
 
@@ -3940,163 +3946,287 @@ fn export_param_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
     write_text(&out_dir.join("params.ts"), &lines.join("\n"))
 }
 
-fn export_inv_types(_ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
-    // TODO: populate from cache inv config archive
-    let lines = vec![
+fn export_inv_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
+    let mut entries: Vec<_> = ctx.invs.values().collect();
+    entries.sort_by_key(|e| e.id);
+
+    let mut lines = vec![
         "// Auto-generated Inventory definitions".to_string(),
         "// Source: RS3 cache inv config".to_string(),
         String::new(),
-        "export interface InvEntry {".to_string(),
-        "    id: number;".to_string(),
-        "    name: string;".to_string(),
-        "    size: number;".to_string(),
-        "}".to_string(),
-        String::new(),
-        "// Inventories define container slots for items".to_string(),
     ];
+
+    lines.push("export interface InvStockEntry {".to_string());
+    lines.push("    objId: number;".to_string());
+    lines.push("    count: number;".to_string());
+    lines.push("}".to_string());
+    lines.push(String::new());
+    lines.push("export interface InvEntry {".to_string());
+    lines.push("    id: number;".to_string());
+    lines.push("    size: number | null;".to_string());
+    lines.push("    stocks: InvStockEntry[];".to_string());
+    lines.push("}".to_string());
+    lines.push(String::new());
+
+    if !entries.is_empty() {
+        lines.push("export const INVS: ReadonlyMap<number, InvEntry> = new Map([".to_string());
+        for entry in &entries {
+            let size = entry
+                .size
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "null".to_string());
+            let stocks_json: String = entry
+                .stocks
+                .iter()
+                .map(|s| format!("{{ objId: {}, count: {} }}", s.obj_id, s.count))
+                .collect::<Vec<_>>()
+                .join(", ");
+            lines.push(format!(
+                "    [{id}, {{ id: {id}, size: {size}, stocks: [{stocks_json}] }}],",
+                id = entry.id
+            ));
+        }
+        lines.push("]);".to_string());
+        lines.push(String::new());
+    }
+    lines.push(format!("export const INV_COUNT = {};", entries.len()));
 
     write_text(&out_dir.join("invs.ts"), &lines.join("\n"))
 }
 
-fn export_obj_types(_ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
-    // TODO: populate from cache obj config archive
-    let lines = vec![
+fn export_obj_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
+    let mut entries: Vec<_> = ctx.objs.values().collect();
+    entries.sort_by_key(|e| e.id);
+
+    let mut lines = vec![
         "// Auto-generated Item (Obj) definitions".to_string(),
         "// Source: RS3 cache obj config".to_string(),
         String::new(),
         "export interface ObjEntry {".to_string(),
         "    id: number;".to_string(),
-        "    name: string;".to_string(),
-        "    members: boolean;".to_string(),
-        "    cost: number;".to_string(),
-        "    weight: number;".to_string(),
-        "    stackable: boolean;".to_string(),
-        "    noted: boolean;".to_string(),
-        "    noteId: number;".to_string(),
-        "    inventoryModel: number;".to_string(),
-        "    zoom: number;".to_string(),
-        "    rotationX: number;".to_string(),
-        "    rotationY: number;".to_string(),
-        "    rotationZ: number;".to_string(),
-        "    offsetX: number;".to_string(),
-        "    offsetY: number;".to_string(),
-        "    options: (string | null)[];".to_string(),
-        "    interfaceOptions: (string | null)[];".to_string(),
-        "    params: Map<number, number | string>;".to_string(),
+        "    name: string | null;".to_string(),
+        "    ops: string[];".to_string(),
         "}".to_string(),
         String::new(),
-        "// Items are the core game objects that players can interact with".to_string(),
     ];
+
+    if !entries.is_empty() {
+        lines.push("export const OBJS: ReadonlyMap<number, ObjEntry> = new Map([".to_string());
+        for entry in &entries {
+            let name = extract_oplist_name(&entry.ops);
+            let ops_json: String = entry
+                .ops
+                .iter()
+                .map(|o| format!("'{}'", escape_ts_string(o)))
+                .collect::<Vec<_>>()
+                .join(", ");
+            lines.push(format!(
+                "    [{id}, {{ id: {id}, name: {name}, ops: [{ops_json}] }}],",
+                id = entry.id
+            ));
+        }
+        lines.push("]);".to_string());
+        lines.push(String::new());
+    }
+    lines.push(format!("export const OBJ_COUNT = {};", entries.len()));
 
     write_text(&out_dir.join("objs.ts"), &lines.join("\n"))
 }
 
-fn export_npc_types(_ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
-    // TODO: populate from cache npc config archive
-    let lines = vec![
+fn export_npc_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
+    let mut entries: Vec<_> = ctx.npcs.values().collect();
+    entries.sort_by_key(|e| e.id);
+
+    let mut lines = vec![
         "// Auto-generated NPC definitions".to_string(),
         "// Source: RS3 cache npc config".to_string(),
         String::new(),
         "export interface NpcEntry {".to_string(),
         "    id: number;".to_string(),
-        "    name: string;".to_string(),
-        "    size: number;".to_string(),
-        "    combatLevel: number;".to_string(),
-        "    options: (string | null)[];".to_string(),
-        "    interfaceOptions: (string | null)[];".to_string(),
-        "    params: Map<number, number | string>;".to_string(),
+        "    name: string | null;".to_string(),
+        "    ops: string[];".to_string(),
         "}".to_string(),
         String::new(),
-        "// NPCs are non-player characters in the game world".to_string(),
     ];
+
+    if !entries.is_empty() {
+        lines.push("export const NPCS: ReadonlyMap<number, NpcEntry> = new Map([".to_string());
+        for entry in &entries {
+            let name = extract_oplist_name(&entry.ops);
+            let ops_json: String = entry
+                .ops
+                .iter()
+                .map(|o| format!("'{}'", escape_ts_string(o)))
+                .collect::<Vec<_>>()
+                .join(", ");
+            lines.push(format!(
+                "    [{id}, {{ id: {id}, name: {name}, ops: [{ops_json}] }}],",
+                id = entry.id
+            ));
+        }
+        lines.push("]);".to_string());
+        lines.push(String::new());
+    }
+    lines.push(format!("export const NPC_COUNT = {};", entries.len()));
 
     write_text(&out_dir.join("npcs.ts"), &lines.join("\n"))
 }
 
-fn export_loc_types(_ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
-    // TODO: populate from cache loc config archive
-    let lines = vec![
+fn export_loc_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
+    let mut entries: Vec<_> = ctx.locs.values().collect();
+    entries.sort_by_key(|e| e.id);
+
+    let mut lines = vec![
         "// Auto-generated Loc (Object) definitions".to_string(),
         "// Source: RS3 cache loc config".to_string(),
         String::new(),
         "export interface LocEntry {".to_string(),
         "    id: number;".to_string(),
-        "    name: string;".to_string(),
-        "    type: number;".to_string(),
-        "    sizeX: number;".to_string(),
-        "    sizeY: number;".to_string(),
-        "    interactive: number;".to_string(),
-        "    obstructive: number;".to_string(),
-        "    options: (string | null)[];".to_string(),
-        "    params: Map<number, number | string>;".to_string(),
+        "    name: string | null;".to_string(),
+        "    ops: string[];".to_string(),
         "}".to_string(),
         String::new(),
-        "// Locs are world objects (walls, doors, decorations, etc.)".to_string(),
     ];
+
+    if !entries.is_empty() {
+        lines.push("export const LOCS: ReadonlyMap<number, LocEntry> = new Map([".to_string());
+        for entry in &entries {
+            let name = extract_oplist_name(&entry.ops);
+            let ops_json: String = entry
+                .ops
+                .iter()
+                .map(|o| format!("'{}'", escape_ts_string(o)))
+                .collect::<Vec<_>>()
+                .join(", ");
+            lines.push(format!(
+                "    [{id}, {{ id: {id}, name: {name}, ops: [{ops_json}] }}],",
+                id = entry.id
+            ));
+        }
+        lines.push("]);".to_string());
+        lines.push(String::new());
+    }
+    lines.push(format!("export const LOC_COUNT = {};", entries.len()));
 
     write_text(&out_dir.join("locs.ts"), &lines.join("\n"))
 }
 
-fn export_seq_types(_ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
-    // TODO: populate from cache seq config archive
-    let lines = vec![
+fn export_seq_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
+    let mut entries: Vec<_> = ctx.seqs.values().collect();
+    entries.sort_by_key(|e| e.id);
+
+    let mut lines = vec![
         "// Auto-generated Sequence (Animation) definitions".to_string(),
         "// Source: RS3 cache seq config".to_string(),
         String::new(),
-        "export interface SeqEntry {".to_string(),
-        "    id: number;".to_string(),
-        "    name: string;".to_string(),
-        "    frameCount: number;".to_string(),
-        "    frameLengths: number[];".to_string(),
-        "    frameIds: number[];".to_string(),
-        "    interleaveLeave: number[];".to_string(),
-        "    stretches: boolean;".to_string(),
-        "    forcedPriority: number;".to_string(),
-        "    leftHandItem: number;".to_string(),
-        "    rightHandItem: number;".to_string(),
-        "    maxLoops: number;".to_string(),
-        "    delayType: number;".to_string(),
-        "    animationKind: number;".to_string(),
-        "    restoreGrowth: boolean;".to_string(),
-        "    shielding: boolean;".to_string(),
-        "    weaponType: number;".to_string(),
-        "    runAnim: number;".to_string(),
-        "    walkAnim: number;".to_string(),
-        "    turn180Anim: number;".to_string(),
-        "    turn90CWAnim: number;".to_string(),
-        "    turn90CCWAnim: number;".to_string(),
-        "    crawlAnim: number;".to_string(),
+        "export interface SeqFrame {".to_string(),
+        "    animId: number;".to_string(),
+        "    frameId: number;".to_string(),
+        "    delay: number;".to_string(),
         "}".to_string(),
         String::new(),
-        "// Sequences define animation frames and timing".to_string(),
+        "export interface SeqEntry {".to_string(),
+        "    id: number;".to_string(),
+        "    frames: SeqFrame[];".to_string(),
+        "    stretches: boolean;".to_string(),
+        "    priority: number | null;".to_string(),
+        "    leftHand: number | null;".to_string(),
+        "    rightHand: number | null;".to_string(),
+        "    loopCount: number | null;".to_string(),
+        "    params: StructParamEntry[];".to_string(),
+        "}".to_string(),
+        String::new(),
     ];
+
+    if !entries.is_empty() {
+        lines.push("export const SEQS: ReadonlyMap<number, SeqEntry> = new Map([".to_string());
+        for entry in &entries {
+            let frames_json: String = entry
+                .frames
+                .iter()
+                .map(|f| {
+                    format!(
+                        "{{ animId: {}, frameId: {}, delay: {} }}",
+                        f.anim_id, f.frame_id, f.delay
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            let params_json: String = entry
+                .params
+                .iter()
+                .map(|p| {
+                    format!(
+                        "{{ id: {}, value: {} }}",
+                        p.param_id,
+                        format_scalar_value(&p.value)
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            lines.push(format!(
+                "    [{id}, {{ id: {id}, frames: [{frames_json}], stretches: {stretches}, priority: {priority}, leftHand: {lefthand}, rightHand: {righthand}, loopCount: {loopcount}, params: [{params_json}] }}],",
+                id = entry.id,
+                stretches = entry.stretches,
+                priority = entry.priority.map(|p| p.to_string()).unwrap_or_else(|| "null".to_string()),
+                lefthand = entry.lefthand_raw.map(|l| l.to_string()).unwrap_or_else(|| "null".to_string()),
+                righthand = entry.righthand_raw.map(|r| r.to_string()).unwrap_or_else(|| "null".to_string()),
+                loopcount = entry.loopcount.map(|l| l.to_string()).unwrap_or_else(|| "null".to_string()),
+            ));
+        }
+        lines.push("]);".to_string());
+        lines.push(String::new());
+    }
+    lines.push(format!("export const SEQ_COUNT = {};", entries.len()));
 
     write_text(&out_dir.join("seqs.ts"), &lines.join("\n"))
 }
 
-fn export_spot_types(_ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
-    // TODO: populate from cache spot config archive
-    let lines = vec![
+fn export_spot_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
+    let mut entries: Vec<_> = ctx.spots.values().collect();
+    entries.sort_by_key(|e| e.id);
+
+    let mut lines = vec![
         "// Auto-generated Spotanim (Graphic) definitions".to_string(),
         "// Source: RS3 cache spot config".to_string(),
         String::new(),
         "export interface SpotEntry {".to_string(),
         "    id: number;".to_string(),
-        "    name: string;".to_string(),
-        "    model: number;".to_string(),
-        "    animation: number;".to_string(),
-        "    rotation: number;".to_string(),
-        "    width: number;".to_string(),
-        "    height: number;".to_string(),
-        "    orientation: number;".to_string(),
-        "    ambient: number;".to_string(),
-        "    contrast: number;".to_string(),
+        "    ops: string[];".to_string(),
         "}".to_string(),
         String::new(),
-        "// Spotanims are graphics/effects played at a location".to_string(),
     ];
 
+    if !entries.is_empty() {
+        lines.push("export const SPOTS: ReadonlyMap<number, SpotEntry> = new Map([".to_string());
+        for entry in &entries {
+            let ops_json: String = entry
+                .ops
+                .iter()
+                .map(|o| format!("'{}'", escape_ts_string(&format!("{o:?}"))))
+                .collect::<Vec<_>>()
+                .join(", ");
+            lines.push(format!(
+                "    [{id}, {{ id: {id}, ops: [{ops_json}] }}],",
+                id = entry.id
+            ));
+        }
+        lines.push("]);".to_string());
+        lines.push(String::new());
+    }
+    lines.push(format!("export const SPOT_COUNT = {};", entries.len()));
+
     write_text(&out_dir.join("spots.ts"), &lines.join("\n"))
+}
+
+/// Extract a name from op list entries like "name=Attack" or "name=Man".
+fn extract_oplist_name(ops: &[String]) -> String {
+    for op in ops {
+        if let Some(name) = op.strip_prefix("name=") {
+            return format!("'{}'", escape_ts_string(name));
+        }
+    }
+    "null".to_string()
 }
 
 fn export_interface_ids(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
@@ -4288,12 +4418,12 @@ fn export_index(out_dir: &Path) -> Result<()> {
         "    COMPONENT_COUNT,".to_string(),
         "    type ComponentInfo,".to_string(),
         "} from './interfaces';".to_string(),
-        "export { type InvEntry } from './invs';".to_string(),
-        "export { type ObjEntry } from './objs';".to_string(),
-        "export { type NpcEntry } from './npcs';".to_string(),
-        "export { type LocEntry } from './locs';".to_string(),
-        "export { type SeqEntry } from './seqs';".to_string(),
-        "export { type SpotEntry } from './spots';".to_string(),
+        "export {{ type InvEntry, INVS, INV_COUNT }} from './invs';".to_string(),
+        "export {{ type ObjEntry, OBJS, OBJ_COUNT }} from './objs';".to_string(),
+        "export {{ type NpcEntry, NPCS, NPC_COUNT }} from './npcs';".to_string(),
+        "export {{ type LocEntry, LOCS, LOC_COUNT }} from './locs';".to_string(),
+        "export {{ type SeqEntry, SEQS, SEQ_COUNT }} from './seqs';".to_string(),
+        "export {{ type SpotEntry, SPOTS, SPOT_COUNT }} from './spots';".to_string(),
     ];
 
     write_text(&out_dir.join("index.ts"), &lines.join("\n"))
