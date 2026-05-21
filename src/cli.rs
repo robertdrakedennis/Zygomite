@@ -46,7 +46,7 @@ use crate::interface::render_interface_group;
 use crate::map::decode_map_square;
 use crate::model::Model;
 use crate::script::{CompiledScript, Instruction, OpcodeBook, Operand, decode_script};
-use crate::script_transpile::Transpiler;
+use crate::transpile::Transpiler;
 use crate::vars::{VarDomain, parse_var, parse_varbit};
 use crate::vfx::decode as decode_vfx;
 use anyhow::{Context, Result, bail};

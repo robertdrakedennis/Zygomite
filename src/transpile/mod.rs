@@ -1,15 +1,19 @@
 pub mod ast;
+pub mod cfg;
 pub mod codegen;
 pub mod diagnostics;
 pub mod scope;
 pub mod sema;
+pub mod structured_writer;
 pub mod writer;
 
 pub use ast::*;
+pub use cfg::{BasicBlock, ControlFlowGraph, build_cfg, generate_structured};
 pub use codegen::{CodeGen, generate_program};
 pub use diagnostics::{Diagnostic, Diagnostics, Severity, Span};
 pub use scope::{LocalType, Scope, Scopes, Symbol, SymbolKind, SymbolTable};
 pub use sema::Sema;
+pub use structured_writer::StructuredWriter;
 pub use writer::Writer;
 
 use crate::config::EnumEntry;
@@ -104,10 +108,24 @@ impl Transpiler {
     }
 
     pub fn transpile(&self, script: &CompiledScript, script_id: i32) -> TranspiledScript {
+        self.transpile_structured(script, script_id)
+    }
+
+    pub fn transpile_to_ast(&self, script: &CompiledScript, script_id: i32) -> Declaration {
+        let codegen = CodeGen::new(self.symbol_table.clone());
+        codegen.generate(script, script_id)
+    }
+
+    pub fn transpile_structured(
+        &self,
+        script: &CompiledScript,
+        script_id: i32,
+    ) -> TranspiledScript {
         let codegen = CodeGen::new(self.symbol_table.clone());
         let decl = codegen.generate(script, script_id);
-        let mut writer = Writer::new();
-        let source = writer.write_declaration(&decl);
+        let cfg = build_cfg(decl.instructions.clone());
+        let mut writer = StructuredWriter::new();
+        let source = writer.write_declaration_structured(&decl, &cfg);
         TranspiledScript {
             source,
             referenced_vars: collect_var_refs(script),
@@ -115,11 +133,6 @@ impl Transpiler {
             referenced_enums: collect_enum_refs(script),
             referenced_scripts: collect_script_refs(script),
         }
-    }
-
-    pub fn transpile_to_ast(&self, script: &CompiledScript, script_id: i32) -> Declaration {
-        let codegen = CodeGen::new(self.symbol_table.clone());
-        codegen.generate(script, script_id)
     }
 }
 
