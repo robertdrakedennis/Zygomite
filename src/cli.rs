@@ -3464,8 +3464,19 @@ fn run_transpile_scripts(
 
     fs::create_dir_all(out_dir)?;
 
+    // Generate type definitions so script imports resolve.
+    // Skip if index.ts already exists (user may have run ts-export).
+    if !out_dir.join("index.ts").exists() {
+        export_var_types(&ctx, out_dir)?;
+        export_varbit_types(&ctx, out_dir)?;
+        export_enum_types(&ctx, out_dir)?;
+        export_param_types(&ctx, out_dir)?;
+        export_index(out_dir)?;
+    }
+
     let mut script_count = 0;
     let mut errors = 0;
+    let mut barrel_exports: Vec<String> = Vec::new();
 
     for (&script_id_raw, data) in &ctx.scripts {
         let script_id = crate::transpile::ScriptId(script_id_raw as i32);
@@ -3485,6 +3496,11 @@ fn run_transpile_scripts(
                 let filename = format!("{}.ts", sanitize_file_component(&script_name));
                 let out_path = out_dir.join(&filename);
                 fs::write(&out_path, &ts.source)?;
+                barrel_exports.push(format!(
+                    "export {{ script_{id} }} from './{filename_no_ext}';",
+                    id = script_id,
+                    filename_no_ext = filename.trim_end_matches(".ts")
+                ));
                 script_count += 1;
                 if script_count >= max_scripts {
                     break;
@@ -3495,6 +3511,18 @@ fn run_transpile_scripts(
                 errors += 1;
             }
         }
+    }
+
+    // Write scripts barrel file so you can import { script_N } from './scripts'
+    if !barrel_exports.is_empty() {
+        barrel_exports.sort();
+        let mut lines = vec![
+            "// Auto-generated scripts barrel".to_string(),
+            "// Source: RS3 cache transpile-scripts".to_string(),
+            String::new(),
+        ];
+        lines.extend(barrel_exports);
+        write_text(&out_dir.join("scripts.ts"), &lines.join("\n"))?;
     }
 
     eprintln!(

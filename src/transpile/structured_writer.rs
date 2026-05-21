@@ -13,18 +13,15 @@ impl StructuredWriter {
 
     pub fn write_declaration(&mut self, decl: &Declaration) -> String {
         let mut out = String::new();
-        out.push_str("// @ts-nocheck - Auto-generated CS2 to TypeScript\n");
-        out.push_str("import { VARS, VARBITS, ENUMS, PARAMS } from './index';\n\n");
 
+        // ── Header comment ──
+        let _ = writeln!(&mut out, "// Auto-generated CS2 to TypeScript");
         if let Some(ref name) = decl.name {
-            out.push_str("// script name: ");
-            out.push_str(name);
-            out.push('\n');
+            let _ = writeln!(&mut out, "// Script name: {name}");
         }
-
         let _ = writeln!(
             &mut out,
-            "// script_{}: locals(int={}, obj={}, long={}) args(int={}, obj={}, long={})\n",
+            "// script_{}: locals(int={}, obj={}, long={}) args(int={}, obj={}, long={})",
             decl.script_id,
             decl.locals
                 .iter()
@@ -52,24 +49,70 @@ impl StructuredWriter {
                 .count(),
         );
 
-        out.push_str("const ");
-        let mut locals: Vec<String> = decl
-            .arguments
-            .iter()
-            .map(|v| format!("{}: {}", v.name, v.type_annotation.as_str()))
-            .collect();
-        locals.extend(
-            decl.locals
-                .iter()
-                .map(|v| format!("{}: {}", v.name, v.type_annotation.as_str())),
-        );
-        out.push_str(&locals.join(", "));
-        out.push_str(";\n\n");
-
+        // ── Build function body ──
         let blocks = build_cfg(decl.instructions.clone());
         let structured = emit_structured(blocks);
 
-        self.write_structured(&structured, &mut out);
+        let mut body = String::new();
+        self.indent = 1;
+        // Local variable declarations
+        for local in &decl.locals {
+            let _ = writeln!(
+                &mut body,
+                "    let {name}: {type_};",
+                name = local.name,
+                type_ = local.type_annotation.as_str()
+            );
+        }
+        if !decl.locals.is_empty() {
+            body.push('\n');
+        }
+        self.write_structured(&structured, &mut body);
+
+        // ── Detect which imports are needed ──
+        let needs_vars = body.contains("VARS.");
+        let needs_varbits = body.contains("VARBITS.");
+        let needs_enums = body.contains("ENUMS.");
+        let needs_params = body.contains("PARAMS.");
+
+        // ── Emit imports ──
+        if needs_vars || needs_varbits || needs_enums || needs_params {
+            let mut imports = Vec::new();
+            if needs_vars {
+                imports.push("VARS");
+            }
+            if needs_varbits {
+                imports.push("VARBITS");
+            }
+            if needs_enums {
+                imports.push("ENUMS");
+            }
+            if needs_params {
+                imports.push("PARAMS");
+            }
+            let _ = writeln!(
+                &mut out,
+                "import {{ {} }} from './index';",
+                imports.join(", ")
+            );
+        }
+        out.push('\n');
+
+        // ── Function signature ──
+        let _ = writeln!(
+            &mut out,
+            "export function script_{id}({args}): void {{",
+            id = decl.script_id,
+            args = decl
+                .arguments
+                .iter()
+                .map(|a| format!("{}: {}", a.name, a.type_annotation.as_str()))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+
+        out.push_str(&body);
+        out.push_str("}\n");
 
         out
     }
