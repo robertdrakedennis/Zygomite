@@ -6,9 +6,17 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
-// Minimum build for standard RS3 opcode numbering (IDs 0-200 range).
-// Builds before 947 use a different encoding (`RuneScriptKt` opcode IDs).
-// Config type exports work on all builds; script transpilation requires >= 947.
+// ── Build compatibility ──
+//
+// Build 947+ (supported): Classic RS3 bytecode format. Opcodes 0-200
+// mapped via opcodes-{version}.txt with full type signatures.
+// Code length validation enforced; all operators decode cleanly.
+//
+// Builds < 947 (best-effort): The bytecode may use RuneScriptKt
+// opcode numbering (command IDs in the 4000+ range for arithmetic,
+// separate namespaces for engine commands). We decode what we can
+// from the opcode table and surface unknown commands as `cmd_NNNN`
+// with a 1-byte operand. Code length validation is relaxed.
 pub const MIN_SCRIPT_BUILD: u32 = 947;
 
 #[derive(Clone, Debug, Serialize)]
@@ -18,6 +26,8 @@ pub struct OpcodeBook {
 
 impl OpcodeBook {
     pub fn load(data_dir: &Path, version: u32, subversion: u32) -> Result<Self> {
+        // Build-specific opcode file (e.g. opcodes-910.txt, opcodes-947.txt).
+        // Falls back to opcodes-unscrambled.txt if no version-specific file exists.
         let mut path = data_dir.join("opcodes-unscrambled.txt");
         if version >= 685 {
             let scoped = data_dir.join(format!("opcodes-{version}-{subversion}.txt"));
@@ -200,6 +210,10 @@ pub fn decode_script(
         let command = opcode_book
             .name(opcode)
             .map(str::to_string)
+            // Builds before MIN_SCRIPT_BUILD: unknown opcodes get synthetic
+            // names so the script decodes without failing. This surfaces
+            // every instruction in the output even when we lack the full
+            // opcode table for that build.
             .unwrap_or_else(|_| format!("cmd_{opcode}"));
         let index = i32::try_from(code.len()).context("script too large")?;
         let operand = decode_operand(
@@ -217,9 +231,10 @@ pub fn decode_script(
         });
     }
 
-    // Code length validation: only enforced on builds where we have a complete
-    // opcode table. Earlier builds may use command IDs we don't recognize,
-    // causing instruction decoding mismatches.
+    // ── Code length validation ──
+    // Only enforced when we have a complete opcode table. On older builds
+    // unknown commands may decode with different operand sizes than the
+    // actual bytecode, so the instruction count can drift.
     if version >= MIN_SCRIPT_BUILD && code.len() != code_len {
         bail!(
             "script code length mismatch: decoded {} expected {}",
@@ -353,8 +368,10 @@ fn decode_operand(
         | "push_array_int_leave_index_on_stack"
         | "push_array_int_and_index"
         | "pop_array_int_leave_value_on_stack" => Ok(Operand::Array(packet.g4s()?)),
-        // Unknown commands: read 1 byte operand (RuneScriptKt generic format).
-        // For build 910+, commands not in our opcode table use writeShort+writeByte.
+        // ── Unknown commands ──
+        // Read a 1-byte operand (the RuneScriptKt default format).
+        // Known commands above match on exact name and read the correct
+        // operand size (int, string, branch offset, etc.).
         _ => Ok(Operand::Byte(packet.g1()?)),
     }
 }
