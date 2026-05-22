@@ -56,6 +56,15 @@ pub struct ConflictReport {
     pub total_entities: usize,
     pub summary: ConflictSummary,
     pub entities: Vec<ConflictEntry>,
+    /// Present when --remap is enabled.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remap: Option<RemapTable>,
+    /// Present when --remap is enabled.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reference_updates: Option<Vec<ReferenceUpdate>>,
+    /// Present when --remap is enabled.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allocation: Option<AllocationInfo>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -66,6 +75,144 @@ pub struct ConflictSummary {
     pub changed: usize,
     pub script_changed: usize,
     pub unknown: usize,
+}
+
+// ── Remap planning types ──
+
+/// Maps old (source) IDs to new (target) IDs for entities that need shifting.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct RemapTable {
+    /// `script_id` → `new_script_id`
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub scripts: BTreeMap<u32, u32>,
+    /// "domain:id" → { domain, id }
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub varps: BTreeMap<String, VarpRemapTarget>,
+    /// `varbit_id` → `new_varbit_id`
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub varbits: BTreeMap<u32, u32>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct VarpRemapTarget {
+    pub domain: String,
+    pub id: u32,
+}
+
+/// Describes one reference that needs updating after ID shifts.
+#[derive(Debug, Clone, Serialize)]
+pub struct ReferenceUpdate {
+    #[serde(rename = "type")]
+    pub entity_type: String,
+    pub id: u32,
+    pub updates: Vec<RefUpdateEntry>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RefUpdateEntry {
+    /// Human-readable location of the reference (e.g. "instruction[3]").
+    pub location: String,
+    /// Old reference value.
+    pub from: String,
+    /// New reference value.
+    pub to: String,
+}
+
+/// Describes where free IDs were sourced from in the target build.
+#[derive(Debug, Clone, Serialize)]
+pub struct AllocationInfo {
+    pub scripts: RangeAlloc,
+    pub varps_player: RangeAlloc,
+    pub varps_npc: RangeAlloc,
+    pub varps_client: RangeAlloc,
+    pub varps_world: RangeAlloc,
+    pub varps_region: RangeAlloc,
+    pub varps_object: RangeAlloc,
+    pub varps_clan: RangeAlloc,
+    pub varps_clan_setting: RangeAlloc,
+    pub varps_controller: RangeAlloc,
+    pub varps_global: RangeAlloc,
+    pub varps_player_group: RangeAlloc,
+    pub varbits: RangeAlloc,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RangeAlloc {
+    pub target_max: u32,
+    pub allocated_from: u32,
+    pub count: usize,
+}
+
+impl AllocationInfo {
+    fn new() -> Self {
+        Self {
+            scripts: RangeAlloc {
+                target_max: 0,
+                allocated_from: 0,
+                count: 0,
+            },
+            varps_player: RangeAlloc {
+                target_max: 0,
+                allocated_from: 0,
+                count: 0,
+            },
+            varps_npc: RangeAlloc {
+                target_max: 0,
+                allocated_from: 0,
+                count: 0,
+            },
+            varps_client: RangeAlloc {
+                target_max: 0,
+                allocated_from: 0,
+                count: 0,
+            },
+            varps_world: RangeAlloc {
+                target_max: 0,
+                allocated_from: 0,
+                count: 0,
+            },
+            varps_region: RangeAlloc {
+                target_max: 0,
+                allocated_from: 0,
+                count: 0,
+            },
+            varps_object: RangeAlloc {
+                target_max: 0,
+                allocated_from: 0,
+                count: 0,
+            },
+            varps_clan: RangeAlloc {
+                target_max: 0,
+                allocated_from: 0,
+                count: 0,
+            },
+            varps_clan_setting: RangeAlloc {
+                target_max: 0,
+                allocated_from: 0,
+                count: 0,
+            },
+            varps_controller: RangeAlloc {
+                target_max: 0,
+                allocated_from: 0,
+                count: 0,
+            },
+            varps_global: RangeAlloc {
+                target_max: 0,
+                allocated_from: 0,
+                count: 0,
+            },
+            varps_player_group: RangeAlloc {
+                target_max: 0,
+                allocated_from: 0,
+                count: 0,
+            },
+            varbits: RangeAlloc {
+                target_max: 0,
+                allocated_from: 0,
+                count: 0,
+            },
+        }
+    }
 }
 
 // ── Helpers ──
@@ -114,6 +261,22 @@ fn push_diff_opt<T: std::fmt::Debug + PartialEq>(
             source: format!("{source:?}"),
             target: format!("{target:?}"),
         });
+    }
+}
+
+fn alloc_for(alloc: &mut AllocationInfo, domain: VarDomain) -> &mut RangeAlloc {
+    match domain {
+        VarDomain::Player => &mut alloc.varps_player,
+        VarDomain::Npc => &mut alloc.varps_npc,
+        VarDomain::Client => &mut alloc.varps_client,
+        VarDomain::World => &mut alloc.varps_world,
+        VarDomain::Region => &mut alloc.varps_region,
+        VarDomain::Object => &mut alloc.varps_object,
+        VarDomain::Clan => &mut alloc.varps_clan,
+        VarDomain::ClanSetting => &mut alloc.varps_clan_setting,
+        VarDomain::Controller => &mut alloc.varps_controller,
+        VarDomain::Global => &mut alloc.varps_global,
+        VarDomain::PlayerGroup => &mut alloc.varps_player_group,
     }
 }
 
@@ -719,6 +882,282 @@ impl MigrationAnalyzer {
             total_entities: entities.len(),
             summary,
             entities,
+            remap: None,
+            reference_updates: None,
+            allocation: None,
+        }
+    }
+
+    // ── Remap planning ──
+
+    pub fn remap_interface(&self, group_id: u32, buffer: u32) -> ConflictReport {
+        let mut report = self.analyze_interface(group_id);
+
+        let (remap_table, alloc) = self.allocate_free_ids(&report.entities, buffer);
+        let ref_updates = self.build_reference_updates(group_id, &remap_table);
+
+        report.remap = Some(remap_table);
+        report.reference_updates = Some(ref_updates);
+        report.allocation = Some(alloc);
+
+        report
+    }
+
+    fn allocate_free_ids(
+        &self,
+        entities: &[ConflictEntry],
+        buffer: u32,
+    ) -> (RemapTable, AllocationInfo) {
+        let mut remap = RemapTable::default();
+        let mut alloc = AllocationInfo::new();
+
+        // Scripts
+        {
+            let max_script = self
+                .target
+                .decoded_scripts
+                .keys()
+                .copied()
+                .max()
+                .unwrap_or(0);
+            let start = max_script.saturating_add(buffer);
+            let mut next_id = start;
+            for e in entities {
+                if e.entity_type == "script"
+                    && matches!(
+                        e.status,
+                        ConflictStatus::Missing | ConflictStatus::IdConflict
+                    )
+                {
+                    remap.scripts.insert(e.id, next_id);
+                    next_id += 1;
+                }
+            }
+            alloc.scripts = RangeAlloc {
+                target_max: max_script,
+                allocated_from: start,
+                count: remap.scripts.len(),
+            };
+        }
+
+        // Varps — per domain
+        for domain in &[
+            VarDomain::Player,
+            VarDomain::Npc,
+            VarDomain::Client,
+            VarDomain::World,
+            VarDomain::Region,
+            VarDomain::Object,
+            VarDomain::Clan,
+            VarDomain::ClanSetting,
+            VarDomain::Controller,
+            VarDomain::Global,
+            VarDomain::PlayerGroup,
+        ] {
+            let max_varp = self
+                .target
+                .varps_by_domain
+                .get(domain)
+                .map(|vars| vars.keys().copied().max().unwrap_or(0))
+                .unwrap_or(0);
+            let start = max_varp.saturating_add(buffer);
+            let mut next_id = start;
+
+            for e in entities {
+                if e.entity_type == Self::varp_type_label(*domain)
+                    && matches!(
+                        e.status,
+                        ConflictStatus::Missing | ConflictStatus::IdConflict
+                    )
+                {
+                    let key = format!("{}:{}", domain.as_label(), e.id);
+                    remap.varps.insert(
+                        key,
+                        VarpRemapTarget {
+                            domain: domain.as_label().to_string(),
+                            id: next_id,
+                        },
+                    );
+                    next_id += 1;
+                }
+            }
+            let ra = alloc_for(&mut alloc, *domain);
+            *ra = RangeAlloc {
+                target_max: max_varp,
+                allocated_from: start,
+                count: (next_id - start) as usize,
+            };
+        }
+
+        // Varbits
+        {
+            let max_bit = self.target.varbits.keys().copied().max().unwrap_or(0);
+            let start = max_bit.saturating_add(buffer);
+            let mut next_id = start;
+            for e in entities {
+                if e.entity_type == "varbit"
+                    && matches!(
+                        e.status,
+                        ConflictStatus::Missing | ConflictStatus::IdConflict
+                    )
+                {
+                    remap.varbits.insert(e.id, next_id);
+                    next_id += 1;
+                }
+            }
+            alloc.varbits = RangeAlloc {
+                target_max: max_bit,
+                allocated_from: start,
+                count: remap.varbits.len(),
+            };
+        }
+
+        (remap, alloc)
+    }
+
+    fn build_reference_updates(&self, group_id: u32, remap: &RemapTable) -> Vec<ReferenceUpdate> {
+        let mut updates = Vec::new();
+
+        // Walk scripts in the dependency tree
+        let mut visited: HashSet<EntityKey> = HashSet::new();
+        if let Some(comps) = self.source.parsed_components.get(&group_id) {
+            for comp_deps in comps.values() {
+                for &script_id in &comp_deps.scripts {
+                    self.collect_script_ref_updates(script_id, remap, &mut updates, &mut visited);
+                }
+            }
+        }
+
+        // Walk components in the dependency tree
+        if let Some(comps) = self.source.parsed_components.get(&group_id) {
+            for (&comp_id, comp_deps) in comps {
+                let mut comp_updates = Vec::new();
+
+                for &script_id in &comp_deps.scripts {
+                    if let Some(&new_id) = remap.scripts.get(&script_id) {
+                        comp_updates.push(RefUpdateEntry {
+                            location: format!("scripts[{script_id}]"),
+                            from: format!("script {script_id}"),
+                            to: format!("script {new_id}"),
+                        });
+                    }
+                }
+
+                for var_ref in &comp_deps.varps {
+                    let (_, id) = var_transmit_to_entity(var_ref);
+                    let domain = Self::var_ref_domain(var_ref);
+                    let key = format!("{}:{}", domain.as_label(), id);
+                    if let Some(target) = remap.varps.get(&key) {
+                        comp_updates.push(RefUpdateEntry {
+                            location: format!("varps[{key}]"),
+                            from: format!("varp {key}"),
+                            to: format!("varp {}:{}", target.domain, target.id),
+                        });
+                    }
+                }
+
+                for &varbit_id in &comp_deps.varbits {
+                    if let Some(&new_id) = remap.varbits.get(&varbit_id) {
+                        comp_updates.push(RefUpdateEntry {
+                            location: format!("varbits[{varbit_id}]"),
+                            from: format!("varbit {varbit_id}"),
+                            to: format!("varbit {new_id}"),
+                        });
+                    }
+                }
+
+                if !comp_updates.is_empty() {
+                    updates.push(ReferenceUpdate {
+                        entity_type: "component".to_string(),
+                        id: comp_id,
+                        updates: comp_updates,
+                    });
+                }
+            }
+        }
+
+        updates
+    }
+
+    fn collect_script_ref_updates(
+        &self,
+        script_id: u32,
+        remap: &RemapTable,
+        updates: &mut Vec<ReferenceUpdate>,
+        visited: &mut HashSet<EntityKey>,
+    ) {
+        if !visited.insert(EntityKey::new(EntityType::Script, script_id)) {
+            return;
+        }
+
+        let mut script_updates = Vec::new();
+
+        if let Some(script) = self.source.decoded_scripts.get(&script_id) {
+            for (i, instruction) in script.code.iter().enumerate() {
+                match &instruction.operand {
+                    crate::script::Operand::VarRef(var_ref) => {
+                        let ref_entity = crate::dep_tree::var_ref_to_entity_ref(var_ref);
+                        let domain = Self::entity_type_to_domain(ref_entity.entity_type);
+                        if let Some(domain) = domain {
+                            let key = format!("{}:{}", domain.as_label(), ref_entity.id);
+                            if let Some(target) = remap.varps.get(&key) {
+                                script_updates.push(RefUpdateEntry {
+                                    location: format!("instruction[{i}]"),
+                                    from: format!("varp {key}"),
+                                    to: format!("varp {}:{}", target.domain, target.id),
+                                });
+                            }
+                        }
+                    }
+                    crate::script::Operand::VarBitRef(vbr) => {
+                        let id = u32::from(vbr.id);
+                        if let Some(&new_id) = remap.varbits.get(&id) {
+                            script_updates.push(RefUpdateEntry {
+                                location: format!("instruction[{i}]"),
+                                from: format!("varbit {id}"),
+                                to: format!("varbit {new_id}"),
+                            });
+                        }
+                    }
+                    crate::script::Operand::Script(called_id) => {
+                        let id = *called_id as u32;
+                        if let Some(&new_id) = remap.scripts.get(&id) {
+                            script_updates.push(RefUpdateEntry {
+                                location: format!("instruction[{i}]"),
+                                from: format!("script {id}"),
+                                to: format!("script {new_id}"),
+                            });
+                        }
+                        // Recurse into called script
+                        self.collect_script_ref_updates(id, remap, updates, visited);
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        if !script_updates.is_empty() {
+            updates.push(ReferenceUpdate {
+                entity_type: "script".to_string(),
+                id: script_id,
+                updates: script_updates,
+            });
+        }
+    }
+
+    fn varp_type_label(domain: VarDomain) -> &'static str {
+        match domain {
+            VarDomain::Player => "varplayer",
+            VarDomain::Npc => "varnpc",
+            VarDomain::Client => "varclient",
+            VarDomain::World => "varworld",
+            VarDomain::Region => "varregion",
+            VarDomain::Object => "varobject",
+            VarDomain::Clan => "varclan",
+            VarDomain::ClanSetting => "varclansetting",
+            VarDomain::Controller => "varcontroller",
+            VarDomain::Global => "varglobal",
+            VarDomain::PlayerGroup => "varplayergroup",
         }
     }
 

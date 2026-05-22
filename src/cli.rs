@@ -194,6 +194,12 @@ pub enum Command {
         source_build: u32,
         #[arg(long, default_value_t = 1)]
         source_subbuild: u32,
+        /// Enable ID remap planning for conflicted entities.
+        #[arg(long)]
+        remap: bool,
+        /// Buffer above target's max ID for allocating free IDs (default 10000).
+        #[arg(long, default_value_t = 10000)]
+        remap_buffer: u32,
     },
 }
 
@@ -666,6 +672,8 @@ pub fn run(cli: Cli) -> Result<()> {
             source_cache_tar,
             source_build,
             source_subbuild,
+            remap,
+            remap_buffer,
         } => run_migrate_check(
             &cache,
             &tar_path,
@@ -676,6 +684,8 @@ pub fn run(cli: Cli) -> Result<()> {
             source_cache_tar.as_deref(),
             source_build,
             source_subbuild,
+            remap,
+            remap_buffer,
         ),
     }
 }
@@ -3455,6 +3465,8 @@ fn run_migrate_check(
     source_cache_tar: Option<&Path>,
     source_build: u32,
     source_subbuild: u32,
+    enable_remap: bool,
+    remap_buffer: u32,
 ) -> Result<()> {
     let target_ctx = ResolverContext::load(
         cache,
@@ -3469,7 +3481,11 @@ fn run_migrate_check(
         ResolverContext::load(cache, source_tar, data_dir, source_build, source_subbuild)?;
 
     let analyzer = crate::migrate::MigrationAnalyzer::new(source_ctx, target_ctx);
-    let report = analyzer.analyze_interface(interface_group);
+    let report = if enable_remap {
+        analyzer.remap_interface(interface_group, remap_buffer)
+    } else {
+        analyzer.analyze_interface(interface_group)
+    };
 
     let json = serde_json::to_string_pretty(&report)?;
     std::fs::write(out_file, &json)?;
