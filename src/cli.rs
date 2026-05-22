@@ -201,6 +201,22 @@ pub enum Command {
         #[arg(long, default_value_t = 10000)]
         remap_buffer: u32,
     },
+    MigrateScript {
+        #[arg(long)]
+        script_id: u32,
+        #[arg(long)]
+        out_file: PathBuf,
+        #[arg(long)]
+        source_cache_tar: Option<PathBuf>,
+        #[arg(long, default_value_t = 947)]
+        source_build: u32,
+        #[arg(long, default_value_t = 1)]
+        source_subbuild: u32,
+        #[arg(long)]
+        remap: bool,
+        #[arg(long, default_value_t = 10000)]
+        remap_buffer: u32,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -679,6 +695,27 @@ pub fn run(cli: Cli) -> Result<()> {
             &tar_path,
             &cli.data_dir,
             interface_group,
+            &out_file,
+            version,
+            source_cache_tar.as_deref(),
+            source_build,
+            source_subbuild,
+            remap,
+            remap_buffer,
+        ),
+        Command::MigrateScript {
+            script_id,
+            out_file,
+            source_cache_tar,
+            source_build,
+            source_subbuild,
+            remap,
+            remap_buffer,
+        } => run_migrate_script(
+            &cache,
+            &tar_path,
+            &cli.data_dir,
+            script_id,
             &out_file,
             version,
             source_cache_tar.as_deref(),
@@ -3492,6 +3529,56 @@ fn run_migrate_check(
 
     eprintln!(
         "migration report: {} entities ({} safe, {} missing, {} id_conflict, {} changed, {} script_changed) written to {}",
+        report.total_entities,
+        report.summary.safe,
+        report.summary.missing,
+        report.summary.id_conflict,
+        report.summary.changed,
+        report.summary.script_changed,
+        out_file.display()
+    );
+    Ok(())
+}
+
+// Loads both source and target caches for single-script migration analysis.
+#[allow(clippy::too_many_arguments)]
+fn run_migrate_script(
+    cache: &FlatCache,
+    tar_path: &Path,
+    data_dir: &Path,
+    script_id: u32,
+    out_file: &Path,
+    target_version: RuntimeVersion,
+    source_cache_tar: Option<&Path>,
+    source_build: u32,
+    source_subbuild: u32,
+    enable_remap: bool,
+    remap_buffer: u32,
+) -> Result<()> {
+    let target_ctx = ResolverContext::load(
+        cache,
+        tar_path,
+        data_dir,
+        target_version.build,
+        target_version.subbuild,
+    )?;
+
+    let source_tar = source_cache_tar.unwrap_or(tar_path);
+    let source_ctx =
+        ResolverContext::load(cache, source_tar, data_dir, source_build, source_subbuild)?;
+
+    let analyzer = crate::migrate::MigrationAnalyzer::new(source_ctx, target_ctx);
+    let report = if enable_remap {
+        analyzer.remap_script(script_id, remap_buffer)
+    } else {
+        analyzer.analyze_script(script_id)
+    };
+
+    let json = serde_json::to_string_pretty(&report)?;
+    std::fs::write(out_file, &json)?;
+
+    eprintln!(
+        "script migration report: {} entities ({} safe, {} missing, {} id_conflict, {} changed, {} script_changed) written to {}",
         report.total_entities,
         report.summary.safe,
         report.summary.missing,

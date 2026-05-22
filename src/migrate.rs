@@ -77,6 +77,25 @@ pub struct ConflictSummary {
     pub unknown: usize,
 }
 
+/// A conflict report for a single script and its transitive dependencies.
+#[derive(Debug, Clone, Serialize)]
+pub struct ScriptReport {
+    pub source_build: u32,
+    pub target_build: u32,
+    pub script_id: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub script_name: Option<String>,
+    pub total_entities: usize,
+    pub summary: ConflictSummary,
+    pub entities: Vec<ConflictEntry>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remap: Option<RemapTable>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reference_updates: Option<Vec<ReferenceUpdate>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allocation: Option<AllocationInfo>,
+}
+
 // ── Remap planning types ──
 
 /// Maps old (source) IDs to new (target) IDs for entities that need shifting.
@@ -901,6 +920,79 @@ impl MigrationAnalyzer {
         report.allocation = Some(alloc);
 
         report
+    }
+
+    // ── Script-level analysis ──
+
+    /// Analyze a single script and its full transitive dependency tree.
+    pub fn analyze_script(&self, script_id: u32) -> ScriptReport {
+        let mut entities = Vec::new();
+        let mut visited: HashSet<EntityKey> = HashSet::new();
+
+        // Start with the script itself
+        let key = EntityKey::new(EntityType::Script, script_id);
+        visited.insert(key);
+        self.collect_entity(
+            EntityType::Script,
+            script_id,
+            None,
+            &mut entities,
+            &mut visited,
+        );
+        self.walk_script(script_id, &mut entities, &mut visited);
+
+        let mut summary = ConflictSummary::default();
+        for e in &entities {
+            match e.status {
+                ConflictStatus::Safe => summary.safe += 1,
+                ConflictStatus::Missing => summary.missing += 1,
+                ConflictStatus::IdConflict => summary.id_conflict += 1,
+                ConflictStatus::Changed => summary.changed += 1,
+                ConflictStatus::ScriptChanged => summary.script_changed += 1,
+                ConflictStatus::Unknown => summary.unknown += 1,
+            }
+        }
+
+        let script_name = self
+            .source
+            .decoded_scripts
+            .get(&script_id)
+            .and_then(|s| s.name.clone());
+
+        ScriptReport {
+            source_build: self.source.build,
+            target_build: self.target.build,
+            script_id,
+            script_name,
+            total_entities: entities.len(),
+            summary,
+            entities,
+            remap: None,
+            reference_updates: None,
+            allocation: None,
+        }
+    }
+
+    /// Analyze a single script with remap planning.
+    pub fn remap_script(&self, script_id: u32, buffer: u32) -> ScriptReport {
+        let mut report = self.analyze_script(script_id);
+
+        let (remap_table, alloc) = self.allocate_free_ids(&report.entities, buffer);
+        let ref_updates = self.build_script_ref_updates(script_id, &remap_table);
+
+        report.remap = Some(remap_table);
+        report.reference_updates = Some(ref_updates);
+        report.allocation = Some(alloc);
+
+        report
+    }
+
+    /// Build reference updates starting from a single script.
+    fn build_script_ref_updates(&self, script_id: u32, remap: &RemapTable) -> Vec<ReferenceUpdate> {
+        let mut updates = Vec::new();
+        let mut visited: HashSet<EntityKey> = HashSet::new();
+        self.collect_script_ref_updates(script_id, remap, &mut updates, &mut visited);
+        updates
     }
 
     fn allocate_free_ids(
