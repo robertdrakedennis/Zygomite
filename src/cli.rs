@@ -224,6 +224,39 @@ pub enum Command {
         #[arg(long)]
         out_file: Option<PathBuf>,
     },
+    /// Assemble a pragma-annotated CS2 TypeScript back to byte-perfect CS2 binary.
+    #[command(name = "assemble-script")]
+    AssembleScript {
+        /// Path to the .ts or .asm file containing @cs2 pragmas
+        #[arg(long)]
+        input: PathBuf,
+        /// Path to write the compiled .cs2 binary
+        #[arg(long)]
+        output: PathBuf,
+        /// Cache build version (default: auto-detect)
+        #[arg(long)]
+        build: Option<u32>,
+        /// Cache sub-build version (default: 0)
+        #[arg(long, default_value = "0")]
+        subbuild: u32,
+    },
+    /// Dump a lossless raw-flat cache tree for JS5 repacking.
+    #[command(name = "dump-raw-flat")]
+    DumpRawFlat {
+        /// Output directory for the raw flat cache
+        #[arg(long)]
+        out_dir: PathBuf,
+        /// Comma-separated archive IDs to dump (default: all)
+        #[arg(long)]
+        archives: Option<String>,
+    },
+    /// Dump config dependency references for the cache overlay workflow.
+    #[command(name = "dump-refs")]
+    DumpRefs {
+        /// Output directory (writes refs/{obj,npc,loc,...}.json)
+        #[arg(long)]
+        out_dir: PathBuf,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -742,6 +775,28 @@ pub fn run(cli: Cli) -> Result<()> {
             out_file.as_deref(),
             version,
         ),
+        Command::AssembleScript {
+            input,
+            output,
+            build,
+            subbuild,
+        } => run_assemble_script(
+            &cache,
+            &tar_path,
+            &cli.data_dir,
+            &input,
+            &output,
+            build,
+            subbuild,
+            version,
+        ),
+        Command::DumpRawFlat {
+            out_dir,
+            archives,
+        } => run_dump_raw_flat(&cache, &tar_path, &out_dir, archives.as_deref()),
+        Command::DumpRefs { out_dir } => {
+            run_dump_refs(&cache, &tar_path, &out_dir, version.build)
+        }
     }
 }
 
@@ -3560,15 +3615,23 @@ fn run_validate_script(
                     }
                     crate::validate::ValidationError::StackUnderflow {
                         index,
+                        stack,
                         needed,
                         available,
                     } => {
                         eprintln!(
-                            "  FAIL [{index}] stack underflow: needs {needed}, has {available}"
+                            "  FAIL [{index}] {stack} stack underflow: needs {needed}, has {available}"
                         );
                     }
-                    crate::validate::ValidationError::UnbalancedReturn { index, stack_depth } => {
-                        eprintln!("  FAIL [{index}] return with {stack_depth} values on stack");
+                    crate::validate::ValidationError::UnbalancedReturn {
+                        index,
+                        int_stack,
+                        obj_stack,
+                        long_stack,
+                    } => {
+                        eprintln!(
+                            "  FAIL [{index}] return with values on stacks: int={int_stack}, obj={obj_stack}, long={long_stack}"
+                        );
                     }
                     crate::validate::ValidationError::MissingReturn => {
                         eprintln!("  FAIL missing return statement");
@@ -3581,6 +3644,92 @@ fn run_validate_script(
             eprintln!("  WARN {warn}");
         }
     }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_assemble_script(
+    cache: &FlatCache,
+    tar_path: &Path,
+    data_dir: &Path,
+    input: &Path,
+    output: &Path,
+    build: Option<u32>,
+    subbuild: u32,
+    version: RuntimeVersion,
+) -> Result<()> {
+    let effective_build = build.unwrap_or(version.build);
+    let ctx = ResolverContext::load(cache, tar_path, data_dir, effective_build, subbuild)?;
+    let opcode_book = &ctx.opcode_book;
+
+    let source =
+        std::fs::read_to_string(input).with_context(|| format!("reading {}", input.display()))?;
+    let script = crate::script::parse_cs2_asm(&source)
+        .with_context(|| format!("parsing ASM pragmas from {}", input.display()))?;
+    let binary = crate::script::encode_script(&script, opcode_book, effective_build)
+        .context("encoding CS2 binary")?;
+
+    std::fs::write(output, &binary).with_context(|| format!("writing {}", output.display()))?;
+
+    eprintln!(
+        "Assembled {} instructions → {} ({} bytes, build {})",
+        script.code.len(),
+        output.display(),
+        binary.len(),
+        effective_build
+    );
+    Ok(())
+}
+
+fn run_dump_raw_flat(
+    cache: &FlatCache,
+    tar_path: &Path,
+    out_dir: &Path,
+    archives: Option<&str>,
+) -> Result<()> {
+    let archive_filter: Option<Vec<u32>> = archives.map(|s| {
+        s.split(',')
+            .filter_map(|p| p.trim().parse::<u32>().ok())
+            .collect()
+    });
+
+    // Ensure all archives are extracted from tar if needed
+    if tar_path.is_file() {
+        for id in crate::dump::discover_archives(cache)? {
+            crate::fixture::ensure_archive_complete(cache.root(), tar_path, id)?;
+        }
+    }
+
+    let stats = crate::dump::dump_raw_flat(cache, out_dir, archive_filter.as_deref())?;
+
+    eprintln!(
+        "Dumped {} archives, {} groups, {} bytes in {} ms",
+        stats.archives, stats.groups_copied, stats.total_bytes, stats.elapsed_ms
+    );
+    Ok(())
+}
+
+fn run_dump_refs(
+    cache: &FlatCache,
+    tar_path: &Path,
+    out_dir: &Path,
+    build: u32,
+) -> Result<()> {
+    for archive in [
+        ARCHIVE_CONFIG,
+        ARCHIVE_ENUM_CONFIG,
+        ARCHIVE_OBJ_CONFIG,
+        ARCHIVE_NPC_CONFIG,
+        ARCHIVE_LOC_CONFIG,
+        ARCHIVE_SEQ_CONFIG,
+        ARCHIVE_SPOT_CONFIG,
+        ARCHIVE_STRUCT_CONFIG,
+    ] {
+        ensure_archive_complete(cache.root(), tar_path, archive)?;
+    }
+    let cache = FlatCache::open(cache.root())?;
+    let graph = crate::config_refs::build_config_ref_graph(&cache, build)?;
+    crate::config_refs::write_refs_json(&graph, out_dir)?;
     Ok(())
 }
 

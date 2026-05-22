@@ -52,6 +52,23 @@ impl VarDomain {
         }
     }
 
+    pub fn from_label(label: &str) -> Result<Self> {
+        match label {
+            "player" => Ok(Self::Player),
+            "npc" => Ok(Self::Npc),
+            "client" => Ok(Self::Client),
+            "world" => Ok(Self::World),
+            "region" => Ok(Self::Region),
+            "object" => Ok(Self::Object),
+            "clan" => Ok(Self::Clan),
+            "clan_setting" => Ok(Self::ClanSetting),
+            "controller" => Ok(Self::Controller),
+            "player_group" => Ok(Self::PlayerGroup),
+            "global" => Ok(Self::Global),
+            _ => bail!("unknown var domain label: {label}"),
+        }
+    }
+
     pub fn type_str(&self) -> &'static str {
         match self {
             Self::Player

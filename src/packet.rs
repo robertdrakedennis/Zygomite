@@ -1,6 +1,8 @@
 use anyhow::{Context, Result, bail};
 use encoding_rs::WINDOWS_1252;
 
+// ── Packet reader (read-only, references external buffer) ──
+
 #[derive(Clone, Debug)]
 pub struct Packet<'a> {
     data: &'a [u8],
@@ -231,5 +233,88 @@ impl<'a> Packet<'a> {
         let start = self.pos;
         self.pos = end;
         Ok(&self.data[start..end])
+    }
+}
+
+// ── ByteWriter (write-only, owns its buffer) ──
+
+#[derive(Clone, Debug, Default)]
+pub struct ByteWriter {
+    pub data: Vec<u8>,
+}
+
+impl ByteWriter {
+    pub fn new() -> Self {
+        Self { data: Vec::new() }
+    }
+
+    pub fn with_capacity(cap: usize) -> Self {
+        Self {
+            data: Vec::with_capacity(cap),
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.data.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.data.is_empty()
+    }
+
+    pub fn p1(&mut self, value: u8) {
+        self.data.push(value);
+    }
+
+    pub fn p2(&mut self, value: u16) {
+        self.data.extend_from_slice(&value.to_be_bytes());
+    }
+
+    pub fn p2_le(&mut self, value: u16) {
+        self.data.extend_from_slice(&value.to_le_bytes());
+    }
+
+    pub fn p3(&mut self, value: u32) {
+        let bytes = value.to_be_bytes();
+        self.data.push(bytes[1]);
+        self.data.push(bytes[2]);
+        self.data.push(bytes[3]);
+    }
+
+    pub fn p4s(&mut self, value: i32) {
+        self.data.extend_from_slice(&value.to_be_bytes());
+    }
+
+    pub fn p4s_le(&mut self, value: i32) {
+        self.data.extend_from_slice(&value.to_le_bytes());
+    }
+
+    pub fn p8s(&mut self, value: i64) {
+        self.data.extend_from_slice(&value.to_be_bytes());
+    }
+
+    pub fn pfloat_le(&mut self, value: f32) {
+        self.p4s_le(value.to_bits() as i32);
+    }
+
+    pub fn pdata(&mut self, bytes: &[u8]) {
+        self.data.extend_from_slice(bytes);
+    }
+
+    pub fn pjstr(&mut self, s: &str) {
+        let (encoded, _, had_errors) = WINDOWS_1252.encode(s);
+        if had_errors {
+            self.data.extend_from_slice(s.as_bytes());
+        } else {
+            self.data.extend_from_slice(&encoded);
+        }
+        self.data.push(0);
+    }
+
+    pub fn pjstrnull(&mut self, s: Option<&str>) {
+        match s {
+            None => self.data.push(0),
+            Some(s) => self.pjstr(s),
+        }
     }
 }

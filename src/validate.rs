@@ -29,14 +29,18 @@ pub enum ValidationError {
         index: usize,
         called_id: i32,
     },
+    /// Popping from a typed stack that has insufficient values.
     StackUnderflow {
         index: usize,
+        stack: String,
         needed: usize,
         available: usize,
     },
     UnbalancedReturn {
         index: usize,
-        stack_depth: usize,
+        int_stack: usize,
+        obj_stack: usize,
+        long_stack: usize,
     },
     MissingReturn,
 }
@@ -58,21 +62,113 @@ impl ValidationReport {
     }
 }
 
-// ── Stack types ──
+// ── Three typed stacks (matching the Ignis runtime) ──
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum StackType {
-    Int,
-    Long,
-    String,
+struct TypedStacks {
+    ints: Vec<()>,
+    objects: Vec<()>,
+    longs: Vec<()>,
 }
 
-impl std::fmt::Display for StackType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Int => write!(f, "int"),
-            Self::Long => write!(f, "long"),
-            Self::String => write!(f, "string"),
+impl TypedStacks {
+    fn new() -> Self {
+        Self {
+            ints: Vec::new(),
+            objects: Vec::new(),
+            longs: Vec::new(),
+        }
+    }
+}
+
+/// Per-stack pop/push counts resulting from an instruction.
+struct StackEffect {
+    pops_int: usize,
+    pops_obj: usize,
+    pops_long: usize,
+    pushes_int: usize,
+    pushes_obj: usize,
+    pushes_long: usize,
+}
+
+impl StackEffect {
+    const fn int_push(n: usize) -> Self {
+        Self {
+            pushes_int: n,
+            pushes_obj: 0,
+            pushes_long: 0,
+            pops_int: 0,
+            pops_obj: 0,
+            pops_long: 0,
+        }
+    }
+    const fn obj_push(n: usize) -> Self {
+        Self {
+            pushes_obj: n,
+            pushes_int: 0,
+            pushes_long: 0,
+            pops_int: 0,
+            pops_obj: 0,
+            pops_long: 0,
+        }
+    }
+    const fn long_push(n: usize) -> Self {
+        Self {
+            pushes_long: n,
+            pushes_int: 0,
+            pushes_obj: 0,
+            pops_int: 0,
+            pops_obj: 0,
+            pops_long: 0,
+        }
+    }
+    const fn int_pop(n: usize) -> Self {
+        Self {
+            pops_int: n,
+            pops_obj: 0,
+            pops_long: 0,
+            pushes_int: 0,
+            pushes_obj: 0,
+            pushes_long: 0,
+        }
+    }
+    const fn int_op(n: usize) -> Self {
+        Self {
+            pops_int: n,
+            pushes_int: 1,
+            pops_obj: 0,
+            pops_long: 0,
+            pushes_obj: 0,
+            pushes_long: 0,
+        }
+    }
+    const fn obj_pop(n: usize) -> Self {
+        Self {
+            pops_obj: n,
+            pops_int: 0,
+            pops_long: 0,
+            pushes_int: 0,
+            pushes_obj: 0,
+            pushes_long: 0,
+        }
+    }
+    const fn long_pop(n: usize) -> Self {
+        Self {
+            pops_long: n,
+            pops_int: 0,
+            pops_obj: 0,
+            pushes_int: 0,
+            pushes_obj: 0,
+            pushes_long: 0,
+        }
+    }
+    const fn none() -> Self {
+        Self {
+            pops_int: 0,
+            pops_obj: 0,
+            pops_long: 0,
+            pushes_int: 0,
+            pushes_obj: 0,
+            pushes_long: 0,
         }
     }
 }
@@ -156,27 +252,23 @@ impl<'a> Cs2Validator<'a> {
     }
 
     fn pass_stack(&self, script: &CompiledScript, report: &mut ValidationReport) {
-        let mut stack: Vec<StackType> = Vec::new();
+        let mut stacks = TypedStacks::new();
 
         for (i, instr) in script.code.iter().enumerate() {
-            let effect = Self::stack_effect_for(&instr.command);
+            let effect = self.stack_effect_for(instr);
 
-            if effect.pops > stack.len() {
-                report.errors.push(ValidationError::StackUnderflow {
-                    index: i,
-                    needed: effect.pops,
-                    available: stack.len(),
-                });
-                stack.clear();
-            } else {
-                for _ in 0..effect.pops {
-                    stack.pop();
-                }
+            Self::apply_pop(&mut stacks.ints, effect.pops_int, i, "int", report);
+            Self::apply_pop(&mut stacks.objects, effect.pops_obj, i, "obj", report);
+            Self::apply_pop(&mut stacks.longs, effect.pops_long, i, "long", report);
+
+            for _ in 0..effect.pushes_int {
+                stacks.ints.push(());
             }
-
-            let push_type = Self::push_type_for(&instr.command, &instr.operand);
-            for _ in 0..effect.pushes {
-                stack.push(push_type);
+            for _ in 0..effect.pushes_obj {
+                stacks.objects.push(());
+            }
+            for _ in 0..effect.pushes_long {
+                stacks.longs.push(());
             }
         }
 
@@ -186,6 +278,27 @@ impl<'a> Cs2Validator<'a> {
                 .warnings
                 .push(format!("ends with '{cmd}' (expected 'return' or 'branch')")),
             None => report.errors.push(ValidationError::MissingReturn),
+        }
+    }
+
+    fn apply_pop(
+        stack: &mut Vec<()>,
+        needed: usize,
+        index: usize,
+        label: &str,
+        report: &mut ValidationReport,
+    ) {
+        let available = stack.len();
+        if available < needed {
+            report.errors.push(ValidationError::StackUnderflow {
+                index,
+                stack: label.to_string(),
+                needed,
+                available,
+            });
+            stack.clear();
+        } else {
+            stack.truncate(available - needed);
         }
     }
 
@@ -228,30 +341,64 @@ impl<'a> Cs2Validator<'a> {
         }
     }
 
-    fn stack_effect_for(cmd: &str) -> StackEffect {
-        match cmd {
-            "push_constant_int" | "push_long_constant" | "push_constant_string" => {
-                StackEffect { pops: 0, pushes: 1 }
-            }
-            "push_var" | "push_varbit" | "pop_varbit" => StackEffect { pops: 0, pushes: 1 },
-            "push_int_local" | "push_string_local" | "push_long_local" => {
-                StackEffect { pops: 0, pushes: 1 }
-            }
-            "pop_int_local" | "pop_string_local" | "pop_long_local" | "pop_var" => {
-                StackEffect { pops: 1, pushes: 0 }
-            }
-            "pop_int_discard" | "pop_string_discard" | "pop_long_discard" => {
-                StackEffect { pops: 1, pushes: 0 }
-            }
-            "add" | "sub" | "multiply" | "divide" | "mod" | "and" | "or" | "compare" => {
-                StackEffect { pops: 2, pushes: 1 }
-            }
-            "lowercase" | "uppercase" | "length" | "neg" => StackEffect { pops: 1, pushes: 1 },
-            "join_string" => StackEffect { pops: 2, pushes: 1 },
-            "branch" => StackEffect { pops: 0, pushes: 0 },
-            "branch_not" | "branch_if_true" | "branch_if_false" => {
-                StackEffect { pops: 1, pushes: 0 }
-            }
+    // Based on Ignis ClientScriptState runtime: three typed stacks
+    // (intStack/isp, objectStack/osp, longStack/lsp).
+    fn stack_effect_for(&self, instr: &crate::script::Instruction) -> StackEffect {
+        let cmd = &instr.command;
+        match cmd.as_str() {
+            // ── Integer pushes ──
+            "push_constant_int" => StackEffect::int_push(1),
+            "push_int_local" => StackEffect::int_push(1),
+
+            // ── Object (string) pushes ──
+            "push_constant_string" => StackEffect::obj_push(1),
+            "push_string_local" => StackEffect::obj_push(1),
+
+            // ── Long pushes ──
+            "push_long_constant" | "push_constant_long" => StackEffect::long_push(1),
+            "push_long_local" => StackEffect::long_push(1),
+
+            // ── push_var: resolve varp type to determine int/obj/long ──
+            "push_var" => self.varp_stack_effect_for(&instr.operand, true),
+
+            // ── Integer pops ──
+            "pop_int_local" => StackEffect::int_pop(1),
+            "pop_int_discard" => StackEffect::int_pop(1),
+
+            // ── Object pops ──
+            "pop_string_local" => StackEffect::obj_pop(1),
+            "pop_string_discard" => StackEffect::obj_pop(1),
+
+            // ── Long pops ──
+            "pop_long_local" | "pop_long_discard" => StackEffect::long_pop(1),
+
+            // ── pop_var: resolve varp type ──
+            "pop_var" => self.varp_stack_effect_for(&instr.operand, false),
+
+            // ── Integer arithmetic: pop 2, push 1 ──
+            "add" | "sub" | "multiply" | "divide" | "mod" => StackEffect::int_op(2),
+
+            // ── Logical: pop 2 ints, push 1 int ──
+            "and" | "or" | "compare" => StackEffect::int_op(2),
+
+            // ── String ops: pop 1 obj, push 1 ──
+            "lowercase" | "uppercase" | "length" => StackEffect {
+                pops_obj: 1,
+                pushes_obj: 1,
+                ..StackEffect::none()
+            },
+            "join_string" => StackEffect {
+                pops_obj: 2,
+                pushes_obj: 1,
+                ..StackEffect::none()
+            },
+
+            // ── Unary int: pop 1, push 1 ──
+            "neg" => StackEffect::int_op(1),
+
+            // ── Control flow: no stack effect ──
+            "branch" => StackEffect::none(),
+            "branch_not" | "branch_if_true" | "branch_if_false" => StackEffect::int_pop(1),
             "branch_equals"
             | "branch_less_than"
             | "branch_greater_than"
@@ -261,43 +408,89 @@ impl<'a> Cs2Validator<'a> {
             | "long_branch_less_than"
             | "long_branch_greater_than"
             | "long_branch_less_than_or_equals"
-            | "long_branch_greater_than_or_equals" => StackEffect { pops: 2, pushes: 0 },
-            "switch" => StackEffect { pops: 1, pushes: 0 },
-            "return" => StackEffect { pops: 0, pushes: 0 },
-            "gosub_with_params" => StackEffect { pops: 1, pushes: 1 },
-            "define_array" => StackEffect { pops: 0, pushes: 0 },
-            "push_array_int" | "push_array_string" => StackEffect { pops: 1, pushes: 1 },
-            "pop_array_int" | "pop_array_string" => StackEffect { pops: 2, pushes: 0 },
-            _ if cmd.starts_with("cc_") || cmd.starts_with("if_") => {
-                StackEffect { pops: 2, pushes: 0 }
-            }
-            _ if cmd.starts_with("push_") => StackEffect { pops: 0, pushes: 1 },
-            _ if cmd.starts_with("pop_")
-                || cmd.starts_with("branch_")
-                || cmd.starts_with("long_branch_") =>
-            {
-                StackEffect { pops: 1, pushes: 0 }
-            }
-            _ => StackEffect { pops: 0, pushes: 0 },
-        }
-    }
-
-    fn push_type_for(cmd: &str, operand: &Operand) -> StackType {
-        match cmd {
-            "push_long_constant" | "push_long_local" => StackType::Long,
-            "push_constant_string" | "push_string_local" => StackType::String,
-            _ => match operand {
-                Operand::Long(_) => StackType::Long,
-                Operand::Str(_) => StackType::String,
-                _ => StackType::Int,
+            | "long_branch_greater_than_or_equals" => StackEffect {
+                pops_int: 2,
+                ..StackEffect::none()
             },
+            "switch" => StackEffect::int_pop(1),
+            "return" => StackEffect::none(),
+            "gosub_with_params" => StackEffect {
+                pops_int: 1,
+                pushes_int: 1,
+                ..StackEffect::none()
+            },
+
+            // ── Array ops ──
+            "define_array" => StackEffect::none(),
+            "push_array_int" => StackEffect {
+                pops_int: 1,
+                pushes_int: 1,
+                ..StackEffect::none()
+            },
+            "pop_array_int" => StackEffect {
+                pops_int: 2,
+                ..StackEffect::none()
+            },
+            "push_array_string" => StackEffect {
+                pops_obj: 1,
+                pushes_obj: 1,
+                ..StackEffect::none()
+            },
+            "pop_array_string" => StackEffect {
+                pops_obj: 2,
+                ..StackEffect::none()
+            },
+
+            // ── Varbit: pops int for bit index, pushes int value ──
+            "push_varbit" => StackEffect::int_push(1),
+            "pop_varbit" => StackEffect::int_pop(1),
+
+            // ── Engine commands (cc_*, if_*): conservatively assume int args ──
+            _ if cmd.starts_with("cc_") || cmd.starts_with("if_") => StackEffect {
+                pops_int: 2,
+                ..StackEffect::none()
+            },
+
+            // ── Fallback patterns ──
+            _ if cmd.starts_with("push_") => StackEffect::int_push(1),
+            _ if cmd.starts_with("pop_") => StackEffect::int_pop(1),
+            _ if cmd.starts_with("branch_") || cmd.starts_with("long_branch_") => {
+                StackEffect::int_pop(1)
+            }
+            _ => StackEffect::none(),
         }
     }
-}
 
-struct StackEffect {
-    pops: usize,
-    pushes: usize,
+    /// Resolve a varp reference to determine which stack `push_var`/`pop_var` affects.
+    fn varp_stack_effect_for(&self, operand: &Operand, is_push: bool) -> StackEffect {
+        if let Operand::VarRef(vr) = operand {
+            let type_id = self
+                .ctx
+                .varps_by_domain
+                .get(&vr.domain)
+                .and_then(|vars| vars.get(&u32::from(vr.id)))
+                .and_then(|v| v.type_id);
+            match type_id {
+                // type_id 1 = long, 2 = string, 0/None/N = int
+                Some(1) if is_push => StackEffect::long_push(1),
+                Some(1) => StackEffect {
+                    pops_long: 1,
+                    ..StackEffect::none()
+                },
+                Some(2) if is_push => StackEffect::obj_push(1),
+                Some(2) => StackEffect {
+                    pops_obj: 1,
+                    ..StackEffect::none()
+                },
+                _ if is_push => StackEffect::int_push(1),
+                _ => StackEffect::int_pop(1),
+            }
+        } else if is_push {
+            StackEffect::int_push(1)
+        } else {
+            StackEffect::int_pop(1)
+        }
+    }
 }
 
 // ── Batch validation ──
