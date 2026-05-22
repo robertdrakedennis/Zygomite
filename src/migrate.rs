@@ -341,6 +341,49 @@ fn non_empty(diffs: Vec<FieldDiff>) -> Option<Vec<FieldDiff>> {
     if diffs.is_empty() { None } else { Some(diffs) }
 }
 
+/// Shared pattern for all compare methods: returns (SAFE, None) or
+/// (`changed_status`, `diffs`) when both source and target exist.
+fn compare_pair<S, T>(
+    source: Option<&S>,
+    target: Option<&T>,
+    build_diffs: impl FnOnce(&S, &T) -> Vec<FieldDiff>,
+    changed_status: ConflictStatus,
+) -> (ConflictStatus, Option<Vec<FieldDiff>>) {
+    match (source, target) {
+        (Some(_), None) => (ConflictStatus::Missing, None),
+        (None, Some(_)) => (ConflictStatus::IdConflict, None),
+        (None, None) => (ConflictStatus::Missing, None),
+        (Some(s), Some(t)) => {
+            let diffs = build_diffs(s, t);
+            (
+                if diffs.is_empty() {
+                    ConflictStatus::Safe
+                } else {
+                    changed_status
+                },
+                non_empty(diffs),
+            )
+        }
+    }
+}
+
+/// Accumulate conflict counts from a slice of entities.
+fn accumulate_summary(entities: &[ConflictEntry]) -> ConflictSummary {
+    let mut s = ConflictSummary::default();
+    for e in entities {
+        match e.status {
+            ConflictStatus::Safe => s.safe += 1,
+            ConflictStatus::Missing => s.missing += 1,
+            ConflictStatus::IdConflict => s.id_conflict += 1,
+            ConflictStatus::Changed => s.changed += 1,
+            ConflictStatus::ScriptChanged => s.script_changed += 1,
+            ConflictStatus::Unknown => s.unknown += 1,
+            ConflictStatus::Asset => s.asset += 1,
+        }
+    }
+    s
+}
+
 fn format_scalar_opt(v: &Option<ScalarValue>) -> String {
     match v {
         Some(ScalarValue::Int(i)) => i.to_string(),
@@ -657,11 +700,10 @@ impl MigrationAnalyzer {
         let domain = Self::entity_type_to_domain(entity_type);
         let s = domain.and_then(|d| self.source.varps_by_domain.get(&d).and_then(|v| v.get(&id)));
         let t = domain.and_then(|d| self.target.varps_by_domain.get(&d).and_then(|v| v.get(&id)));
-        match (s, t) {
-            (Some(_), None) => (ConflictStatus::Missing, None),
-            (None, Some(_)) => (ConflictStatus::IdConflict, None),
-            (None, None) => (ConflictStatus::Missing, None),
-            (Some(s), Some(t)) => {
+        compare_pair(
+            s,
+            t,
+            |s, t| {
                 let mut diffs = Vec::new();
                 push_diff(&mut diffs, "name", &s.var_name, &t.var_name);
                 push_diff_opt(&mut diffs, "type_id", &s.type_id, &t.type_id);
@@ -680,16 +722,10 @@ impl MigrationAnalyzer {
                     &t.domain_default,
                 );
                 push_diff(&mut diffs, "wiki_sync", &s.wiki_sync, &t.wiki_sync);
-                (
-                    if diffs.is_empty() {
-                        ConflictStatus::Safe
-                    } else {
-                        ConflictStatus::Changed
-                    },
-                    non_empty(diffs),
-                )
-            }
-        }
+                diffs
+            },
+            ConflictStatus::Changed,
+        )
     }
 
     fn compare_varbit(&self, id: u32) -> (ConflictStatus, Option<Vec<FieldDiff>>) {
@@ -1026,18 +1062,7 @@ impl MigrationAnalyzer {
     }
 
     fn build_report(&self, group_id: u32, entities: Vec<ConflictEntry>) -> ConflictReport {
-        let mut summary = ConflictSummary::default();
-        for e in &entities {
-            match e.status {
-                ConflictStatus::Safe => summary.safe += 1,
-                ConflictStatus::Missing => summary.missing += 1,
-                ConflictStatus::IdConflict => summary.id_conflict += 1,
-                ConflictStatus::Changed => summary.changed += 1,
-                ConflictStatus::ScriptChanged => summary.script_changed += 1,
-                ConflictStatus::Unknown => summary.unknown += 1,
-                ConflictStatus::Asset => summary.asset += 1,
-            }
-        }
+        let summary = accumulate_summary(&entities);
         let components = self.source.parsed_components.get(&group_id);
         ConflictReport {
             source_build: self.source.build,
@@ -1088,18 +1113,7 @@ impl MigrationAnalyzer {
         );
         self.walk_script(script_id, &mut entities, &mut visited);
 
-        let mut summary = ConflictSummary::default();
-        for e in &entities {
-            match e.status {
-                ConflictStatus::Safe => summary.safe += 1,
-                ConflictStatus::Missing => summary.missing += 1,
-                ConflictStatus::IdConflict => summary.id_conflict += 1,
-                ConflictStatus::Changed => summary.changed += 1,
-                ConflictStatus::ScriptChanged => summary.script_changed += 1,
-                ConflictStatus::Unknown => summary.unknown += 1,
-                ConflictStatus::Asset => summary.asset += 1,
-            }
-        }
+        let summary = accumulate_summary(&entities);
 
         let script_name = self
             .source
