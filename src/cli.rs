@@ -217,6 +217,13 @@ pub enum Command {
         #[arg(long, default_value_t = 10000)]
         remap_buffer: u32,
     },
+    /// Validate a CS2 script's bytecode against the target build.
+    ValidateScript {
+        #[arg(long)]
+        script_id: u32,
+        #[arg(long)]
+        out_file: Option<PathBuf>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -723,6 +730,17 @@ pub fn run(cli: Cli) -> Result<()> {
             source_subbuild,
             remap,
             remap_buffer,
+        ),
+        Command::ValidateScript {
+            script_id,
+            out_file,
+        } => run_validate_script(
+            &cache,
+            &tar_path,
+            &cli.data_dir,
+            script_id,
+            out_file.as_deref(),
+            version,
         ),
     }
 }
@@ -3487,6 +3505,82 @@ fn run_dep_tree_config(
         tree.cycles_detected,
         tree.max_depth_hits
     );
+    Ok(())
+}
+
+fn run_validate_script(
+    cache: &FlatCache,
+    tar_path: &Path,
+    data_dir: &Path,
+    script_id: u32,
+    out_file: Option<&Path>,
+    version: RuntimeVersion,
+) -> Result<()> {
+    let ctx = ResolverContext::load(cache, tar_path, data_dir, version.build, version.subbuild)?;
+    let validator = crate::validate::Cs2Validator::new(&ctx);
+    let report = validator.validate(script_id);
+
+    if let Some(path) = out_file {
+        let json = serde_json::to_string_pretty(&report)?;
+        std::fs::write(path, &json)?;
+        eprintln!("validation report written to {}", path.display());
+    } else {
+        let name = report.script_name.as_deref().unwrap_or("(unnamed)");
+        eprintln!(
+            "script_{id} \"{name}\" ({count} instructions, build {build})",
+            id = report.script_id,
+            count = report.instruction_count,
+            build = report.build
+        );
+        if report.errors.is_empty() {
+            eprintln!("  [PASS] 0 errors");
+        } else {
+            for err in &report.errors {
+                match err {
+                    crate::validate::ValidationError::UnknownOpcode { index, opcode } => {
+                        eprintln!("  FAIL [{index}] unknown opcode {opcode}");
+                    }
+                    crate::validate::ValidationError::InvalidBranchTarget {
+                        index,
+                        target,
+                        total_instructions,
+                    } => {
+                        eprintln!(
+                            "  FAIL [{index}] branch target {target} out of range (0..{total_instructions})"
+                        );
+                    }
+                    crate::validate::ValidationError::VarpNotFound { index, domain, id } => {
+                        eprintln!("  FAIL [{index}] varp {domain}:{id} not found");
+                    }
+                    crate::validate::ValidationError::VarbitNotFound { index, id } => {
+                        eprintln!("  FAIL [{index}] varbit {id} not found");
+                    }
+                    crate::validate::ValidationError::ScriptNotFound { index, called_id } => {
+                        eprintln!("  FAIL [{index}] called script {called_id} not found");
+                    }
+                    crate::validate::ValidationError::StackUnderflow {
+                        index,
+                        needed,
+                        available,
+                    } => {
+                        eprintln!(
+                            "  FAIL [{index}] stack underflow: needs {needed}, has {available}"
+                        );
+                    }
+                    crate::validate::ValidationError::UnbalancedReturn { index, stack_depth } => {
+                        eprintln!("  FAIL [{index}] return with {stack_depth} values on stack");
+                    }
+                    crate::validate::ValidationError::MissingReturn => {
+                        eprintln!("  FAIL missing return statement");
+                    }
+                }
+            }
+            eprintln!("  {} error(s)", report.errors.len());
+        }
+        for warn in &report.warnings {
+            eprintln!("  WARN {warn}");
+        }
+    }
     Ok(())
 }
 

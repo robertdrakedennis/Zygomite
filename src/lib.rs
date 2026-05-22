@@ -56,5 +56,6 @@ pub mod packet;
 pub mod script;
 pub mod script_transpile;
 pub mod transpile;
+pub mod validate;
 pub mod vars;
 pub mod vfx;
