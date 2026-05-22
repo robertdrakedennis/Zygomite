@@ -183,6 +183,18 @@ pub enum Command {
         #[arg(long, default_value_t = 100)]
         max_scripts: usize,
     },
+    MigrateCheck {
+        #[arg(long)]
+        interface_group: u32,
+        #[arg(long)]
+        out_file: PathBuf,
+        #[arg(long)]
+        source_cache_tar: Option<PathBuf>,
+        #[arg(long, default_value_t = 947)]
+        source_build: u32,
+        #[arg(long, default_value_t = 1)]
+        source_subbuild: u32,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -647,6 +659,23 @@ pub fn run(cli: Cli) -> Result<()> {
             filter_script.as_deref(),
             max_scripts,
             version,
+        ),
+        Command::MigrateCheck {
+            interface_group,
+            out_file,
+            source_cache_tar,
+            source_build,
+            source_subbuild,
+        } => run_migrate_check(
+            &cache,
+            &tar_path,
+            &cli.data_dir,
+            interface_group,
+            &out_file,
+            version,
+            source_cache_tar.as_deref(),
+            source_build,
+            source_subbuild,
         ),
     }
 }
@@ -3410,6 +3439,50 @@ fn run_dep_tree_config(
         tree.total_nodes,
         tree.cycles_detected,
         tree.max_depth_hits
+    );
+    Ok(())
+}
+
+// Loads both source and target caches for migration impact analysis.
+#[allow(clippy::too_many_arguments)]
+fn run_migrate_check(
+    cache: &FlatCache,
+    tar_path: &Path,
+    data_dir: &Path,
+    interface_group: u32,
+    out_file: &Path,
+    target_version: RuntimeVersion,
+    source_cache_tar: Option<&Path>,
+    source_build: u32,
+    source_subbuild: u32,
+) -> Result<()> {
+    let target_ctx = ResolverContext::load(
+        cache,
+        tar_path,
+        data_dir,
+        target_version.build,
+        target_version.subbuild,
+    )?;
+
+    let source_tar = source_cache_tar.unwrap_or(tar_path);
+    let source_ctx =
+        ResolverContext::load(cache, source_tar, data_dir, source_build, source_subbuild)?;
+
+    let analyzer = crate::migrate::MigrationAnalyzer::new(source_ctx, target_ctx);
+    let report = analyzer.analyze_interface(interface_group);
+
+    let json = serde_json::to_string_pretty(&report)?;
+    std::fs::write(out_file, &json)?;
+
+    eprintln!(
+        "migration report: {} entities ({} safe, {} missing, {} id_conflict, {} changed, {} script_changed) written to {}",
+        report.total_entities,
+        report.summary.safe,
+        report.summary.missing,
+        report.summary.id_conflict,
+        report.summary.changed,
+        report.summary.script_changed,
+        out_file.display()
     );
     Ok(())
 }

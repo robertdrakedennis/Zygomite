@@ -50,6 +50,7 @@ pub mod fixture;
 pub mod interface;
 pub mod js5;
 pub mod map;
+pub mod migrate;
 pub mod model;
 pub mod packet;
 pub mod script;

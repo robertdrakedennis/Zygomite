@@ -1594,7 +1594,7 @@ fn var_to_entity_ref(domain: &crate::interface::VarTransmitRef) -> EntityRef {
     }
 }
 
-fn var_ref_to_entity_ref(var_ref: &crate::script::VarRef) -> EntityRef {
+pub fn var_ref_to_entity_ref(var_ref: &crate::script::VarRef) -> EntityRef {
     let entity_type = var_domain_to_entity_type(var_ref.domain);
     EntityRef::new(entity_type, u32::from(var_ref.id))
 }
