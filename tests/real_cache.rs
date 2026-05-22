@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use rs3_cache_rs::animator::decode as decode_animator_controller;
 use rs3_cache_rs::audio::{AudioKind, inspect_audio_file};
 use rs3_cache_rs::cache::FlatCache;
@@ -45,7 +45,7 @@ use rs3_cache_rs::fixture::{
 use rs3_cache_rs::interface::render_interface_group;
 use rs3_cache_rs::map::decode_map_square;
 use rs3_cache_rs::model::Model;
-use rs3_cache_rs::script::{OpcodeBook, decode_script};
+use rs3_cache_rs::script::{OpcodeBook, decode_script, encode_script, parse_cs2_asm, script_to_asm};
 use rs3_cache_rs::vars::{VarDomain, parse_var, parse_varbit};
 use rs3_cache_rs::vfx::decode as decode_vfx;
 use std::path::PathBuf;
@@ -335,6 +335,195 @@ fn decodes_all_cs2_scripts_and_opcodes() -> Result<()> {
     assert!(unique.contains("push_varbit"));
     assert!(unique.contains("gosub_with_params"));
     assert!(unique.contains("switch"));
+    Ok(())
+}
+
+#[test]
+fn asm_encode_roundtrip_byte_perfect() -> Result<()> {
+    let _guard = lock_guard();
+    let cache_dir = cache_dir();
+    ensure_archive_complete(&cache_dir, &tar_path(), ARCHIVE_CLIENTSCRIPTS)?;
+    let cache = FlatCache::open(&cache_dir)?;
+    let index = cache.archive_index(ARCHIVE_CLIENTSCRIPTS)?;
+    let opcode_book = OpcodeBook::load(&data_dir(), BUILD, SUBBUILD)?;
+
+    let mut tested = 0usize;
+    let mut total_instructions = 0usize;
+
+    for group in &index.group_id {
+        let unpacked = cache.group_files_with_index(&index, ARCHIVE_CLIENTSCRIPTS, *group)?;
+        for (_, data) in unpacked {
+            if tested >= 100 {
+                break;
+            }
+
+            let original = decode_script(&data, &opcode_book, BUILD)?;
+
+            // Roundtrip 1: ASM format (decode → asm → parse → compare)
+            let asm = script_to_asm(&original);
+            let from_asm = parse_cs2_asm(&asm)
+                .with_context(|| format!("parse_cs2_asm failed for script {:?}", original.name))?;
+            assert_eq!(original.name, from_asm.name, "name mismatch via ASM");
+            assert_eq!(original.local_count_int, from_asm.local_count_int);
+            assert_eq!(original.local_count_object, from_asm.local_count_object);
+            assert_eq!(original.local_count_long, from_asm.local_count_long);
+            assert_eq!(original.argument_count_int, from_asm.argument_count_int);
+            assert_eq!(original.argument_count_object, from_asm.argument_count_object);
+            assert_eq!(original.argument_count_long, from_asm.argument_count_long);
+            assert_eq!(
+                original.code.len(),
+                from_asm.code.len(),
+                "instruction count mismatch via ASM"
+            );
+            for (i, (orig, parsed)) in original.code.iter().zip(from_asm.code.iter()).enumerate() {
+                assert_eq!(
+                    orig.command, parsed.command,
+                    "command mismatch at [{i}] via ASM"
+                );
+                assert_operand_eq(&orig.operand, &parsed.operand, i);
+            }
+
+            // Roundtrip 2: binary encode (decode → encode → decode → compare)
+            let encoded = encode_script(&original, &opcode_book, BUILD)?;
+            let re_decoded = decode_script(&encoded, &opcode_book, BUILD)?;
+            assert_eq!(original.name, re_decoded.name, "name mismatch via binary");
+            assert_eq!(original.local_count_int, re_decoded.local_count_int);
+            assert_eq!(original.local_count_object, re_decoded.local_count_object);
+            assert_eq!(original.local_count_long, re_decoded.local_count_long);
+            assert_eq!(original.argument_count_int, re_decoded.argument_count_int);
+            assert_eq!(original.argument_count_object, re_decoded.argument_count_object);
+            assert_eq!(original.argument_count_long, re_decoded.argument_count_long);
+            assert_eq!(
+                original.code.len(),
+                re_decoded.code.len(),
+                "instruction count mismatch via binary"
+            );
+            for (i, (orig, redec)) in original.code.iter().zip(re_decoded.code.iter()).enumerate() {
+                assert_eq!(
+                    orig.command, redec.command,
+                    "command mismatch at [{i}] via binary"
+                );
+                assert_operand_eq(&orig.operand, &redec.operand, i);
+            }
+
+            total_instructions += original.code.len();
+            tested += 1;
+        }
+        if tested >= 100 {
+            break;
+        }
+    }
+
+    eprintln!(
+        "Roundtrip OK: {tested} scripts, {total_instructions} total instructions"
+    );
+    Ok(())
+}
+
+fn assert_operand_eq(a: &rs3_cache_rs::script::Operand, b: &rs3_cache_rs::script::Operand, idx: usize) {
+    use rs3_cache_rs::script::Operand;
+    match (a, b) {
+        (Operand::Int(av), Operand::Int(bv)) => assert_eq!(av, bv, "operand Int mismatch at [{idx}]"),
+        (Operand::Long(av), Operand::Long(bv)) => assert_eq!(av, bv, "operand Long mismatch at [{idx}]"),
+        (Operand::Str(av), Operand::Str(bv)) => assert_eq!(av, bv, "operand Str mismatch at [{idx}]"),
+        (Operand::Local(av), Operand::Local(bv)) => assert_eq!(av, bv, "operand Local mismatch at [{idx}]"),
+        (Operand::VarRef(av), Operand::VarRef(bv)) => {
+            assert_eq!(av.domain, bv.domain, "VarRef domain mismatch at [{idx}]");
+            assert_eq!(av.id, bv.id, "VarRef id mismatch at [{idx}]");
+            assert_eq!(av.transmog, bv.transmog, "VarRef transmog mismatch at [{idx}]");
+        }
+        (Operand::VarBitRef(av), Operand::VarBitRef(bv)) => {
+            assert_eq!(av.id, bv.id, "VarBitRef id mismatch at [{idx}]");
+            assert_eq!(av.transmog, bv.transmog, "VarBitRef transmog mismatch at [{idx}]");
+        }
+        (Operand::Branch(av), Operand::Branch(bv)) => {
+            assert_eq!(av, bv, "Branch target mismatch at [{idx}]");
+        }
+        (Operand::Switch(av), Operand::Switch(bv)) => {
+            assert_eq!(av.len(), bv.len(), "Switch case count mismatch at [{idx}]");
+            for (j, (ac, bc)) in av.iter().zip(bv.iter()).enumerate() {
+                assert_eq!(ac.value, bc.value, "Switch case[{j}] value mismatch at [{idx}]");
+                assert_eq!(ac.target, bc.target, "Switch case[{j}] target mismatch at [{idx}]");
+            }
+        }
+        (Operand::Script(av), Operand::Script(bv)) => assert_eq!(av, bv, "Script operand mismatch at [{idx}]"),
+        (Operand::Array(av), Operand::Array(bv)) => assert_eq!(av, bv, "Array operand mismatch at [{idx}]"),
+        (Operand::Count(av), Operand::Count(bv)) => assert_eq!(av, bv, "Count operand mismatch at [{idx}]"),
+        (Operand::Byte(av), Operand::Byte(bv)) => assert_eq!(av, bv, "Byte operand mismatch at [{idx}]"),
+        _ => panic!("operand type mismatch at [{idx}]: {a:?} vs {b:?}"),
+    }
+}
+
+#[test]
+fn asm_encode_roundtrip_byte_perfect_910() -> Result<()> {
+    const BUILD_910: u32 = 910;
+    const DEFAULT_910_CACHE: &str = "/tmp/rs3-cache-rs-910/cache";
+    const DEFAULT_910_TAR: &str = "/Users/robert/projects/ignis/static/cache-runescape-live-en-b910-2019-12-11-00-00-00-openrs2#1730.tar";
+
+    let cache_dir =
+        std::env::var("RS3_CACHE_DIR_910").map_or_else(|_| PathBuf::from(DEFAULT_910_CACHE), PathBuf::from);
+    if !cache_dir.join("255/12.dat").is_file() {
+        eprintln!("SKIP (no 910 cache at {})", cache_dir.display());
+        return Ok(());
+    }
+
+    let tar =
+        std::env::var("RS3_CACHE_TAR_910").map_or_else(|_| PathBuf::from(DEFAULT_910_TAR), PathBuf::from);
+
+    let _guard = lock_guard();
+    ensure_archive_complete(&cache_dir, &tar, ARCHIVE_CLIENTSCRIPTS)?;
+    let cache = FlatCache::open(&cache_dir)?;
+    let index = cache.archive_index(ARCHIVE_CLIENTSCRIPTS)?;
+    let opcode_book = OpcodeBook::load(&data_dir(), BUILD_910, 0)?;
+
+    let mut tested = 0usize;
+    let mut total_instructions = 0usize;
+
+    for group in &index.group_id {
+        let unpacked = cache.group_files_with_index(&index, ARCHIVE_CLIENTSCRIPTS, *group)?;
+        for (_, data) in unpacked {
+            if tested >= 100 {
+                break;
+            }
+
+            let original = decode_script(&data, &opcode_book, BUILD_910)?;
+
+            // ASM roundtrip
+            let asm = script_to_asm(&original);
+            let from_asm = parse_cs2_asm(&asm)?;
+            assert_eq!(original.name, from_asm.name, "910 name mismatch via ASM");
+            assert_eq!(original.code.len(), from_asm.code.len(), "910 instr count via ASM");
+            for (i, (orig, parsed)) in original.code.iter().zip(from_asm.code.iter()).enumerate()
+            {
+                assert_eq!(orig.command, parsed.command, "910 cmd mismatch [{i}] via ASM");
+                assert_operand_eq(&orig.operand, &parsed.operand, i);
+            }
+
+            // Binary roundtrip
+            let encoded = encode_script(&original, &opcode_book, BUILD_910)?;
+            let re_decoded = decode_script(&encoded, &opcode_book, BUILD_910)?;
+            assert_eq!(original.name, re_decoded.name, "910 name mismatch via binary");
+            assert_eq!(
+                original.code.len(),
+                re_decoded.code.len(),
+                "910 instr count via binary"
+            );
+            for (i, (orig, redec)) in original.code.iter().zip(re_decoded.code.iter()).enumerate() {
+                assert_eq!(orig.command, redec.command, "910 cmd mismatch [{i}] via binary");
+                assert_operand_eq(&orig.operand, &redec.operand, i);
+            }
+
+            total_instructions += original.code.len();
+            tested += 1;
+        }
+        if tested >= 100 {
+            break;
+        }
+    }
+
+    eprintln!(
+        "Roundtrip OK (build 910): {tested} scripts, {total_instructions} total instructions"
+    );
     Ok(())
 }
 

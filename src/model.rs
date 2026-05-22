@@ -22,6 +22,7 @@ pub struct Model {
 }
 
 #[derive(Clone, Debug, Serialize)]
+// RS3 model mesh flags are inherently many independent rendering booleans.
 #[allow(clippy::struct_excessive_bools)]
 pub struct Mesh {
     pub group_flags: u8,
@@ -55,6 +56,7 @@ pub enum UvBuffer {
 }
 
 #[derive(Clone, Debug, Serialize)]
+// RS3 model mesh data flags include face/material booleans.
 #[allow(clippy::struct_excessive_bools)]
 pub struct MeshData {
     pub group_flags: u8,
@@ -80,6 +82,7 @@ pub struct MeshData {
 }
 
 #[derive(Clone, Debug, Serialize)]
+// RS3 model render flags include face/lighting/color booleans.
 #[allow(clippy::struct_excessive_bools)]
 pub struct Render {
     pub group_flags: u8,
