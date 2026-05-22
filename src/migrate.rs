@@ -289,6 +289,38 @@ fn push_diff_opt<T: std::fmt::Debug + PartialEq>(
     }
 }
 
+/// Returns `(pop_count, asset_entity_type)` for asset-related commands.
+/// Returns `(0, None)` for non-asset or unknown commands.
+fn asset_command_info(cmd: &str) -> (usize, Option<EntityType>) {
+    // Commands that consume asset IDs from the stack.
+    // Returns (total_pops, Some(asset_type)) for asset commands.
+    // The last-popped (first-pushed) value is the asset reference.
+    if cmd.contains("model") {
+        if cmd.contains("angle")
+            || cmd.contains("zoom")
+            || cmd.contains("xof")
+            || cmd.contains("yof")
+        {
+            return (0, None);
+        }
+        (2, Some(EntityType::Model)) // pops (comp_id, model_id)
+    } else if cmd.contains("graphic") || cmd.contains("sprite") {
+        (2, Some(EntityType::Graphic))
+    } else if cmd.contains("cursor") {
+        (2, Some(EntityType::Cursor))
+    } else if cmd.contains("font") {
+        (2, Some(EntityType::FontMetrics))
+    } else if cmd.contains("texture") {
+        (2, Some(EntityType::Texture))
+    } else if cmd.contains("stylesheet") || cmd.contains("style") {
+        (2, Some(EntityType::Stylesheet))
+    } else if cmd.contains("seq") || cmd.contains("anim") {
+        (2, Some(EntityType::Seq))
+    } else {
+        (0, None)
+    }
+}
+
 fn alloc_for(alloc: &mut AllocationInfo, domain: VarDomain) -> &mut RangeAlloc {
     match domain {
         VarDomain::Player => &mut alloc.varps_player,
@@ -453,6 +485,7 @@ impl MigrationAnalyzer {
         visited: &mut HashSet<EntityKey>,
     ) {
         if let Some(script) = self.source.decoded_scripts.get(&script_id) {
+            // ── Pass 1: operand-level deps (varps, varbits, script calls) ──
             for instruction in &script.code {
                 match &instruction.operand {
                     crate::script::Operand::VarRef(var_ref) => {
@@ -482,6 +515,41 @@ impl MigrationAnalyzer {
                         }
                     }
                     _ => {}
+                }
+            }
+
+            // ── Pass 2: stack simulation for asset references ──
+            // Track pushed int constants and record them as asset deps
+            // when consumed by asset-related cc_/if_ commands.
+            let mut stack: Vec<u32> = Vec::new();
+            for instruction in &script.code {
+                match &instruction.operand {
+                    crate::script::Operand::Int(val)
+                        if instruction.command == "push_constant_int" =>
+                    {
+                        stack.push(*val as u32);
+                    }
+                    _ => {
+                        let name = &instruction.command;
+                        let (pops, asset_type) = asset_command_info(name);
+                        if let Some(at) = asset_type {
+                            // Pop args from stack. The last popped value is the
+                            // first pushed, which is the asset ID.
+                            let mut popped = Vec::new();
+                            for _ in 0..pops {
+                                if let Some(v) = stack.pop() {
+                                    popped.push(v);
+                                }
+                            }
+                            // First pushed (last popped) = asset reference
+                            if let Some(&asset_id) = popped.last() {
+                                let key = EntityKey::new(at, asset_id);
+                                if visited.insert(key) {
+                                    self.collect_entity(at, asset_id, None, entities, visited);
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
