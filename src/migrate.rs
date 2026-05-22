@@ -18,6 +18,9 @@ pub enum ConflictStatus {
     Changed,
     ScriptChanged,
     Unknown,
+    /// Asset (model, graphic, cursor, texture, etc.) — tracked but
+    /// cannot be deeply compared without loading the archive content.
+    Asset,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -75,6 +78,9 @@ pub struct ConflictSummary {
     pub changed: usize,
     pub script_changed: usize,
     pub unknown: usize,
+    /// Assets (models, graphics, cursors, textures, fonts, stylesheets)
+    /// that were tracked but cannot be deeply compared.
+    pub asset: usize,
 }
 
 /// A conflict report for a single script and its transitive dependencies.
@@ -411,6 +417,33 @@ impl MigrationAnalyzer {
                 self.collect_entity(EntityType::Inv, inv_id, None, entities, visited);
             }
         }
+        // Asset types tracked for completeness; cannot be deeply
+        // compared without full archive loading.
+        for &cursor_id in &comp_deps.cursors {
+            if visited.insert(EntityKey::new(EntityType::Cursor, cursor_id)) {
+                self.collect_entity(EntityType::Cursor, cursor_id, None, entities, visited);
+            }
+        }
+        for &font_id in &comp_deps.fontmetrics {
+            if visited.insert(EntityKey::new(EntityType::FontMetrics, font_id)) {
+                self.collect_entity(EntityType::FontMetrics, font_id, None, entities, visited);
+            }
+        }
+        for &tex_id in &comp_deps.textures {
+            if visited.insert(EntityKey::new(EntityType::Texture, tex_id)) {
+                self.collect_entity(EntityType::Texture, tex_id, None, entities, visited);
+            }
+        }
+        for &ss_id in &comp_deps.stylesheets {
+            if visited.insert(EntityKey::new(EntityType::Stylesheet, ss_id)) {
+                self.collect_entity(EntityType::Stylesheet, ss_id, None, entities, visited);
+            }
+        }
+        for &stat_id in &comp_deps.stats {
+            if visited.insert(EntityKey::new(EntityType::Config, stat_id)) {
+                self.collect_entity(EntityType::Config, stat_id, None, entities, visited);
+            }
+        }
     }
 
     fn walk_script(
@@ -499,7 +532,52 @@ impl MigrationAnalyzer {
             EntityType::Param => self.compare_param(id),
             EntityType::Seq => self.compare_seq(id),
             EntityType::Component => self.compare_component(id),
+            EntityType::Inv => self.compare_inv(id),
+            // Asset types — tracked for completeness, no deep comparison.
+            EntityType::Model
+            | EntityType::Graphic
+            | EntityType::Cursor
+            | EntityType::FontMetrics
+            | EntityType::Texture
+            | EntityType::Stylesheet
+            | EntityType::Config => self.compare_asset(entity_type, id),
             _ => (ConflictStatus::Unknown, None),
+        }
+    }
+
+    fn compare_asset(
+        &self,
+        _entity_type: EntityType,
+        id: u32,
+    ) -> (ConflictStatus, Option<Vec<FieldDiff>>) {
+        let source_exists = self.source.interfaces.values().any(|g| g.contains_key(&id));
+        let target_exists = self.target.interfaces.values().any(|g| g.contains_key(&id));
+
+        match (source_exists, target_exists) {
+            (true, false) => (ConflictStatus::Missing, None),
+            (false, true) => (ConflictStatus::IdConflict, None),
+            _ => (ConflictStatus::Asset, None),
+        }
+    }
+
+    fn compare_inv(&self, id: u32) -> (ConflictStatus, Option<Vec<FieldDiff>>) {
+        match (self.source.invs.get(&id), self.target.invs.get(&id)) {
+            (Some(_), None) => (ConflictStatus::Missing, None),
+            (None, Some(_)) => (ConflictStatus::IdConflict, None),
+            (None, None) => (ConflictStatus::Missing, None),
+            (Some(s), Some(t)) => {
+                let mut diffs = Vec::new();
+                push_diff_opt(&mut diffs, "size", &s.size, &t.size);
+                push_diff(&mut diffs, "stock_count", &s.stocks.len(), &t.stocks.len());
+                (
+                    if diffs.is_empty() {
+                        ConflictStatus::Safe
+                    } else {
+                        ConflictStatus::Changed
+                    },
+                    non_empty(diffs),
+                )
+            }
         }
     }
 
@@ -889,6 +967,7 @@ impl MigrationAnalyzer {
                 ConflictStatus::Changed => summary.changed += 1,
                 ConflictStatus::ScriptChanged => summary.script_changed += 1,
                 ConflictStatus::Unknown => summary.unknown += 1,
+                ConflictStatus::Asset => summary.asset += 1,
             }
         }
         let components = self.source.parsed_components.get(&group_id);
@@ -950,6 +1029,7 @@ impl MigrationAnalyzer {
                 ConflictStatus::Changed => summary.changed += 1,
                 ConflictStatus::ScriptChanged => summary.script_changed += 1,
                 ConflictStatus::Unknown => summary.unknown += 1,
+                ConflictStatus::Asset => summary.asset += 1,
             }
         }
 
