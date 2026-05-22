@@ -425,12 +425,52 @@ pub struct ResolverContext {
 }
 
 impl ResolverContext {
+    /// Decodes a script on demand when lazy loading is enabled.
+    /// Checks the cache first, then falls back to raw bytes.
+    pub fn ensure_script_decoded(&mut self, script_id: u32) -> Option<&CompiledScript> {
+        if self.decoded_scripts.contains_key(&script_id) {
+            return self.decoded_scripts.get(&script_id);
+        }
+        if let Some(bytes) = self.scripts.get(&script_id) {
+            if let Ok(script) = decode_script(bytes, &self.opcode_book, self.build) {
+                self.decoded_scripts.insert(script_id, script);
+                return self.decoded_scripts.get(&script_id);
+            }
+        }
+        None
+    }
+
+    /// Load with eager script decoding (backward-compatible).
     pub fn load(
         cache: &FlatCache,
         tar_path: &Path,
         data_dir: &Path,
         build: u32,
         subbuild: u32,
+    ) -> Result<Self> {
+        Self::load_inner(cache, tar_path, data_dir, build, subbuild, false)
+    }
+
+    /// Load with lazy script decoding — scripts are only decoded on
+    /// first access via `ensure_script_decoded()`. Reduces memory
+    /// footprint and startup time for migration analysis.
+    pub fn load_lazy(
+        cache: &FlatCache,
+        tar_path: &Path,
+        data_dir: &Path,
+        build: u32,
+        subbuild: u32,
+    ) -> Result<Self> {
+        Self::load_inner(cache, tar_path, data_dir, build, subbuild, true)
+    }
+
+    fn load_inner(
+        cache: &FlatCache,
+        tar_path: &Path,
+        data_dir: &Path,
+        build: u32,
+        subbuild: u32,
+        lazy_scripts: bool,
     ) -> Result<Self> {
         let opcode_book = OpcodeBook::load(data_dir, build, subbuild)?;
 
@@ -699,9 +739,11 @@ impl ResolverContext {
 
         // ── Decode scripts ──
         let mut decoded_scripts = BTreeMap::new();
-        for (&script_id, bytes) in &scripts {
-            if let Ok(script) = decode_script(bytes, &opcode_book, build) {
-                decoded_scripts.insert(script_id, script);
+        if !lazy_scripts {
+            for (&script_id, bytes) in &scripts {
+                if let Ok(script) = decode_script(bytes, &opcode_book, build) {
+                    decoded_scripts.insert(script_id, script);
+                }
             }
         }
 

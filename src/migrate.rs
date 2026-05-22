@@ -398,11 +398,32 @@ fn format_scalar_opt(v: &Option<ScalarValue>) -> String {
 pub struct MigrationAnalyzer {
     source: ResolverContext,
     target: ResolverContext,
+    /// Cached set of all interface component IDs in the source build.
+    source_component_ids: HashSet<u32>,
+    /// Cached set of all interface component IDs in the target build.
+    target_component_ids: HashSet<u32>,
 }
 
 impl MigrationAnalyzer {
     pub fn new(source: ResolverContext, target: ResolverContext) -> Self {
-        Self { source, target }
+        let source_component_ids: HashSet<u32> = source
+            .parsed_components
+            .values()
+            .flat_map(|g| g.keys())
+            .copied()
+            .collect();
+        let target_component_ids: HashSet<u32> = target
+            .parsed_components
+            .values()
+            .flat_map(|g| g.keys())
+            .copied()
+            .collect();
+        Self {
+            source,
+            target,
+            source_component_ids,
+            target_component_ids,
+        }
     }
 
     pub fn analyze_interface(&self, group_id: u32) -> ConflictReport {
@@ -521,13 +542,29 @@ impl MigrationAnalyzer {
         }
     }
 
+    /// Decodes a script from its raw bytes on demand (lazy path).
+    /// Checks the decoded cache first for already-decoded scripts.
+    fn get_script(
+        &self,
+        ctx: &ResolverContext,
+        script_id: u32,
+    ) -> Option<crate::script::CompiledScript> {
+        if let Some(script) = ctx.decoded_scripts.get(&script_id) {
+            return Some(script.clone());
+        }
+        // Lazy path: decode from raw bytes
+        ctx.scripts
+            .get(&script_id)
+            .and_then(|bytes| crate::script::decode_script(bytes, &ctx.opcode_book, ctx.build).ok())
+    }
+
     fn walk_script(
         &self,
         script_id: u32,
         entities: &mut Vec<ConflictEntry>,
         visited: &mut HashSet<EntityKey>,
     ) {
-        if let Some(script) = self.source.decoded_scripts.get(&script_id) {
+        if let Some(script) = self.get_script(&self.source, script_id) {
             // ── Pass 1: operand-level deps (varps, varbits, script calls) ──
             for instruction in &script.code {
                 match &instruction.operand {
@@ -661,10 +698,10 @@ impl MigrationAnalyzer {
         _entity_type: EntityType,
         id: u32,
     ) -> (ConflictStatus, Option<Vec<FieldDiff>>) {
-        let source_exists = self.source.interfaces.values().any(|g| g.contains_key(&id));
-        let target_exists = self.target.interfaces.values().any(|g| g.contains_key(&id));
-
-        match (source_exists, target_exists) {
+        match (
+            self.source_component_ids.contains(&id),
+            self.target_component_ids.contains(&id),
+        ) {
             (true, false) => (ConflictStatus::Missing, None),
             (false, true) => (ConflictStatus::IdConflict, None),
             _ => (ConflictStatus::Asset, None),
@@ -755,8 +792,8 @@ impl MigrationAnalyzer {
 
     fn compare_script(&self, id: u32) -> (ConflictStatus, Option<Vec<FieldDiff>>) {
         match (
-            self.source.decoded_scripts.get(&id),
-            self.target.decoded_scripts.get(&id),
+            self.get_script(&self.source, id),
+            self.get_script(&self.target, id),
         ) {
             (Some(_), None) => (ConflictStatus::Missing, None),
             (None, Some(_)) => (ConflictStatus::IdConflict, None),
@@ -1025,8 +1062,8 @@ impl MigrationAnalyzer {
                 )
             }
             EntityType::Script => {
-                let s = self.source.decoded_scripts.get(&id);
-                let t = self.target.decoded_scripts.get(&id);
+                let s = self.get_script(&self.source, id);
+                let t = self.get_script(&self.target, id);
                 (
                     s.map(|s| {
                         format!(
@@ -1346,7 +1383,7 @@ impl MigrationAnalyzer {
 
         let mut script_updates = Vec::new();
 
-        if let Some(script) = self.source.decoded_scripts.get(&script_id) {
+        if let Some(script) = self.get_script(&self.source, script_id) {
             for (i, instruction) in script.code.iter().enumerate() {
                 match &instruction.operand {
                     crate::script::Operand::VarRef(var_ref) => {

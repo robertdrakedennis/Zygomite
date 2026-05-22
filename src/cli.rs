@@ -3505,7 +3505,7 @@ fn run_migrate_check(
     enable_remap: bool,
     remap_buffer: u32,
 ) -> Result<()> {
-    let target_ctx = ResolverContext::load(
+    let target_ctx = ResolverContext::load_lazy(
         cache,
         tar_path,
         data_dir,
@@ -3515,7 +3515,7 @@ fn run_migrate_check(
 
     let source_tar = source_cache_tar.unwrap_or(tar_path);
     let source_ctx =
-        ResolverContext::load(cache, source_tar, data_dir, source_build, source_subbuild)?;
+        ResolverContext::load_lazy(cache, source_tar, data_dir, source_build, source_subbuild)?;
 
     let analyzer = crate::migrate::MigrationAnalyzer::new(source_ctx, target_ctx);
     let report = if enable_remap {
@@ -3555,7 +3555,7 @@ fn run_migrate_script(
     enable_remap: bool,
     remap_buffer: u32,
 ) -> Result<()> {
-    let target_ctx = ResolverContext::load(
+    let target_ctx = ResolverContext::load_lazy(
         cache,
         tar_path,
         data_dir,
@@ -3565,7 +3565,7 @@ fn run_migrate_script(
 
     let source_tar = source_cache_tar.unwrap_or(tar_path);
     let source_ctx =
-        ResolverContext::load(cache, source_tar, data_dir, source_build, source_subbuild)?;
+        ResolverContext::load_lazy(cache, source_tar, data_dir, source_build, source_subbuild)?;
 
     let analyzer = crate::migrate::MigrationAnalyzer::new(source_ctx, target_ctx);
     let report = if enable_remap {
