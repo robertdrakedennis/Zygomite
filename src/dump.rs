@@ -1,5 +1,5 @@
 use crate::cache::FlatCache;
-use anyhow::{Context, Result};
+use crate::error::{Context, Result};
 use rayon::prelude::*;
 use std::collections::BTreeSet;
 use std::fs;
@@ -46,8 +46,7 @@ pub fn discover_groups(cache: &FlatCache, archive: u32) -> Result<Vec<u32>> {
 
 fn copy_file(src: &Path, dst: &Path) -> Result<u64> {
     if let Some(parent) = dst.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("creating {}", parent.display()))?;
+        fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
     }
     fs::copy(src, dst).with_context(|| format!("copying {} → {}", src.display(), dst.display()))
 }
@@ -102,32 +101,30 @@ pub fn dump_raw_flat(
         copy_file(&master, &index_dir.join("255.dat"))?;
     }
 
-    archives
-        .par_iter()
-        .try_for_each(|&archive| -> Result<()> {
-            let src = cache.root().join(format!("255/{archive}.dat"));
-            if src.is_file() {
-                total_bytes.fetch_add(
-                    copy_file(&src, &index_dir.join(format!("{archive}.dat")))?,
-                    Ordering::Relaxed,
-                );
-            }
+    archives.par_iter().try_for_each(|&archive| -> Result<()> {
+        let src = cache.root().join(format!("255/{archive}.dat"));
+        if src.is_file() {
+            total_bytes.fetch_add(
+                copy_file(&src, &index_dir.join(format!("{archive}.dat")))?,
+                Ordering::Relaxed,
+            );
+        }
 
-            let groups = discover_groups(cache, archive)?;
-            if groups.is_empty() {
-                return Ok(());
-            }
+        let groups = discover_groups(cache, archive)?;
+        if groups.is_empty() {
+            return Ok(());
+        }
 
-            let archive_dir = out_dir.join(archive.to_string());
-            fs::create_dir_all(&archive_dir)
-                .with_context(|| format!("creating archive dir {}", archive_dir.display()))?;
+        let archive_dir = out_dir.join(archive.to_string());
+        fs::create_dir_all(&archive_dir)
+            .with_context(|| format!("creating archive dir {}", archive_dir.display()))?;
 
-            groups.par_iter().try_for_each(|&group| -> Result<()> {
-                copy_group(cache, archive, group, out_dir, &total_bytes, &total_groups)
-            })?;
-
-            Ok(())
+        groups.par_iter().try_for_each(|&group| -> Result<()> {
+            copy_group(cache, archive, group, out_dir, &total_bytes, &total_groups)
         })?;
+
+        Ok(())
+    })?;
 
     Ok(RawFlatStats {
         archives: archives.len(),

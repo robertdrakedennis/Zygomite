@@ -12,15 +12,11 @@ fn default_data_dir() -> PathBuf {
 }
 
 fn cache_dir() -> PathBuf {
-    std::env::var_os("RS3_CACHE_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(default_cache_dir)
+    std::env::var_os("RS3_CACHE_DIR").map_or_else(default_cache_dir, PathBuf::from)
 }
 
 fn data_dir() -> PathBuf {
-    std::env::var_os("RS3_DATA_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(default_data_dir)
+    std::env::var_os("RS3_DATA_DIR").map_or_else(default_data_dir, PathBuf::from)
 }
 
 fn require_fixture() -> Option<(PathBuf, PathBuf)> {

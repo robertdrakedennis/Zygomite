@@ -1,6 +1,7 @@
+use crate::cache_bail as bail;
+use crate::error::{Context, Result};
 use crate::packet::{ByteWriter, Packet};
 use crate::vars::VarDomain;
-use anyhow::{Context, Result, bail};
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::fs;
@@ -862,10 +863,7 @@ fn parse_counts(input: &str, int: &mut u16, obj: &mut u16, long: &mut u16) -> Re
     Ok(())
 }
 
-fn flush_pending_switch(
-    instructions: &mut Vec<Instruction>,
-    pending: &mut Vec<SwitchCase>,
-) {
+fn flush_pending_switch(instructions: &mut Vec<Instruction>, pending: &mut Vec<SwitchCase>) {
     if !pending.is_empty() {
         instructions.push(Instruction {
             opcode: 0,
@@ -894,7 +892,8 @@ fn parse_operand_asm(opcode_name: &str, operand_text: &str) -> Result<Operand> {
             if let Some((type_tag, rest)) = operand_text.split_once(':') {
                 match type_tag {
                     "int" => Ok(Operand::Int(
-                        rest.parse::<i32>().context("expected int for string constant")?,
+                        rest.parse::<i32>()
+                            .context("expected int for string constant")?,
                     )),
                     "long" => Ok(Operand::Long(
                         rest.parse::<i64>()

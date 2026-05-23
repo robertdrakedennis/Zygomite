@@ -18,17 +18,17 @@ use crate::constants::{
     ARCHIVE_LOC_CONFIG, ARCHIVE_NPC_CONFIG, ARCHIVE_OBJ_CONFIG, ARCHIVE_SEQ_CONFIG,
     ARCHIVE_SPOT_CONFIG, ARCHIVE_STRUCT_CONFIG, CONFIG_GROUP_DBROW, CONFIG_GROUP_DBTABLE,
     CONFIG_GROUP_INV, CONFIG_GROUP_LOC_LEGACY, CONFIG_GROUP_NPC_LEGACY, CONFIG_GROUP_OBJ_LEGACY,
-    CONFIG_GROUP_SEQ, CONFIG_GROUP_SPOT, CONFIG_GROUP_VAR_BIT, CONFIG_GROUP_VAR_CLAN,
-    CONFIG_GROUP_VAR_CLAN_SETTING, CONFIG_GROUP_VAR_CLIENT, CONFIG_GROUP_VAR_CONTROLLER,
-    CONFIG_GROUP_VAR_GLOBAL, CONFIG_GROUP_VAR_NPC, CONFIG_GROUP_VAR_OBJECT,
-    CONFIG_GROUP_PARAM, CONFIG_GROUP_VAR_PLAYER, CONFIG_GROUP_VAR_PLAYER_GROUP,
+    CONFIG_GROUP_PARAM, CONFIG_GROUP_SEQ, CONFIG_GROUP_SPOT, CONFIG_GROUP_VAR_BIT,
+    CONFIG_GROUP_VAR_CLAN, CONFIG_GROUP_VAR_CLAN_SETTING, CONFIG_GROUP_VAR_CLIENT,
+    CONFIG_GROUP_VAR_CONTROLLER, CONFIG_GROUP_VAR_GLOBAL, CONFIG_GROUP_VAR_NPC,
+    CONFIG_GROUP_VAR_OBJECT, CONFIG_GROUP_VAR_PLAYER, CONFIG_GROUP_VAR_PLAYER_GROUP,
     CONFIG_GROUP_VAR_REGION, CONFIG_GROUP_VAR_WORLD,
 };
+use crate::error::Result;
 use crate::interface::{ComponentDeps, parse_component_deps};
 use crate::js5;
 use crate::script::{CompiledScript, OpcodeBook, Operand, decode_script};
 use crate::vars::{VarBitEntry, VarDomain, VarEntry, parse_var, parse_varbit};
-use anyhow::Result;
 use serde::Serialize;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
@@ -501,6 +501,9 @@ impl ResolverContext {
             }
         }
 
+        let config_archive_available =
+            crate::fixture::ensure_archive_complete(cache.root(), tar_path, ARCHIVE_CONFIG).is_ok();
+
         let mut varps_by_domain = HashMap::new();
         let var_domains = [
             (CONFIG_GROUP_VAR_PLAYER, VarDomain::Player),
@@ -516,7 +519,9 @@ impl ResolverContext {
             (CONFIG_GROUP_VAR_PLAYER_GROUP, VarDomain::PlayerGroup),
         ];
         for (group_id, domain) in var_domains {
-            if let Some(payload) = cache.get(ARCHIVE_CONFIG, group_id)? {
+            if config_archive_available
+                && let Some(payload) = cache.get(ARCHIVE_CONFIG, group_id)?
+            {
                 let config_index = cache.archive_index(ARCHIVE_CONFIG)?;
                 let vars = js5::unpack_group(&config_index, group_id, &payload)?;
                 let mut map = BTreeMap::new();
@@ -530,7 +535,9 @@ impl ResolverContext {
         }
 
         let mut varbits = BTreeMap::new();
-        if let Some(payload) = cache.get(ARCHIVE_CONFIG, CONFIG_GROUP_VAR_BIT)? {
+        if config_archive_available
+            && let Some(payload) = cache.get(ARCHIVE_CONFIG, CONFIG_GROUP_VAR_BIT)?
+        {
             let config_index = cache.archive_index(ARCHIVE_CONFIG)?;
             let raw = js5::unpack_group(&config_index, CONFIG_GROUP_VAR_BIT, &payload)?;
             for (id, bytes) in raw {
@@ -541,7 +548,9 @@ impl ResolverContext {
         }
 
         let mut params = BTreeMap::new();
-        if let Some(payload) = cache.get(ARCHIVE_CONFIG, CONFIG_GROUP_PARAM)? {
+        if config_archive_available
+            && let Some(payload) = cache.get(ARCHIVE_CONFIG, CONFIG_GROUP_PARAM)?
+        {
             let config_index = cache.archive_index(ARCHIVE_CONFIG)?;
             let raw = js5::unpack_group(&config_index, CONFIG_GROUP_PARAM, &payload)?;
             for (id, bytes) in raw {
@@ -589,7 +598,7 @@ impl ResolverContext {
         let load_config_archive = |archive: u32,
                                    bit_shift: u32,
                                    legacy_group: u32,
-                                   parser: fn(u32, &[u8]) -> Result<OpListEntry>|
+                                   parser: fn(u32, &[u8]) -> crate::error::Result<OpListEntry>|
          -> Result<BTreeMap<u32, OpListEntry>> {
             if crate::fixture::ensure_archive_complete(cache.root(), tar_path, archive).is_ok() {
                 let c2 = FlatCache::open(cache.root())?;
@@ -606,7 +615,9 @@ impl ResolverContext {
                 }
                 return Ok(map);
             }
-            if let Some(payload) = cache.get(ARCHIVE_CONFIG, legacy_group)? {
+            if config_archive_available
+                && let Some(payload) = cache.get(ARCHIVE_CONFIG, legacy_group)?
+            {
                 let config_index = cache.archive_index(ARCHIVE_CONFIG)?;
                 let entries = js5::unpack_group(&config_index, legacy_group, &payload)?;
                 return Ok(entries
@@ -653,7 +664,9 @@ impl ResolverContext {
                         }
                     }
                 }
-            } else if let Some(payload) = cache.get(ARCHIVE_CONFIG, CONFIG_GROUP_SEQ)? {
+            } else if config_archive_available
+                && let Some(payload) = cache.get(ARCHIVE_CONFIG, CONFIG_GROUP_SEQ)?
+            {
                 let config_index = cache.archive_index(ARCHIVE_CONFIG)?;
                 let entries = js5::unpack_group(&config_index, CONFIG_GROUP_SEQ, &payload)?;
                 for (id, data) in entries {
@@ -681,7 +694,9 @@ impl ResolverContext {
                         }
                     }
                 }
-            } else if let Some(payload) = cache.get(ARCHIVE_CONFIG, CONFIG_GROUP_SPOT)? {
+            } else if config_archive_available
+                && let Some(payload) = cache.get(ARCHIVE_CONFIG, CONFIG_GROUP_SPOT)?
+            {
                 let config_index = cache.archive_index(ARCHIVE_CONFIG)?;
                 let entries = js5::unpack_group(&config_index, CONFIG_GROUP_SPOT, &payload)?;
                 for (id, data) in entries {
@@ -696,7 +711,9 @@ impl ResolverContext {
         // Inventories: CONFIG_GROUP_INV within ARCHIVE_CONFIG
         let invs: BTreeMap<u32, InvEntry> = {
             let mut map = BTreeMap::new();
-            if let Some(payload) = cache.get(ARCHIVE_CONFIG, CONFIG_GROUP_INV)? {
+            if config_archive_available
+                && let Some(payload) = cache.get(ARCHIVE_CONFIG, CONFIG_GROUP_INV)?
+            {
                 let config_index = cache.archive_index(ARCHIVE_CONFIG)?;
                 let entries = js5::unpack_group(&config_index, CONFIG_GROUP_INV, &payload)?;
                 for (id, data) in entries {
@@ -711,7 +728,9 @@ impl ResolverContext {
         // DB tables and rows — the embedded SQLite-like database system
         let dbtables: BTreeMap<u32, DbTableEntry> = {
             let mut map = BTreeMap::new();
-            if let Some(payload) = cache.get(ARCHIVE_CONFIG, CONFIG_GROUP_DBTABLE)? {
+            if config_archive_available
+                && let Some(payload) = cache.get(ARCHIVE_CONFIG, CONFIG_GROUP_DBTABLE)?
+            {
                 let config_index = cache.archive_index(ARCHIVE_CONFIG)?;
                 let entries = js5::unpack_group(&config_index, CONFIG_GROUP_DBTABLE, &payload)?;
                 for (id, data) in entries {
@@ -725,7 +744,9 @@ impl ResolverContext {
 
         let dbrows: BTreeMap<u32, DbRowEntry> = {
             let mut map = BTreeMap::new();
-            if let Some(payload) = cache.get(ARCHIVE_CONFIG, CONFIG_GROUP_DBROW)? {
+            if config_archive_available
+                && let Some(payload) = cache.get(ARCHIVE_CONFIG, CONFIG_GROUP_DBROW)?
+            {
                 let config_index = cache.archive_index(ARCHIVE_CONFIG)?;
                 let entries = js5::unpack_group(&config_index, CONFIG_GROUP_DBROW, &payload)?;
                 for (id, data) in entries {

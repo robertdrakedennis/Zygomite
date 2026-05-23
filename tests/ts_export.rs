@@ -6,7 +6,7 @@
 //! - `RS3_CACHE_DIR=/Users/robert/projects/alerion/cache/unpacked/910`
 //! - `RS3_DATA_DIR=/Users/robert/projects/alerion/tools/zwyz-rs3-cache/data`
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn default_cache_dir() -> PathBuf {
@@ -18,15 +18,11 @@ fn default_data_dir() -> PathBuf {
 }
 
 fn cache_dir() -> PathBuf {
-    std::env::var_os("RS3_CACHE_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(default_cache_dir)
+    std::env::var_os("RS3_CACHE_DIR").map_or_else(default_cache_dir, PathBuf::from)
 }
 
 fn data_dir() -> PathBuf {
-    std::env::var_os("RS3_DATA_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(default_data_dir)
+    std::env::var_os("RS3_DATA_DIR").map_or_else(default_data_dir, PathBuf::from)
 }
 
 fn require_fixture() -> Option<(PathBuf, PathBuf)> {
@@ -44,7 +40,7 @@ fn require_fixture() -> Option<(PathBuf, PathBuf)> {
     }
 }
 
-fn run_rs3(subcommand: &str, out_dir: &PathBuf, extra: &[&str]) {
+fn run_rs3(subcommand: &str, out_dir: &Path, extra: &[&str]) {
     let (cache, data) = require_fixture().expect("fixture");
     let bin = env!("CARGO_BIN_EXE_rs3-cache-rs");
     let output = Command::new(bin)
@@ -98,7 +94,10 @@ fn ts_export_param_count_910() {
         .trim_end_matches(';')
         .parse()
         .expect("parse count");
-    assert!(count > 8000, "PARAM_COUNT should be ~8060 on 910, got {count}");
+    assert!(
+        count > 8000,
+        "PARAM_COUNT should be ~8060 on 910, got {count}"
+    );
 }
 
 #[test]

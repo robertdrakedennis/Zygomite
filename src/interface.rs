@@ -1,5 +1,6 @@
+use crate::cache_bail as bail;
+use crate::error::{CacheError, Result};
 use crate::packet::Packet;
-use anyhow::{Result, bail};
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::collections::HashSet;
@@ -977,9 +978,9 @@ fn decode_common_tail(
     } else {
         let mut value = packet.g1()?;
         while value != 0 {
-            let index = (value >> 4)
-                .checked_sub(1)
-                .ok_or_else(|| anyhow::anyhow!("invalid opkey index nibble {}", value >> 4))?;
+            let index = (value >> 4).checked_sub(1).ok_or_else(|| {
+                CacheError::message(format!("invalid opkey index nibble {}", value >> 4))
+            })?;
             let mut rate = (u16::from(value) << 8 | u16::from(packet.g1()?)) & 4095;
             if rate == 4095 {
                 rate = u16::MAX;

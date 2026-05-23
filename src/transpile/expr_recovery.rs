@@ -654,9 +654,7 @@ impl<'a, S: std::hash::BuildHasher> ExprRecovery<'a, S> {
                         })
                         .unwrap_or_else(|| format!("script_{id}"));
                     let expr = Expression::Call(CallExpr {
-                        callee: Box::new(Expression::Identifier(Identifier {
-                            name: callee_name,
-                        })),
+                        callee: Box::new(Expression::Identifier(Identifier { name: callee_name })),
                         arguments: args,
                     });
                     self.stack.push(expr);

@@ -20,10 +20,11 @@ pub use structured_writer::StructuredWriter;
 pub use writer::Writer;
 
 use crate::config::EnumEntry;
+use crate::error::Result;
 use crate::script::{CompiledScript, OpcodeBook, decode_script};
 use crate::vars::VarDomain;
-use anyhow::Result;
 use std::collections::{BTreeMap, HashMap};
+use std::hash::BuildHasher;
 
 /// Describes a script's parameter and return types for cross-script call typing.
 #[derive(Debug, Clone)]
@@ -105,10 +106,7 @@ impl Transpiler {
             if let Ok(script) = decode_script(data, opcode_book, version)
                 && let Some(name) = &script.name
             {
-                names.insert(
-                    ScriptId(script_id as i32),
-                    extract_script_name_suffix(name),
-                );
+                names.insert(ScriptId(script_id as i32), extract_script_name_suffix(name));
             }
         }
         self.symbol_table.script_names = names;
@@ -141,10 +139,9 @@ impl Transpiler {
         for (&interface_id, comps) in parsed_components {
             for (&comp_id, deps) in comps {
                 let uid = crate::interface::component_uid(interface_id, comp_id);
-                let name = deps
-                    .name
-                    .clone()
-                    .unwrap_or_else(|| crate::interface::component_fallback_name(interface_id, comp_id));
+                let name = deps.name.clone().unwrap_or_else(|| {
+                    crate::interface::component_fallback_name(interface_id, comp_id)
+                });
                 names.insert(uid, name);
             }
         }
@@ -190,8 +187,13 @@ impl Transpiler {
         for (&id, data) in scripts {
             if let Ok(script) = decode_script(data, opcode_book, version) {
                 let script_id = ScriptId(id as i32);
-                let return_type =
-                    infer_return_type_for_script(&script, script_id, &empty_components, &empty_enums, &empty_sigs);
+                let return_type = infer_return_type_for_script(
+                    &script,
+                    script_id,
+                    &empty_components,
+                    &empty_enums,
+                    &empty_sigs,
+                );
                 self.script_signatures.insert(
                     script_id,
                     ScriptSignature {
@@ -351,16 +353,19 @@ pub fn extract_script_name_suffix(value: &str) -> String {
     trimmed.to_string()
 }
 
-pub fn infer_return_type_for_script(
+pub fn infer_return_type_for_script<S>(
     script: &CompiledScript,
     script_id: ScriptId,
-    component_names: &HashMap<u32, String>,
-    enum_value_names: &HashMap<i32, String>,
-    script_signatures: &HashMap<ScriptId, ScriptSignature>,
-) -> String {
+    component_names: &HashMap<u32, String, S>,
+    enum_value_names: &HashMap<i32, String, S>,
+    script_signatures: &HashMap<ScriptId, ScriptSignature, S>,
+) -> String
+where
+    S: BuildHasher + Clone,
+{
     let codegen = CodeGen::new(SymbolTable::new());
     let decl = codegen.generate(script, script_id);
-    let empty_names: HashMap<ScriptId, String> = HashMap::new();
+    let empty_names = HashMap::with_hasher(component_names.hasher().clone());
     let blocks = build_cfg(
         decl.instructions,
         component_names,

@@ -3,11 +3,11 @@
 #![allow(clippy::return_self_not_must_use, clippy::unused_self)]
 
 use crate::config::EnumEntry;
+use crate::error::Result;
 use crate::script::{
     CompiledScript, Instruction, OpcodeBook, Operand, VarBitRef, VarRef, decode_script,
 };
 use crate::vars::VarDomain;
-use anyhow::Result;
 use std::collections::{BTreeMap, HashMap};
 
 pub struct Transpiler {

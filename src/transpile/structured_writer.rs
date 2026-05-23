@@ -299,6 +299,11 @@ fn collect_array_ids(instructions: &[super::ast::InstructionNode]) -> Vec<u32> {
 
 impl Default for StructuredWriter {
     fn default() -> Self {
-        Self::new(HashMap::new(), HashMap::new(), HashMap::new(), HashMap::new())
+        Self::new(
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+        )
     }
 }

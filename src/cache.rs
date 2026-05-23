@@ -1,5 +1,6 @@
+use crate::cache_bail as bail;
+use crate::error::{Context, Result};
 use crate::js5::{ArchiveIndex, decompress, unpack_group};
-use anyhow::{Context, Result, bail};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};

@@ -1,9 +1,10 @@
 use crate::cache::FlatCache;
+use crate::cache_bail as bail;
 use crate::constants::{
     ARCHIVE_CLIENTSCRIPTS, ARCHIVE_CONFIG, ARCHIVE_INTERFACES, ARCHIVE_MODELS_RT7, ARCHIVE_VORBIS,
     DEFAULT_CACHE_TAR,
 };
-use anyhow::{Context, Result, bail};
+use crate::error::{Context, Result};
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};

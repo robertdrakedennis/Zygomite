@@ -1,4 +1,5 @@
-use anyhow::{Context, Result, bail};
+use crate::cache_bail as bail;
+use crate::error::{Context, Result};
 use encoding_rs::WINDOWS_1252;
 
 // ── Packet reader (read-only, references external buffer) ──

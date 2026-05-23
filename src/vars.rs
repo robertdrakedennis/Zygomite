@@ -1,5 +1,6 @@
+use crate::cache_bail as bail;
+use crate::error::Result;
 use crate::packet::Packet;
-use anyhow::{Result, bail};
 use serde::Serialize;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize)]

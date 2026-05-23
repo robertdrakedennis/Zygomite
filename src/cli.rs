@@ -43,9 +43,11 @@ use crate::cutscene2d::decode as decode_cutscene2d;
 use crate::dep_tree::{EntityRef, EntityType, ResolverContext, build_tree};
 use crate::fixture::{default_tar_path, ensure_archive_complete, open_cache};
 use crate::interface::render_interface_group;
-use crate::map::decode_map_square;
+use crate::map::{decode_map_square, decode_map_square_best_effort};
 use crate::model::Model;
-use crate::script::{CompiledScript, Instruction, OpcodeBook, Operand, decode_script, MIN_SCRIPT_BUILD};
+use crate::script::{
+    CompiledScript, Instruction, MIN_SCRIPT_BUILD, OpcodeBook, Operand, decode_script,
+};
 use crate::transpile::Transpiler;
 use crate::vars::{VarDomain, parse_var, parse_varbit};
 use crate::vfx::decode as decode_vfx;
@@ -124,6 +126,9 @@ pub enum Command {
         sample_models: bool,
         #[arg(long)]
         skip_audio: bool,
+        /// Continue maps export when individual map square decodes fail.
+        #[arg(long)]
+        best_effort_maps: bool,
         #[arg(long)]
         max_audio_files: Option<usize>,
     },
@@ -260,14 +265,14 @@ pub enum Command {
         #[arg(long)]
         out_dir: PathBuf,
     },
-    /// Dump config text files (config/dump.{type}) for CacheOverlay compatibility.
+    /// Dump config text files (config/dump.{type}) for `CacheOverlay` compatibility.
     #[command(name = "dump-configs")]
     DumpConfigs {
         /// Output directory (writes config/dump.{obj,npc,loc,...})
         #[arg(long)]
         out_dir: PathBuf,
     },
-    /// Prepare semantic tree for CacheOverlay (raw-flat + refs + manifest).
+    /// Prepare semantic tree for `CacheOverlay` (raw-flat + refs + manifest).
     #[command(name = "prepare-overlay")]
     PrepareOverlay {
         /// Semantic root (e.g. cache/rs3-cache/947-all)
@@ -595,6 +600,7 @@ struct RuntimeVersion {
 struct UnpackRunOptions {
     sample_models: bool,
     skip_audio: bool,
+    best_effort_maps: bool,
     max_audio_files: Option<usize>,
 }
 
@@ -644,6 +650,7 @@ pub fn run(cli: Cli) -> Result<()> {
             out_dir,
             sample_models,
             skip_audio,
+            best_effort_maps,
             max_audio_files,
         } => run_unpack(
             &cache,
@@ -653,6 +660,7 @@ pub fn run(cli: Cli) -> Result<()> {
             UnpackRunOptions {
                 sample_models,
                 skip_audio,
+                best_effort_maps,
                 max_audio_files,
             },
             version,
@@ -812,17 +820,14 @@ pub fn run(cli: Cli) -> Result<()> {
             subbuild,
             version,
         ),
-        Command::DumpRawFlat {
-            out_dir,
-            archives,
-        } => run_dump_raw_flat(&cache, &tar_path, &out_dir, archives.as_deref()),
-        Command::DumpRefs { out_dir } => {
-            run_dump_refs(&cache, &tar_path, &out_dir, version.build)
+        Command::DumpRawFlat { out_dir, archives } => {
+            run_dump_raw_flat(&cache, &tar_path, &out_dir, archives.as_deref())
         }
+        Command::DumpRefs { out_dir } => run_dump_refs(&cache, &tar_path, &out_dir, version.build),
         Command::DumpConfigs { out_dir } => {
             run_dump_configs(&cache, &tar_path, &out_dir, version.build)
         }
-        Command::PrepareOverlay {out_dir, archives} => run_prepare_overlay(
+        Command::PrepareOverlay { out_dir, archives } => run_prepare_overlay(
             &cache,
             &tar_path,
             &out_dir,
@@ -1656,7 +1661,7 @@ fn run_cs2(
                             eprintln!("warning: skipping script {file} in group {group}: {e}");
                             continue;
                         }
-                        return Err(e);
+                        return Err(e.into());
                     }
                 };
                 scripts += 1;
@@ -1710,7 +1715,7 @@ fn run_cs2(
                             if version.build < MIN_SCRIPT_BUILD {
                                 continue;
                             }
-                            return Err(e);
+                            return Err(e.into());
                         }
                     };
                     for instruction in &script.code {
@@ -1929,7 +1934,14 @@ fn run_unpack(
         run_audio(cache, tar_path, Some(&audio_dir), options.max_audio_files)?;
     }
 
-    run_top_level_exports(cache, tar_path, data_dir, out_dir, version.build)?;
+    run_top_level_exports(
+        cache,
+        tar_path,
+        data_dir,
+        out_dir,
+        version.build,
+        options.best_effort_maps,
+    )?;
 
     Ok(())
 }
@@ -1940,6 +1952,7 @@ fn run_top_level_exports(
     data_dir: &Path,
     out_dir: &Path,
     build: u32,
+    best_effort_maps: bool,
 ) -> Result<()> {
     let hash_names = load_other_names_map(data_dir)?;
 
@@ -1978,7 +1991,7 @@ fn run_top_level_exports(
         &out_dir.join("vfx"),
         ".json",
         &hash_names,
-        |_, _, data| decode_vfx(data),
+        |_, _, data| Ok(decode_vfx(data)?),
     )
     .context("export vfx archive")?;
     export_archive_json(
@@ -1988,7 +2001,7 @@ fn run_top_level_exports(
         &out_dir.join("animator"),
         ".json",
         &hash_names,
-        |_, _, data| decode_animator_controller(data),
+        |_, _, data| Ok(decode_animator_controller(data)?),
     )
     .context("export animator archive")?;
     export_archive_json(
@@ -1998,7 +2011,7 @@ fn run_top_level_exports(
         &out_dir.join("cutscene2d"),
         ".json",
         &hash_names,
-        |_, _, data| decode_cutscene2d(data),
+        |_, _, data| Ok(decode_cutscene2d(data)?),
     )
     .context("export cutscene2d archive")?;
 
@@ -2023,8 +2036,14 @@ fn run_top_level_exports(
     )
     .context("export uianim group")?;
 
-    export_mapsquares_json(cache, tar_path, &out_dir.join("maps"), build)
-        .context("export mapsquares")?;
+    export_mapsquares_json(
+        cache,
+        tar_path,
+        &out_dir.join("maps"),
+        build,
+        best_effort_maps,
+    )
+    .context("export mapsquares")?;
     export_defaults_text(
         cache,
         tar_path,
@@ -2239,6 +2258,7 @@ fn export_mapsquares_json(
     tar_path: &Path,
     out_dir: &Path,
     build: u32,
+    best_effort: bool,
 ) -> Result<usize> {
     if ensure_archive_complete(cache.root(), tar_path, ARCHIVE_MAPSQUARES).is_err() {
         return Ok(0);
@@ -2252,7 +2272,11 @@ fn export_mapsquares_json(
         let files = cache.group_files_with_index(&index, ARCHIVE_MAPSQUARES, *group)?;
         let square_x = group & 0b111_1111;
         let square_z = group >> 7;
-        let decoded = decode_map_square(&files, build);
+        let decoded = if best_effort {
+            decode_map_square_best_effort(&files, build)
+        } else {
+            decode_map_square(&files, build)?
+        };
         let path = out_dir.join(format!("{square_x}_{square_z}.json"));
         write_json(&path, &decoded)?;
         count += 1;
@@ -2380,6 +2404,7 @@ fn export_worldmap_dump(cache: &FlatCache, tar_path: &Path, out_dir: &Path) -> R
         lines.push(String::new());
     }
 
+    write_text(&out_dir.join("dump.wma"), &lines.join("\n"))?;
     Ok(())
 }
 
@@ -3754,12 +3779,7 @@ fn run_dump_raw_flat(
     Ok(())
 }
 
-fn run_dump_refs(
-    cache: &FlatCache,
-    tar_path: &Path,
-    out_dir: &Path,
-    build: u32,
-) -> Result<()> {
+fn run_dump_refs(cache: &FlatCache, tar_path: &Path, out_dir: &Path, build: u32) -> Result<()> {
     for archive in [
         ARCHIVE_CONFIG,
         ARCHIVE_ENUM_CONFIG,
@@ -3778,16 +3798,16 @@ fn run_dump_refs(
     Ok(())
 }
 
-fn run_dump_configs(
-    cache: &FlatCache,
-    tar_path: &Path,
-    out_dir: &Path,
-    build: u32,
-) -> Result<()> {
+fn run_dump_configs(cache: &FlatCache, tar_path: &Path, out_dir: &Path, build: u32) -> Result<()> {
     for archive in [
-        ARCHIVE_CONFIG, ARCHIVE_ENUM_CONFIG, ARCHIVE_OBJ_CONFIG,
-        ARCHIVE_NPC_CONFIG, ARCHIVE_LOC_CONFIG, ARCHIVE_SEQ_CONFIG,
-        ARCHIVE_SPOT_CONFIG, ARCHIVE_STRUCT_CONFIG,
+        ARCHIVE_CONFIG,
+        ARCHIVE_ENUM_CONFIG,
+        ARCHIVE_OBJ_CONFIG,
+        ARCHIVE_NPC_CONFIG,
+        ARCHIVE_LOC_CONFIG,
+        ARCHIVE_SEQ_CONFIG,
+        ARCHIVE_SPOT_CONFIG,
+        ARCHIVE_STRUCT_CONFIG,
     ] {
         ensure_archive_complete(cache.root(), tar_path, archive)?;
     }
@@ -3853,6 +3873,46 @@ fn run_prepare_overlay(
 }
 
 // Loads both source and target caches for migration impact analysis.
+fn load_source_resolver_context(
+    target_cache: &FlatCache,
+    target_tar_path: &Path,
+    data_dir: &Path,
+    source_cache_tar: Option<&Path>,
+    source_build: u32,
+    source_subbuild: u32,
+) -> Result<(ResolverContext, Option<tempfile::TempDir>)> {
+    let Some(source_tar) = source_cache_tar else {
+        return Ok((
+            ResolverContext::load_lazy(
+                target_cache,
+                target_tar_path,
+                data_dir,
+                source_build,
+                source_subbuild,
+            )?,
+            None,
+        ));
+    };
+
+    let temp_dir = tempfile::Builder::new()
+        .prefix("rs3-cache-rs-source-")
+        .tempdir()
+        .context("creating isolated source cache")?;
+    let source_cache_root = temp_dir.path().join("cache");
+    fs::create_dir_all(&source_cache_root)
+        .with_context(|| format!("creating {}", source_cache_root.display()))?;
+    let source_cache = FlatCache::open(&source_cache_root)?;
+    let source_ctx = ResolverContext::load_lazy(
+        &source_cache,
+        source_tar,
+        data_dir,
+        source_build,
+        source_subbuild,
+    )?;
+    Ok((source_ctx, Some(temp_dir)))
+}
+
+// Loads both source and target caches for migration impact analysis.
 #[allow(clippy::too_many_arguments)]
 fn run_migrate_check(
     cache: &FlatCache,
@@ -3875,9 +3935,14 @@ fn run_migrate_check(
         target_version.subbuild,
     )?;
 
-    let source_tar = source_cache_tar.unwrap_or(tar_path);
-    let source_ctx =
-        ResolverContext::load_lazy(cache, source_tar, data_dir, source_build, source_subbuild)?;
+    let (source_ctx, _source_cache_temp) = load_source_resolver_context(
+        cache,
+        tar_path,
+        data_dir,
+        source_cache_tar,
+        source_build,
+        source_subbuild,
+    )?;
 
     let analyzer = crate::migrate::MigrationAnalyzer::new(source_ctx, target_ctx);
     let report = if enable_remap {
@@ -3925,9 +3990,14 @@ fn run_migrate_script(
         target_version.subbuild,
     )?;
 
-    let source_tar = source_cache_tar.unwrap_or(tar_path);
-    let source_ctx =
-        ResolverContext::load_lazy(cache, source_tar, data_dir, source_build, source_subbuild)?;
+    let (source_ctx, _source_cache_temp) = load_source_resolver_context(
+        cache,
+        tar_path,
+        data_dir,
+        source_cache_tar,
+        source_build,
+        source_subbuild,
+    )?;
 
     let analyzer = crate::migrate::MigrationAnalyzer::new(source_ctx, target_ctx);
     let report = if enable_remap {
@@ -3978,13 +4048,23 @@ fn run_ts_export(
     export_spot_types(&ctx, out_dir)?;
     export_named_config_ids(&ctx, out_dir)?;
     export_db_types(&ctx, out_dir)?;
-    export_script_signatures(&ctx, out_dir, &opcode_book, version.build, &script_group_names)?;
+    export_script_signatures(
+        &ctx,
+        out_dir,
+        &opcode_book,
+        version.build,
+        &script_group_names,
+    )?;
     export_index(out_dir)?;
 
     eprintln!("typescript definitions exported to {}", out_dir.display());
     Ok(())
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "CLI dispatcher passes parsed command fields"
+)]
 fn run_transpile_scripts(
     cache: &FlatCache,
     tar_path: &Path,
@@ -4029,15 +4109,17 @@ fn run_transpile_scripts(
         export_spot_types(&ctx, out_dir)?;
         export_named_config_ids(&ctx, out_dir)?;
         export_db_types(&ctx, out_dir)?;
-        export_script_signatures(&ctx, out_dir, &opcode_book, version.build, &script_group_names)?;
+        export_script_signatures(
+            &ctx,
+            out_dir,
+            &opcode_book,
+            version.build,
+            &script_group_names,
+        )?;
         export_index(out_dir)?;
     }
 
-    let script_limit = if all_scripts {
-        usize::MAX
-    } else {
-        max_scripts
-    };
+    let script_limit = if all_scripts { usize::MAX } else { max_scripts };
 
     let mut script_count = 0;
     let mut errors = 0;
@@ -4889,7 +4971,10 @@ fn export_script_signatures(
         );
 
         let mut arg_types: Vec<&str> = Vec::new();
-        arg_types.extend(std::iter::repeat_n("number", script.argument_count_int as usize));
+        arg_types.extend(std::iter::repeat_n(
+            "number",
+            script.argument_count_int as usize,
+        ));
         arg_types.extend(std::iter::repeat_n(
             "string",
             script.argument_count_object as usize,
@@ -5635,6 +5720,10 @@ fn set_to_json(set: &std::collections::HashSet<u32>) -> String {
 }
 
 fn export_index(out_dir: &Path) -> Result<()> {
+    write_text(&out_dir.join("index.ts"), &index_exports_source())
+}
+
+fn index_exports_source() -> String {
     let lines = vec![
         "// Auto-generated index file".to_string(),
         "// Source: RS3 cache ts-export".to_string(),
@@ -5685,27 +5774,27 @@ fn export_index(out_dir: &Path) -> Result<()> {
         "    type ComponentInfo,".to_string(),
         "    type InterfaceId as InterfaceIdType,".to_string(),
         "} from './interfaces';".to_string(),
-        "export {{ type InvEntry, INVS, INV_COUNT }} from './invs';".to_string(),
-        "export {{ type ObjEntry, OBJS, OBJ_COUNT }} from './objs';".to_string(),
-        "export {{ type NpcEntry, NPCS, NPC_COUNT }} from './npcs';".to_string(),
-        "export {{ type LocEntry, LOCS, LOC_COUNT }} from './locs';".to_string(),
-        "export {{ type SeqEntry, SEQS, SEQ_COUNT }} from './seqs';".to_string(),
-        "export {{ type SpotEntry, SPOTS, SPOT_COUNT }} from './spots';".to_string(),
-        "export {{ NamedObjIds, NAMED_OBJ_COUNT }} from './named_objs';".to_string(),
-        "export {{ NamedNpcIds, NAMED_NPC_COUNT }} from './named_npcs';".to_string(),
-        "export {{ NamedLocIds, NAMED_LOC_COUNT }} from './named_locs';".to_string(),
-        "export {{ type ItemEntry, ITEMS, ITEM_COUNT,".to_string(),
+        "export { type InvEntry, INVS, INV_COUNT } from './invs';".to_string(),
+        "export { type ObjEntry, OBJS, OBJ_COUNT } from './objs';".to_string(),
+        "export { type NpcEntry, NPCS, NPC_COUNT } from './npcs';".to_string(),
+        "export { type LocEntry, LOCS, LOC_COUNT } from './locs';".to_string(),
+        "export { type SeqEntry, SEQS, SEQ_COUNT } from './seqs';".to_string(),
+        "export { type SpotEntry, SPOTS, SPOT_COUNT } from './spots';".to_string(),
+        "export { NamedObjIds, NAMED_OBJ_COUNT } from './named_objs';".to_string(),
+        "export { NamedNpcIds, NAMED_NPC_COUNT } from './named_npcs';".to_string(),
+        "export { NamedLocIds, NAMED_LOC_COUNT } from './named_locs';".to_string(),
+        "export { type ItemEntry, ITEMS, ITEM_COUNT,".to_string(),
         "    type ItemCategoryEntry, ITEM_CATEGORIES, ITEM_CATEGORY_COUNT,".to_string(),
         "    type ItemSetEntry, ITEM_SETS, ITEM_SET_COUNT,".to_string(),
         "    type NpcStatEntry, NPC_STATS, NPC_STAT_COUNT,".to_string(),
         "    type ClueLocationEntry, CLUE_LOCATIONS, CLUE_LOCATION_COUNT,".to_string(),
         "    ItemColumn, type ItemColumn, NpcColumn, type NpcColumn,".to_string(),
-        "}} from './dbtables';".to_string(),
-        "export {{ DB_TABLES, DB_TABLE_COUNT, DB_ROWS, DB_ROW_COUNT,".to_string(),
-        "    type DbTableEntry, type DbRowEntry, type DbTableColumn, type DbRowColumn }} from './dbtables';".to_string(),
+        "} from './dbtables';".to_string(),
+        "export { DB_TABLES, DB_TABLE_COUNT, DB_ROWS, DB_ROW_COUNT,".to_string(),
+        "    type DbTableEntry, type DbRowEntry, type DbTableColumn, type DbRowColumn } from './dbtables';".to_string(),
     ];
 
-    write_text(&out_dir.join("index.ts"), &lines.join("\n"))
+    lines.join("\n")
 }
 
 fn escape_ts_string(s: &str) -> String {
@@ -5789,6 +5878,30 @@ mod tests {
         assert_eq!("0x00ab12", format_colour(43_794));
         assert_eq!("0xff00ab12", format_colour(-16_733_422));
         assert_eq!("mapelement_42", format_map_element(42));
+    }
+
+    #[test]
+    fn index_exports_smoke_parse_as_typescript_export_list() {
+        let source = index_exports_source();
+
+        assert!(!source.contains("{{"));
+        assert!(!source.contains("}}"));
+        assert_export_braces_are_balanced(&source);
+    }
+
+    fn assert_export_braces_are_balanced(source: &str) {
+        let mut depth = 0_i32;
+        for line in source.lines() {
+            for c in line.chars() {
+                match c {
+                    '{' => depth += 1,
+                    '}' => depth -= 1,
+                    _ => {}
+                }
+                assert!(depth >= 0, "extra closing brace in {line}");
+            }
+        }
+        assert_eq!(0, depth, "unclosed export brace");
     }
 
     #[test]

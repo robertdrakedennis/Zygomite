@@ -1,7 +1,7 @@
-//! Semantic tree manifest for CacheOverlay (`prepare-overlay`).
+//! Semantic tree manifest for `CacheOverlay` (`prepare-overlay`).
 
 use crate::cache::FlatCache;
-use anyhow::{Context, Result};
+use crate::error::{Context, Result};
 use serde::Serialize;
 use std::collections::hash_map::DefaultHasher;
 use std::fs;

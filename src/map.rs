@@ -1,5 +1,6 @@
+use crate::cache_bail as bail;
+use crate::error::Result;
 use crate::packet::Packet;
-use anyhow::{Result, bail};
 use serde::Serialize;
 use std::collections::BTreeMap;
 
@@ -255,7 +256,58 @@ pub struct Vector4 {
     pub w: f32,
 }
 
-pub fn decode_map_square(files: &BTreeMap<u32, Vec<u8>>, build: u32) -> MapSquare {
+pub fn decode_map_square(files: &BTreeMap<u32, Vec<u8>>, build: u32) -> Result<MapSquare> {
+    let landscape = files
+        .get(&3)
+        .map(|data| decode_landscape(&mut Packet::new(data), false, build))
+        .transpose()?;
+
+    let underwater_landscape = files
+        .get(&4)
+        .map(|data| decode_landscape(&mut Packet::new(data), true, build))
+        .transpose()?;
+
+    let locs = files
+        .get(&0)
+        .map(|data| decode_locs(&mut Packet::new(data)))
+        .transpose()?
+        .unwrap_or_default();
+
+    let underwater_locs = files
+        .get(&1)
+        .map(|data| decode_locs(&mut Packet::new(data)))
+        .transpose()?
+        .unwrap_or_default();
+
+    let environment = files
+        .get(&6)
+        .map(|data| decode_environment(&mut Packet::new(data), build))
+        .transpose()?;
+
+    let lights = files
+        .get(&7)
+        .map(|data| decode_lights(&mut Packet::new(data), build))
+        .transpose()?
+        .unwrap_or_default();
+
+    let water = files
+        .get(&8)
+        .map(|data| decode_water(&mut Packet::new(data)))
+        .transpose()?
+        .unwrap_or_default();
+
+    Ok(MapSquare {
+        landscape,
+        underwater_landscape,
+        locs,
+        underwater_locs,
+        environment,
+        lights,
+        water,
+    })
+}
+
+pub fn decode_map_square_best_effort(files: &BTreeMap<u32, Vec<u8>>, build: u32) -> MapSquare {
     macro_rules! try_decode {
         ($decoder:expr) => {
             match $decoder {
@@ -318,10 +370,7 @@ fn has_jagx_header(packet: &mut Packet<'_>) -> Result<bool> {
         return Ok(false);
     }
     let pos = packet.pos();
-    if packet.g1()? != b'j'
-        || packet.g1()? != b'a'
-        || packet.g1()? != b'g'
-        || packet.g1()? != b'x'
+    if packet.g1()? != b'j' || packet.g1()? != b'a' || packet.g1()? != b'g' || packet.g1()? != b'x'
     {
         packet.set_pos(pos)?;
         return Ok(false);
@@ -332,7 +381,11 @@ fn has_jagx_header(packet: &mut Packet<'_>) -> Result<bool> {
     Ok(true)
 }
 
-fn decode_landscape(packet: &mut Packet<'_>, underwater: bool, _build: u32) -> Result<LandscapeData> {
+fn decode_landscape(
+    packet: &mut Packet<'_>,
+    underwater: bool,
+    _build: u32,
+) -> Result<LandscapeData> {
     let has_jagx = has_jagx_header(packet)?;
     let level_count: usize = if underwater { 1 } else { 4 };
 
@@ -363,21 +416,25 @@ fn decode_landscape(packet: &mut Packet<'_>, underwater: bool, _build: u32) -> R
                     underlay_ids[level][x][z] = packet.gsmart1or2()?;
                 }
                 if (opcode & 0x8) != 0 {
-                    let height = i32::from(if has_jagx { packet.g2()? } else { u16::from(packet.g1()?) });
+                    let height = i32::from(if has_jagx {
+                        packet.g2()?
+                    } else {
+                        u16::from(packet.g1()?)
+                    });
                     if underwater {
-                        heights[0][x][z] = height * 8 << 2;
+                        heights[0][x][z] = (height * 8) << 2;
                     } else {
                         let h = if height == 1 { 0 } else { height };
                         if level == 0 {
                             heights[0][x][z] = -(h * 8) << 2;
                         } else {
-                            heights[level][x][z] = heights[level - 1][x][z] - (h * 8 << 2);
+                            heights[level][x][z] = heights[level - 1][x][z] - ((h * 8) << 2);
                         }
                     }
                 } else if underwater {
                     heights[0][x][z] = 0;
                 } else if level == 0 {
-                    heights[0][x][z] = -(perlin(x as i32 + 932731, z as i32 + 556238) * 8) << 2;
+                    heights[0][x][z] = -(perlin(x as i32 + 932_731, z as i32 + 556_238) * 8) << 2;
                 } else {
                     heights[level][x][z] = heights[level - 1][x][z] - 960;
                 }
@@ -385,29 +442,33 @@ fn decode_landscape(packet: &mut Packet<'_>, underwater: bool, _build: u32) -> R
         }
     }
 
-    let non_member_areas = if has_jagx && !underwater && packet.pos().saturating_add(8) <= packet.len() {
-        let mut areas = vec![0u8; 8];
-        for a in areas.iter_mut() {
-            *a = packet.g1()?;
+    let non_member_areas =
+        if has_jagx && !underwater && packet.pos().saturating_add(8) <= packet.len() {
+            let mut areas = vec![0u8; 8];
+            for area in &mut areas {
+                *area = packet.g1()?;
+            }
+            Some(areas)
+        } else {
+            None
+        };
+
+    let extras = if has_jagx && packet.pos() < packet.len() {
+        let entries = decode_landscape_extras(packet)?;
+        if entries.is_empty() {
+            None
+        } else {
+            Some(entries)
         }
-        Some(areas)
     } else {
         None
     };
 
-    // Try extras only if there are 2+ bytes remaining (minimum for opcode + data)
-    let extras = if has_jagx && packet.pos().saturating_add(2) <= packet.len() {
-        match decode_landscape_extras(packet) {
-            Ok(e) if !e.is_empty() => Some(e),
-            _ => None,
-        }
-    } else {
-        None
-    };
-
-    // Skip remaining unconsumed bytes matching Java's strict check
-    if packet.pos() != packet.len() && packet.pos().saturating_add(2) <= packet.len() {
-        // Log but continue — partial decode is better than no decode
+    if packet.pos() != packet.len() {
+        bail!(
+            "landscape decode left {} trailing bytes",
+            packet.len().saturating_sub(packet.pos())
+        );
     }
 
     Ok(LandscapeData {
@@ -433,11 +494,14 @@ fn decode_landscape_extras(packet: &mut Packet<'_>) -> Result<Vec<serde_json::Va
             0x01 => decode_extra_01(packet, &mut entry)?,
             0x02 => {
                 entry.insert("name".into(), "unk02".into());
-                entry.insert("values".into(), serde_json::json!([
-                    read_f32_be(packet)?,
-                    read_f32_be(packet)?,
-                    read_f32_be(packet)?
-                ]));
+                entry.insert(
+                    "values".into(),
+                    serde_json::json!([
+                        read_f32_be(packet)?,
+                        read_f32_be(packet)?,
+                        read_f32_be(packet)?
+                    ]),
+                );
             }
             0x03 => {
                 entry.insert("name".into(), "unk03".into());
@@ -460,26 +524,47 @@ fn decode_landscape_extras(packet: &mut Packet<'_>) -> Result<Vec<serde_json::Va
     Ok(extras)
 }
 
-fn decode_extra_00(packet: &mut Packet<'_>, entry: &mut serde_json::Map<String, serde_json::Value>) -> Result<()> {
+fn decode_extra_00(
+    packet: &mut Packet<'_>,
+    entry: &mut serde_json::Map<String, serde_json::Value>,
+) -> Result<()> {
     entry.insert("name".into(), "unk00".into());
     let flags = packet.g1()?;
     entry.insert("flags".into(), flags.into());
-    if (flags & 0x01) != 0 { entry.insert("unk01".into(), read_bytes(packet, 4)?.into()); }
-    if (flags & 0x02) != 0 { entry.insert("unk02".into(), packet.g2()?.into()); }
-    if (flags & 0x04) != 0 { entry.insert("unk04".into(), packet.g2()?.into()); }
-    if (flags & 0x08) != 0 { entry.insert("unk08".into(), packet.g2()?.into()); }
-    if (flags & 0x10) != 0 {
-        entry.insert("unk10".into(), serde_json::json!([
-            packet.g2()?, packet.g2()?, packet.g2()?
-        ]));
+    if (flags & 0x01) != 0 {
+        entry.insert("unk01".into(), read_bytes(packet, 4)?.into());
     }
-    if (flags & 0x20) != 0 { entry.insert("unk20".into(), read_bytes(packet, 4)?.into()); }
-    if (flags & 0x40) != 0 { entry.insert("unk40".into(), packet.g2()?.into()); }
-    if (flags & 0x80) != 0 { entry.insert("unk80".into(), packet.g2()?.into()); }
+    if (flags & 0x02) != 0 {
+        entry.insert("unk02".into(), packet.g2()?.into());
+    }
+    if (flags & 0x04) != 0 {
+        entry.insert("unk04".into(), packet.g2()?.into());
+    }
+    if (flags & 0x08) != 0 {
+        entry.insert("unk08".into(), packet.g2()?.into());
+    }
+    if (flags & 0x10) != 0 {
+        entry.insert(
+            "unk10".into(),
+            serde_json::json!([packet.g2()?, packet.g2()?, packet.g2()?]),
+        );
+    }
+    if (flags & 0x20) != 0 {
+        entry.insert("unk20".into(), read_bytes(packet, 4)?.into());
+    }
+    if (flags & 0x40) != 0 {
+        entry.insert("unk40".into(), packet.g2()?.into());
+    }
+    if (flags & 0x80) != 0 {
+        entry.insert("unk80".into(), packet.g2()?.into());
+    }
     Ok(())
 }
 
-fn decode_extra_01(packet: &mut Packet<'_>, entry: &mut serde_json::Map<String, serde_json::Value>) -> Result<()> {
+fn decode_extra_01(
+    packet: &mut Packet<'_>,
+    entry: &mut serde_json::Map<String, serde_json::Value>,
+) -> Result<()> {
     entry.insert("name".into(), "unk01".into());
     let count = usize::from(packet.g1()?);
     let mut entries = Vec::with_capacity(count);
@@ -494,7 +579,10 @@ fn decode_extra_01(packet: &mut Packet<'_>, entry: &mut serde_json::Map<String, 
         for _ in 0..array_count {
             arrays.push(read_bytes(packet, 4)?);
         }
-        e.insert("array5".into(), serde_json::to_value(arrays).unwrap_or_default());
+        e.insert(
+            "array5".into(),
+            serde_json::to_value(arrays).unwrap_or_default(),
+        );
         e.insert("short3".into(), packet.g2()?.into());
         e.insert("short4".into(), packet.g2()?.into());
         let extra_flags = packet.g1()?;
@@ -509,7 +597,10 @@ fn decode_extra_01(packet: &mut Packet<'_>, entry: &mut serde_json::Map<String, 
     Ok(())
 }
 
-fn decode_extra_81(packet: &mut Packet<'_>, entry: &mut serde_json::Map<String, serde_json::Value>) -> Result<()> {
+fn decode_extra_81(
+    packet: &mut Packet<'_>,
+    entry: &mut serde_json::Map<String, serde_json::Value>,
+) -> Result<()> {
     entry.insert("name".into(), "unk81".into());
     let mut entries = Vec::with_capacity(4);
     for _ in 0..4 {
@@ -538,14 +629,14 @@ fn decode_locs(packet: &mut Packet<'_>) -> Result<Vec<MapLoc>> {
 
     while id_offset != 0 {
         id += id_offset;
-        let mut packed: i32 = 0;
+        let mut coord: i32 = 0;
         let mut packed_offset = i32::from(packet.gsmart1or2()?);
 
         while packed_offset != 0 {
-            packed += packed_offset - 1;
-            let z = (packed & 0x3F) as u8;
-            let x = ((packed >> 6) & 0x3F) as u8;
-            let level = (packed >> 12) as u8;
+            coord += packed_offset - 1;
+            let z = (coord & 0x3F) as u8;
+            let x = ((coord >> 6) & 0x3F) as u8;
+            let level = (coord >> 12) as u8;
             let info = packet.g1()?;
             let transform = if (info & 0x80) != 0 {
                 Some(decode_loc_transform(packet)?)
@@ -554,7 +645,15 @@ fn decode_locs(packet: &mut Packet<'_>) -> Result<Vec<MapLoc>> {
             };
             let shape = (info >> 2) & 0x1F;
             let angle = info & 0x3;
-            entries.push(MapLoc { id, x, z, level, shape, angle, transform });
+            entries.push(MapLoc {
+                id,
+                x,
+                z,
+                level,
+                shape,
+                angle,
+                transform,
+            });
             packed_offset = i32::from(packet.gsmart1or2()?);
         }
         id_offset = packet.g_extended_1or2()?;
@@ -570,24 +669,40 @@ fn decode_loc_transform(packet: &mut Packet<'_>) -> Result<LocTransform> {
     let mut scale = [1.0f32; 3];
 
     if (flags & 0x1) != 0 {
-        rotation[0] = packet.g2s()? as f32 / 32768.0;
-        rotation[1] = packet.g2s()? as f32 / 32768.0;
-        rotation[2] = packet.g2s()? as f32 / 32768.0;
-        rotation[3] = packet.g2s()? as f32 / 32768.0;
+        rotation[0] = f32::from(packet.g2s()?) / 32768.0;
+        rotation[1] = f32::from(packet.g2s()?) / 32768.0;
+        rotation[2] = f32::from(packet.g2s()?) / 32768.0;
+        rotation[3] = f32::from(packet.g2s()?) / 32768.0;
     }
-    if (flags & 0x2) != 0 { translation[0] = i32::from(packet.g2s()?); }
-    if (flags & 0x4) != 0 { translation[1] = i32::from(packet.g2s()?); }
-    if (flags & 0x8) != 0 { translation[2] = i32::from(packet.g2s()?); }
+    if (flags & 0x2) != 0 {
+        translation[0] = i32::from(packet.g2s()?);
+    }
+    if (flags & 0x4) != 0 {
+        translation[1] = i32::from(packet.g2s()?);
+    }
+    if (flags & 0x8) != 0 {
+        translation[2] = i32::from(packet.g2s()?);
+    }
     if (flags & 0x10) != 0 {
-        let s = packet.g2s()? as f32 / 128.0;
+        let s = f32::from(packet.g2s()?) / 128.0;
         scale = [s, s, s];
     } else {
-        if (flags & 0x20) != 0 { scale[0] = packet.g2s()? as f32 / 128.0; }
-        if (flags & 0x40) != 0 { scale[1] = packet.g2s()? as f32 / 128.0; }
-        if (flags & 0x80) != 0 { scale[2] = packet.g2s()? as f32 / 128.0; }
+        if (flags & 0x20) != 0 {
+            scale[0] = f32::from(packet.g2s()?) / 128.0;
+        }
+        if (flags & 0x40) != 0 {
+            scale[1] = f32::from(packet.g2s()?) / 128.0;
+        }
+        if (flags & 0x80) != 0 {
+            scale[2] = f32::from(packet.g2s()?) / 128.0;
+        }
     }
 
-    Ok(LocTransform { rotation, translation, scale })
+    Ok(LocTransform {
+        rotation,
+        translation,
+        scale,
+    })
 }
 
 fn decode_environment(packet: &mut Packet<'_>, build: u32) -> Result<Environment> {
@@ -836,10 +951,10 @@ fn read_f32_be(packet: &mut Packet<'_>) -> Result<f32> {
 // ── Perlin noise (for default landscape heights) ──
 
 fn perlin(x: i32, z: i32) -> i32 {
-    let mut value = perlin_scale(x + 45365, z + 91923, 4) - 128;
-    value += (perlin_scale(x + 10294, z + 37821, 2) - 128) >> 1;
+    let mut value = perlin_scale(x + 45_365, z + 91_923, 4) - 128;
+    value += (perlin_scale(x + 10_294, z + 37_821, 2) - 128) >> 1;
     value += (perlin_scale(x, z, 1) - 128) >> 2;
-    let result = (value as f64 * 0.3) as i32 + 35;
+    let result = (f64::from(value) * 0.3) as i32 + 35;
     result.clamp(10, 60)
 }
 
@@ -848,26 +963,27 @@ fn perlin_scale(x: i32, z: i32, scale: i32) -> i32 {
     let fx = x & (scale - 1);
     let sz = z / scale;
     let fz = z & (scale - 1);
-    let a = smooth_noise(sx, sz);
-    let b = smooth_noise(sx + 1, sz);
-    let c = smooth_noise(sx, sz + 1);
-    let d = smooth_noise(sx + 1, sz + 1);
-    let xb = interpolate(a, b, fx, scale);
-    let zb = interpolate(c, d, fx, scale);
+    let northwest = smooth_noise(sx, sz);
+    let northeast = smooth_noise(sx + 1, sz);
+    let southwest = smooth_noise(sx, sz + 1);
+    let southeast = smooth_noise(sx + 1, sz + 1);
+    let xb = interpolate(northwest, northeast, fx, scale);
+    let zb = interpolate(southwest, southeast, fx, scale);
     interpolate(xb, zb, fz, scale)
 }
 
 fn interpolate(a: i32, b: i32, frac: i32, scale: i32) -> i32 {
-    let theta = frac as f64 * std::f64::consts::PI / scale as f64;
+    let theta = f64::from(frac) * std::f64::consts::PI / f64::from(scale);
     let cosine = (theta.cos() * 16384.0) as i64;
     let weight = (65536 - cosine) >> 1;
-    let a = a as i64;
-    let b = b as i64;
-    (((65536 - weight) * a >> 16) + (b * weight >> 16)) as i32
+    let a = i64::from(a);
+    let b = i64::from(b);
+    ((((65536 - weight) * a) >> 16) + ((b * weight) >> 16)) as i32
 }
 
 fn smooth_noise(x: i32, z: i32) -> i32 {
-    let corners = noise(x - 1, z - 1) + noise(x + 1, z - 1) + noise(x - 1, z + 1) + noise(x + 1, z + 1);
+    let corners =
+        noise(x - 1, z - 1) + noise(x + 1, z - 1) + noise(x - 1, z + 1) + noise(x + 1, z + 1);
     let sides = noise(x - 1, z) + noise(x + 1, z) + noise(x, z - 1) + noise(x, z + 1);
     let center = noise(x, z);
     center / 4 + corners / 16 + sides / 8
@@ -876,7 +992,8 @@ fn smooth_noise(x: i32, z: i32) -> i32 {
 fn noise(x: i32, z: i32) -> i32 {
     let mixed = z.wrapping_mul(57).wrapping_add(x);
     let hashed = (mixed << 13) ^ mixed;
-    let value = (hashed as i64 * hashed as i64 * 15731 + 789221) * hashed as i64 + 1376312589;
+    let hashed = i64::from(hashed);
+    let value = (hashed * hashed * 15_731 + 789_221) * hashed + 1_376_312_589;
     ((value & i64::from(i32::MAX)) >> 19) as i32 & 0xFF
 }
 
@@ -888,7 +1005,7 @@ mod tests {
     #[test]
     fn decodes_empty_mapsquare() {
         let files = BTreeMap::new();
-        let decoded = decode_map_square(&files, 947);
+        let decoded = decode_map_square(&files, 947).expect("empty mapsquare");
         assert!(decoded.environment.is_none());
         assert!(decoded.lights.is_empty());
         assert!(decoded.water.is_empty());
@@ -914,7 +1031,7 @@ mod tests {
         push_u16_be(&mut payload, 9);
         files.insert(8, payload);
 
-        let decoded = decode_map_square(&files, 947);
+        let decoded = decode_map_square(&files, 947).expect("water patch");
         assert_eq!(1, decoded.water.len());
         assert_eq!(1, decoded.water[0].x);
         assert_eq!(9, decoded.water[0].type_id);

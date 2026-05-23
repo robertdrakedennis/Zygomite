@@ -1,5 +1,6 @@
+use crate::cache_bail as bail;
+use crate::error::{Context, Result};
 use crate::packet::Packet;
-use anyhow::{Context, Result, bail};
 use bzip2::read::BzDecoder;
 use flate2::read::GzDecoder;
 use std::collections::BTreeMap;
@@ -301,7 +302,11 @@ pub fn unpack_group(
     let file_count = index.file_count_for_group(group)?;
     if file_count == 1 {
         let mut out = BTreeMap::new();
-        let file_id = index.file_ids_for_group(group)?.get(0).copied().unwrap_or(0);
+        let file_id = index
+            .file_ids_for_group(group)?
+            .first()
+            .copied()
+            .unwrap_or(0);
         out.insert(file_id, group_data);
         return Ok(out);
     }

@@ -3,16 +3,19 @@
 use crate::cache::FlatCache;
 use crate::config::{SeqEntry, SpotEntry, SpotOp};
 use crate::constants::{
-    ARCHIVE_CONFIG, ARCHIVE_ENUM_CONFIG, ARCHIVE_LOC_CONFIG, ARCHIVE_NPC_CONFIG, ARCHIVE_OBJ_CONFIG,
-    ARCHIVE_SEQ_CONFIG, ARCHIVE_SPOT_CONFIG, ARCHIVE_STRUCT_CONFIG, CONFIG_GROUP_BAS,
-    CONFIG_GROUP_DBROW, CONFIG_GROUP_DBTABLE, CONFIG_GROUP_PARAM, CONFIG_GROUP_VAR_BIT,
-    CONFIG_GROUP_VAR_CLAN, CONFIG_GROUP_VAR_CLAN_SETTING, CONFIG_GROUP_VAR_CLIENT,
-    CONFIG_GROUP_VAR_CONTROLLER, CONFIG_GROUP_VAR_GLOBAL, CONFIG_GROUP_VAR_NPC,
-    CONFIG_GROUP_VAR_OBJECT, CONFIG_GROUP_VAR_PLAYER, CONFIG_GROUP_VAR_PLAYER_GROUP,
-    CONFIG_GROUP_VAR_REGION, CONFIG_GROUP_VAR_WORLD,
+    ARCHIVE_CONFIG, ARCHIVE_ENUM_CONFIG, ARCHIVE_LOC_CONFIG, ARCHIVE_NPC_CONFIG,
+    ARCHIVE_OBJ_CONFIG, ARCHIVE_SEQ_CONFIG, ARCHIVE_SPOT_CONFIG, ARCHIVE_STRUCT_CONFIG,
+    CONFIG_GROUP_BAS, CONFIG_GROUP_DBROW, CONFIG_GROUP_DBTABLE, CONFIG_GROUP_LOC_LEGACY,
+    CONFIG_GROUP_NPC_LEGACY, CONFIG_GROUP_OBJ_LEGACY, CONFIG_GROUP_PARAM, CONFIG_GROUP_SEQ,
+    CONFIG_GROUP_SPOT, CONFIG_GROUP_STRUCT, CONFIG_GROUP_VAR_BIT, CONFIG_GROUP_VAR_CLAN,
+    CONFIG_GROUP_VAR_CLAN_SETTING, CONFIG_GROUP_VAR_CLIENT, CONFIG_GROUP_VAR_CONTROLLER,
+    CONFIG_GROUP_VAR_GLOBAL, CONFIG_GROUP_VAR_NPC, CONFIG_GROUP_VAR_OBJECT,
+    CONFIG_GROUP_VAR_PLAYER, CONFIG_GROUP_VAR_PLAYER_GROUP, CONFIG_GROUP_VAR_REGION,
+    CONFIG_GROUP_VAR_WORLD,
 };
+use crate::error::{Context, Result};
 use crate::js5;
-use anyhow::{Context, Result};
+use crate::vars::VarDomain;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -32,7 +35,7 @@ pub struct ConfigRefGraph {
     pub r#struct: BTreeMap<u32, RefMap>,
     pub dbtable: BTreeMap<u32, RefMap>,
     pub dbrow: BTreeMap<u32, RefMap>,
-    pub varp: BTreeMap<u32, RefMap>,
+    pub varp: BTreeMap<String, BTreeMap<u32, RefMap>>,
     pub varbit: BTreeMap<u32, RefMap>,
     pub param: BTreeMap<u32, RefMap>,
 }
@@ -45,29 +48,33 @@ fn op_key_to_ref_kind(key: &str) -> Option<&'static str> {
     match key {
         // Model references
         "model" | "manwear" | "manwear2" | "manwear3" | "womanwear" | "womanwear2"
-        | "womanwear3" | "manhead" | "manhead2" | "womanhead" | "womanhead2"
-        | "covermarker" | "modela" | "modelb" => Some("model"),
+        | "womanwear3" | "manhead" | "manhead2" | "womanhead" | "womanhead2" | "covermarker"
+        | "modela" | "modelb" => Some("model"),
         // Seq/animation references
-        "anim" | "readyanim" | "walkanim" | "turnleftanim" | "turnrightanim"
-        | "crawlanim" | "crawlanim_b" | "crawlanim_l" | "crawlanim_r" | "runanim"
-        | "runanim_b" | "runanim_l" | "runanim_r" | "walkanim_b" | "walkanim_l"
-        | "walkanim_r" | "readyanim_l" | "readyanim_r" | "crawlturn_l" | "crawlturn_r"
-        | "runturn_l" | "runturn_r" | "walkturn_l" | "walkturn_r" | "randomreadyanim" => {
-            Some("seq")
-        }
+        "anim" | "readyanim" | "walkanim" | "turnleftanim" | "turnrightanim" | "crawlanim"
+        | "crawlanim_b" | "crawlanim_l" | "crawlanim_r" | "runanim" | "runanim_b" | "runanim_l"
+        | "runanim_r" | "walkanim_b" | "walkanim_l" | "walkanim_r" | "readyanim_l"
+        | "readyanim_r" | "crawlturn_l" | "crawlturn_r" | "runturn_l" | "runturn_r"
+        | "walkturn_l" | "walkturn_r" | "randomreadyanim" => Some("seq"),
         // Other typed references
         "bas" => Some("bas"),
         "msi" => Some("msi"),
         "vfx" => Some("vfx"),
         "quest" => Some("quest"),
         // Obj links
-        "certlink" | "certtemplate" | "lentlink" | "lenttemplate" | "boughtlink"
-        | "boughttemplate" | "shardlink" | "shardtemplate" | "placeholderlink"
+        "certlink"
+        | "certtemplate"
+        | "lentlink"
+        | "lenttemplate"
+        | "boughtlink"
+        | "boughttemplate"
+        | "shardlink"
+        | "shardtemplate"
+        | "placeholderlink"
         | "placeholdertemplate" => Some("obj"),
         // Cursors
-        "cursor1" | "cursor2" | "cursor3" | "cursor4" | "cursor5" | "cursor6"
-        | "icursor1" | "icursor2" | "icursor3" | "icursor4" | "icursor5"
-        | "cursorattack" => Some("cursor"),
+        "cursor1" | "cursor2" | "cursor3" | "cursor4" | "cursor5" | "cursor6" | "icursor1"
+        | "icursor2" | "icursor3" | "icursor4" | "icursor5" | "cursorattack" => Some("cursor"),
         // Multivariants
         "multiloc" => Some("loc"),
         "multinpc" => Some("npc"),
@@ -101,10 +108,10 @@ fn scan_op_special_refs(refs: &mut RefMap, op: &str) {
         }
         return;
     }
-    if let Some(rest) = op.strip_prefix("condition=varbit:") {
-        if let Ok(id) = rest.split([',', ' ']).next().unwrap_or(rest).parse::<u32>() {
-            insert_ref_id(refs, "varbit", id);
-        }
+    if let Some(rest) = op.strip_prefix("condition=varbit:")
+        && let Ok(id) = rest.split([',', ' ']).next().unwrap_or(rest).parse::<u32>()
+    {
+        insert_ref_id(refs, "varbit", id);
     }
 }
 
@@ -114,10 +121,7 @@ fn scan_oplist(ops: &[String]) -> RefMap {
         scan_op_special_refs(&mut refs, op);
         if let Some((key, value)) = op.split_once('=') {
             // Truncate value at first comma or space (multi-value fields)
-            let num_str = value
-                .split([',', ' '])
-                .next()
-                .unwrap_or(value);
+            let num_str = value.split([',', ' ']).next().unwrap_or(value);
             if let Ok(id) = num_str.parse::<u32>() {
                 if let Some(kind) = op_key_to_ref_kind(key) {
                     insert_ref_id(&mut refs, kind, id);
@@ -169,23 +173,19 @@ fn scan_seq(entry: &SeqEntry) -> RefMap {
     }
     for &w in &entry.walkmerge {
         if w != 0xFFFF {
-            refs.entry("seq".into())
-                .or_default()
-                .insert(u32::from(w));
+            refs.entry("seq".into()).or_default().insert(u32::from(w));
         }
     }
     if let Some(g) = entry.group {
         insert_ref_id(&mut refs, "seqgroup", u32::from(g));
     }
-    if let Some(keyframeset) = entry.keyframeset {
-        if keyframeset != 0xFFFF {
-            insert_ref_id(&mut refs, "anim", u32::from(keyframeset));
-        }
+    if let Some(keyframeset) = entry.keyframeset
+        && keyframeset != 0xFFFF
+    {
+        insert_ref_id(&mut refs, "anim", u32::from(keyframeset));
     }
     for p in &entry.params {
-        refs.entry("param".into())
-            .or_default()
-            .insert(p.param_id);
+        refs.entry("param".into()).or_default().insert(p.param_id);
     }
     refs
 }
@@ -195,14 +195,10 @@ fn scan_spot(entry: &SpotEntry) -> RefMap {
     for op in &entry.ops {
         match op {
             SpotOp::Model(id) if *id >= 0 => {
-                refs.entry("model".into())
-                    .or_default()
-                    .insert(*id as u32);
+                refs.entry("model".into()).or_default().insert(*id as u32);
             }
             SpotOp::Anim(id) if *id >= 0 => {
-                refs.entry("seq".into())
-                    .or_default()
-                    .insert(*id as u32);
+                refs.entry("seq".into()).or_default().insert(*id as u32);
             }
             _ => {}
         }
@@ -212,11 +208,7 @@ fn scan_spot(entry: &SpotEntry) -> RefMap {
 
 // ── Archive group iteration helpers ──
 
-fn read_group_files(
-    cache: &FlatCache,
-    archive: u32,
-    group: u32,
-) -> Result<Vec<(u32, Vec<u8>)>> {
+fn read_group_files(cache: &FlatCache, archive: u32, group: u32) -> Result<Vec<(u32, Vec<u8>)>> {
     let Some(data) = cache.get(archive, group)? else {
         return Ok(Vec::new());
     };
@@ -238,13 +230,57 @@ fn for_each_group_file(
     Ok(())
 }
 
+fn split_config_id(group: u32, file: u32, bit_shift: u32) -> u32 {
+    (group << bit_shift) | file
+}
+
+fn archive_index_if_present(cache: &FlatCache, archive: u32) -> Result<Option<js5::ArchiveIndex>> {
+    if cache.get(255, archive)?.is_none() {
+        return Ok(None);
+    }
+    Ok(Some(cache.archive_index(archive)?))
+}
+
+fn for_each_split_archive_file(
+    cache: &FlatCache,
+    archive: u32,
+    bit_shift: u32,
+    mut f: impl FnMut(u32, &[u8]) -> Result<()>,
+) -> Result<bool> {
+    let Some(index) = archive_index_if_present(cache, archive)? else {
+        return Ok(false);
+    };
+    for &group in &index.group_id {
+        let Some(data) = cache.get(archive, group)? else {
+            continue;
+        };
+        for (file, bytes) in js5::unpack_group(&index, group, &data)? {
+            f(split_config_id(group, file, bit_shift), &bytes)?;
+        }
+    }
+    Ok(true)
+}
+
+fn for_each_split_or_legacy_file(
+    cache: &FlatCache,
+    archive: u32,
+    bit_shift: u32,
+    legacy_group: u32,
+    mut f: impl FnMut(u32, &[u8]) -> Result<()>,
+) -> Result<()> {
+    if for_each_split_archive_file(cache, archive, bit_shift, &mut f)? {
+        return Ok(());
+    }
+    for_each_group_file(cache, ARCHIVE_CONFIG, legacy_group, f)
+}
+
 // ── Build each section ──
 
-fn build_oplist_section(
+fn build_legacy_oplist_section(
     cache: &FlatCache,
     archive: u32,
     group: u32,
-    parse: impl Fn(u32, &[u8]) -> Result<crate::config::OpListEntry>,
+    parse: impl Fn(u32, &[u8]) -> crate::error::Result<crate::config::OpListEntry>,
 ) -> Result<BTreeMap<u32, RefMap>> {
     let mut map = BTreeMap::new();
     for_each_group_file(cache, archive, group, |id, data| {
@@ -255,13 +291,35 @@ fn build_oplist_section(
     Ok(map)
 }
 
-fn build_varp_section(cache: &FlatCache, group: u32, domain: crate::vars::VarDomain) -> Result<BTreeMap<u32, RefMap>> {
+fn build_split_oplist_section(
+    cache: &FlatCache,
+    archive: u32,
+    bit_shift: u32,
+    legacy_group: u32,
+    parse: impl Fn(u32, &[u8]) -> crate::error::Result<crate::config::OpListEntry>,
+) -> Result<BTreeMap<u32, RefMap>> {
+    let mut map = BTreeMap::new();
+    for_each_split_or_legacy_file(cache, archive, bit_shift, legacy_group, |id, data| {
+        let entry = parse(id, data)?;
+        map.insert(id, scan_oplist(&entry.ops));
+        Ok(())
+    })?;
+    Ok(map)
+}
+
+fn build_varp_section(
+    cache: &FlatCache,
+    group: u32,
+    domain: VarDomain,
+) -> Result<BTreeMap<u32, RefMap>> {
     let mut map = BTreeMap::new();
     for_each_group_file(cache, ARCHIVE_CONFIG, group, |id, data| {
         let entry = crate::vars::parse_var(domain, id, data)?;
         let mut refs = RefMap::new();
         if let Some(tid) = entry.type_id {
-            refs.entry("param".into()).or_default().insert(u32::from(tid));
+            refs.entry("param".into())
+                .or_default()
+                .insert(u32::from(tid));
         }
         map.insert(id, refs);
         Ok(())
@@ -269,51 +327,91 @@ fn build_varp_section(cache: &FlatCache, group: u32, domain: crate::vars::VarDom
     Ok(map)
 }
 
+fn varbit_refs(entry: &crate::vars::VarBitEntry) -> RefMap {
+    let mut refs = RefMap::new();
+    if let (Some(domain), Some(base_var)) = (entry.domain, entry.base_var) {
+        refs.entry(format!("varp_{}", domain.as_label()))
+            .or_default()
+            .insert(base_var);
+    }
+    refs
+}
+
 #[allow(clippy::field_reassign_with_default)]
 pub fn build_config_ref_graph(cache: &FlatCache, build: u32) -> Result<ConfigRefGraph> {
     let mut g = ConfigRefGraph::default();
 
-    g.obj = build_oplist_section(cache, ARCHIVE_OBJ_CONFIG, 0, |id, d| {
-        crate::config::parse_obj(id, d)
-    })?;
-    g.npc = build_oplist_section(cache, ARCHIVE_NPC_CONFIG, 0, |id, d| {
-        crate::config::parse_npc(id, d)
-    })?;
-    g.loc = build_oplist_section(cache, ARCHIVE_LOC_CONFIG, 0, |id, d| {
-        crate::config::parse_loc(id, d)
-    })?;
-    g.bas = build_oplist_section(cache, ARCHIVE_CONFIG, CONFIG_GROUP_BAS, |id, d| {
+    g.obj = build_split_oplist_section(
+        cache,
+        ARCHIVE_OBJ_CONFIG,
+        8,
+        CONFIG_GROUP_OBJ_LEGACY,
+        crate::config::parse_obj,
+    )?;
+    g.npc = build_split_oplist_section(
+        cache,
+        ARCHIVE_NPC_CONFIG,
+        7,
+        CONFIG_GROUP_NPC_LEGACY,
+        crate::config::parse_npc,
+    )?;
+    g.loc = build_split_oplist_section(
+        cache,
+        ARCHIVE_LOC_CONFIG,
+        8,
+        CONFIG_GROUP_LOC_LEGACY,
+        crate::config::parse_loc,
+    )?;
+    g.bas = build_legacy_oplist_section(cache, ARCHIVE_CONFIG, CONFIG_GROUP_BAS, |id, d| {
         crate::config::parse_bas(id, d, build)
     })?;
 
     // Seq — archive 20 (split)
     g.seq = {
         let mut map = BTreeMap::new();
-        for_each_group_file(cache, ARCHIVE_SEQ_CONFIG, 0, |id, data| {
-            let entry = crate::config::parse_seq(id, data)?;
-            map.insert(id, scan_seq(&entry));
-            Ok(())
-        })?;
+        for_each_split_or_legacy_file(
+            cache,
+            ARCHIVE_SEQ_CONFIG,
+            7,
+            CONFIG_GROUP_SEQ,
+            |id, data| {
+                let entry = crate::config::parse_seq(id, data)?;
+                map.insert(id, scan_seq(&entry));
+                Ok(())
+            },
+        )?;
         map
     };
 
     // Spot — archive 21 (split)
-    for_each_group_file(cache, ARCHIVE_SPOT_CONFIG, 0, |id, data| {
-        let entry = crate::config::parse_spot(id, data)?;
-        g.spot.insert(id, scan_spot(&entry));
-        Ok(())
-    })?;
+    for_each_split_or_legacy_file(
+        cache,
+        ARCHIVE_SPOT_CONFIG,
+        8,
+        CONFIG_GROUP_SPOT,
+        |id, data| {
+            let entry = crate::config::parse_spot(id, data)?;
+            g.spot.insert(id, scan_spot(&entry));
+            Ok(())
+        },
+    )?;
 
     // Struct — archive 22 (split)
-    for_each_group_file(cache, ARCHIVE_STRUCT_CONFIG, 0, |id, data| {
-        let entry = crate::config::parse_struct(id, data)?;
-        let mut refs = RefMap::new();
-        for p in &entry.params {
-            refs.entry("param".into()).or_default().insert(p.param_id);
-        }
-        g.r#struct.insert(id, refs);
-        Ok(())
-    })?;
+    for_each_split_or_legacy_file(
+        cache,
+        ARCHIVE_STRUCT_CONFIG,
+        5,
+        CONFIG_GROUP_STRUCT,
+        |id, data| {
+            let entry = crate::config::parse_struct(id, data)?;
+            let mut refs = RefMap::new();
+            for p in &entry.params {
+                refs.entry("param".into()).or_default().insert(p.param_id);
+            }
+            g.r#struct.insert(id, refs);
+            Ok(())
+        },
+    )?;
 
     // DbTable
     for_each_group_file(cache, ARCHIVE_CONFIG, CONFIG_GROUP_DBTABLE, |id, data| {
@@ -321,7 +419,9 @@ pub fn build_config_ref_graph(cache: &FlatCache, build: u32) -> Result<ConfigRef
         let mut refs = RefMap::new();
         for col in &entry.columns {
             for &tid in &col.tuple_types {
-                refs.entry("param".into()).or_default().insert(u32::from(tid));
+                refs.entry("param".into())
+                    .or_default()
+                    .insert(u32::from(tid));
             }
         }
         g.dbtable.insert(id, refs);
@@ -337,7 +437,9 @@ pub fn build_config_ref_graph(cache: &FlatCache, build: u32) -> Result<ConfigRef
         }
         for col in &entry.columns {
             for &tid in &col.tuple_types {
-                refs.entry("param".into()).or_default().insert(u32::from(tid));
+                refs.entry("param".into())
+                    .or_default()
+                    .insert(u32::from(tid));
             }
         }
         g.dbrow.insert(id, refs);
@@ -349,7 +451,9 @@ pub fn build_config_ref_graph(cache: &FlatCache, build: u32) -> Result<ConfigRef
         let entry = crate::config::parse_param(id, data)?;
         let mut refs = RefMap::new();
         if let Some(tid) = entry.type_id {
-            refs.entry("param".into()).or_default().insert(u32::from(tid));
+            refs.entry("param".into())
+                .or_default()
+                .insert(u32::from(tid));
         }
         g.param.insert(id, refs);
         Ok(())
@@ -364,19 +468,28 @@ pub fn build_config_ref_graph(cache: &FlatCache, build: u32) -> Result<ConfigRef
         (CONFIG_GROUP_VAR_REGION, crate::vars::VarDomain::Region),
         (CONFIG_GROUP_VAR_OBJECT, crate::vars::VarDomain::Object),
         (CONFIG_GROUP_VAR_CLAN, crate::vars::VarDomain::Clan),
-        (CONFIG_GROUP_VAR_CLAN_SETTING, crate::vars::VarDomain::ClanSetting),
-        (CONFIG_GROUP_VAR_CONTROLLER, crate::vars::VarDomain::Controller),
+        (
+            CONFIG_GROUP_VAR_CLAN_SETTING,
+            crate::vars::VarDomain::ClanSetting,
+        ),
+        (
+            CONFIG_GROUP_VAR_CONTROLLER,
+            crate::vars::VarDomain::Controller,
+        ),
         (CONFIG_GROUP_VAR_GLOBAL, crate::vars::VarDomain::Global),
-        (CONFIG_GROUP_VAR_PLAYER_GROUP, crate::vars::VarDomain::PlayerGroup),
+        (
+            CONFIG_GROUP_VAR_PLAYER_GROUP,
+            crate::vars::VarDomain::PlayerGroup,
+        ),
     ] {
         let section = build_varp_section(cache, group, domain)?;
-        g.varp.extend(section);
+        g.varp.insert(domain.as_label().to_string(), section);
     }
 
     // Varbits
     for_each_group_file(cache, ARCHIVE_CONFIG, CONFIG_GROUP_VAR_BIT, |id, data| {
-        let _entry = crate::vars::parse_varbit(id, data)?;
-        g.varbit.insert(id, RefMap::new());
+        let entry = crate::vars::parse_varbit(id, data)?;
+        g.varbit.insert(id, varbit_refs(&entry));
         Ok(())
     })?;
 
@@ -385,15 +498,19 @@ pub fn build_config_ref_graph(cache: &FlatCache, build: u32) -> Result<ConfigRef
         let index = cache.archive_index(ARCHIVE_ENUM_CONFIG)?;
         for &group in &index.group_id {
             for_each_group_file(cache, ARCHIVE_ENUM_CONFIG, group, |id, data| {
-                let entry = crate::config::parse_enum(id, data)?;
+                let entry = crate::config::parse_enum((group << 8) | id, data)?;
                 let mut refs = RefMap::new();
                 if let Some(tid) = entry.input_type_id {
-                    refs.entry("param".into()).or_default().insert(u32::from(tid));
+                    refs.entry("param".into())
+                        .or_default()
+                        .insert(u32::from(tid));
                 }
                 if let Some(tid) = entry.output_type_id {
-                    refs.entry("param".into()).or_default().insert(u32::from(tid));
+                    refs.entry("param".into())
+                        .or_default()
+                        .insert(u32::from(tid));
                 }
-                g.r#enum.insert(id, refs);
+                g.r#enum.insert((group << 8) | id, refs);
                 Ok(())
             })?;
         }
@@ -405,8 +522,7 @@ pub fn build_config_ref_graph(cache: &FlatCache, build: u32) -> Result<ConfigRef
 // ── JSON serializer ──
 
 pub fn write_refs_json(graph: &ConfigRefGraph, out_dir: &Path) -> Result<()> {
-    fs::create_dir_all(out_dir)
-        .with_context(|| format!("creating {}", out_dir.display()))?;
+    fs::create_dir_all(out_dir).with_context(|| format!("creating {}", out_dir.display()))?;
 
     let mut wrote = 0usize;
     macro_rules! write_ref_file {
@@ -438,7 +554,7 @@ pub fn write_refs_json(graph: &ConfigRefGraph, out_dir: &Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::scan_oplist;
+    use super::{scan_oplist, split_config_id, varbit_refs};
 
     #[test]
     fn scan_oplist_extracts_multivar_varbit_and_varp() {
@@ -447,8 +563,14 @@ mod tests {
             "multivar=varp:5".to_string(),
             "model=42".to_string(),
         ]);
-        assert_eq!(refs.get("multivar_varbit").map(|s| s.contains(&7)), Some(true));
-        assert_eq!(refs.get("multivar_varp").map(|s| s.contains(&5)), Some(true));
+        assert_eq!(
+            refs.get("multivar_varbit").map(|s| s.contains(&7)),
+            Some(true)
+        );
+        assert_eq!(
+            refs.get("multivar_varp").map(|s| s.contains(&5)),
+            Some(true)
+        );
         assert_eq!(refs.get("model").map(|s| s.contains(&42)), Some(true));
     }
 
@@ -456,5 +578,23 @@ mod tests {
     fn scan_oplist_extracts_condition_varbit() {
         let refs = scan_oplist(&["condition=varbit:9,0,1".to_string()]);
         assert_eq!(refs.get("varbit").map(|s| s.contains(&9)), Some(true));
+    }
+
+    #[test]
+    fn split_config_id_uses_group_shift() {
+        assert_eq!(0x0305, split_config_id(3, 5, 8));
+        assert_eq!(0x0185, split_config_id(3, 5, 7));
+        assert_eq!(0x0065, split_config_id(3, 5, 5));
+    }
+
+    #[test]
+    fn varbit_refs_include_base_var_domain() {
+        let entry = crate::vars::parse_varbit(7, &[1, 0, 0, 5, 2, 0, 1, 0]).expect("parse varbit");
+        let refs = varbit_refs(&entry);
+
+        assert_eq!(
+            refs.get("varp_player").map(|ids| ids.contains(&5)),
+            Some(true)
+        );
     }
 }
