@@ -102,6 +102,26 @@ cargo run -- models --out-dir /tmp/models --out-file /tmp/models.json
 cargo run -- audio --out-dir /tmp/audio --max-files 5000
 ```
 
+### CacheOverlay semantic tree (`prepare-overlay`)
+
+Writes everything the Alerion overlay needs under one directory:
+
+- `raw-flat/` — lossless JS5 group bytes for repack
+- `refs/` — structured config dependency graph (`obj.json`, `npc.json`, …)
+- `.rs3-cache-manifest.json` — artifact fingerprints for stamp/skip logic
+
+Legacy `config/dump.*` text is not produced here; use the separate `dump-configs` command only if you need human-readable dumps for inspection.
+
+```bash
+cargo run --release -- \
+  --cache-dir /path/to/cache/unpacked/947 \
+  --data-dir /path/to/tools/zwyz-rs3-cache/data \
+  --build 947 --subbuild 1 \
+  prepare-overlay --out-dir /path/to/cache/rs3-cache/947-all
+```
+
+Alerion server shortcut: `bun run cache:semantic:sync-947` (947 + 910 trees), then `bun run cacheoverlay:ensure-947-overlay`.
+
 # CS2 TypeScript export / transpile
 
 ```bash

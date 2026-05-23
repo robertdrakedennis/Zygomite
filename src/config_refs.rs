@@ -80,9 +80,38 @@ fn op_key_to_ref_kind(key: &str) -> Option<&'static str> {
     }
 }
 
+fn insert_ref_id(refs: &mut RefMap, kind: &str, id: u32) {
+    if id == 0xFFFF_FFFF {
+        return;
+    }
+    refs.entry(kind.to_string()).or_default().insert(id);
+}
+
+/// `multivar=varbit:7`, `multivar=varp:5`, `condition=varbit:7,0,1`, etc.
+fn scan_op_special_refs(refs: &mut RefMap, op: &str) {
+    if let Some(rest) = op.strip_prefix("multivar=varbit:") {
+        if let Ok(id) = rest.split([',', ' ']).next().unwrap_or(rest).parse::<u32>() {
+            insert_ref_id(refs, "multivar_varbit", id);
+        }
+        return;
+    }
+    if let Some(rest) = op.strip_prefix("multivar=varp:") {
+        if let Ok(id) = rest.split([',', ' ']).next().unwrap_or(rest).parse::<u32>() {
+            insert_ref_id(refs, "multivar_varp", id);
+        }
+        return;
+    }
+    if let Some(rest) = op.strip_prefix("condition=varbit:") {
+        if let Ok(id) = rest.split([',', ' ']).next().unwrap_or(rest).parse::<u32>() {
+            insert_ref_id(refs, "varbit", id);
+        }
+    }
+}
+
 fn scan_oplist(ops: &[String]) -> RefMap {
     let mut refs = RefMap::new();
     for op in ops {
+        scan_op_special_refs(&mut refs, op);
         if let Some((key, value)) = op.split_once('=') {
             // Truncate value at first comma or space (multi-value fields)
             let num_str = value
@@ -90,11 +119,8 @@ fn scan_oplist(ops: &[String]) -> RefMap {
                 .next()
                 .unwrap_or(value);
             if let Ok(id) = num_str.parse::<u32>() {
-                if id == 0xFFFF_FFFF {
-                    continue;
-                }
                 if let Some(kind) = op_key_to_ref_kind(key) {
-                    refs.entry(kind.to_string()).or_default().insert(id);
+                    insert_ref_id(&mut refs, kind, id);
                 } else if key.starts_with("head")
                     || key.starts_with("model")
                     || key.starts_with("cursor")
@@ -104,7 +130,7 @@ fn scan_oplist(ops: &[String]) -> RefMap {
                 {
                     // Heuristic: keys with model/cursor/etc. prefixes
                     if let Some(kind) = infer_ref_kind(key) {
-                        refs.entry(kind.to_string()).or_default().insert(id);
+                        insert_ref_id(&mut refs, kind, id);
                     }
                 }
             }
@@ -129,16 +155,16 @@ fn scan_seq(entry: &SeqEntry) -> RefMap {
     let mut refs = RefMap::new();
     for f in &entry.frames {
         if f.anim_id != 0xFFFF {
-            refs.entry("seq".into())
-                .or_default()
-                .insert(u32::from(f.anim_id));
+            let id = u32::from(f.anim_id);
+            insert_ref_id(&mut refs, "seq", id);
+            insert_ref_id(&mut refs, "anim", id);
         }
     }
     for f in &entry.iframes {
         if f.anim_id != 0xFFFF {
-            refs.entry("seq".into())
-                .or_default()
-                .insert(u32::from(f.anim_id));
+            let id = u32::from(f.anim_id);
+            insert_ref_id(&mut refs, "seq", id);
+            insert_ref_id(&mut refs, "anim", id);
         }
     }
     for &w in &entry.walkmerge {
@@ -149,9 +175,12 @@ fn scan_seq(entry: &SeqEntry) -> RefMap {
         }
     }
     if let Some(g) = entry.group {
-        refs.entry("seqgroup".into())
-            .or_default()
-            .insert(u32::from(g));
+        insert_ref_id(&mut refs, "seqgroup", u32::from(g));
+    }
+    if let Some(keyframeset) = entry.keyframeset {
+        if keyframeset != 0xFFFF {
+            insert_ref_id(&mut refs, "anim", u32::from(keyframeset));
+        }
     }
     for p in &entry.params {
         refs.entry("param".into())
@@ -405,4 +434,27 @@ pub fn write_refs_json(graph: &ConfigRefGraph, out_dir: &Path) -> Result<()> {
     write_ref_file!(param, "param");
     eprintln!("Wrote {wrote} ref files to {}", out_dir.display());
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::scan_oplist;
+
+    #[test]
+    fn scan_oplist_extracts_multivar_varbit_and_varp() {
+        let refs = scan_oplist(&[
+            "multivar=varbit:7".to_string(),
+            "multivar=varp:5".to_string(),
+            "model=42".to_string(),
+        ]);
+        assert_eq!(refs.get("multivar_varbit").map(|s| s.contains(&7)), Some(true));
+        assert_eq!(refs.get("multivar_varp").map(|s| s.contains(&5)), Some(true));
+        assert_eq!(refs.get("model").map(|s| s.contains(&42)), Some(true));
+    }
+
+    #[test]
+    fn scan_oplist_extracts_condition_varbit() {
+        let refs = scan_oplist(&["condition=varbit:9,0,1".to_string()]);
+        assert_eq!(refs.get("varbit").map(|s| s.contains(&9)), Some(true));
+    }
 }

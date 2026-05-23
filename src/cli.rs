@@ -267,6 +267,16 @@ pub enum Command {
         #[arg(long)]
         out_dir: PathBuf,
     },
+    /// Prepare semantic tree for CacheOverlay (raw-flat + refs + manifest).
+    #[command(name = "prepare-overlay")]
+    PrepareOverlay {
+        /// Semantic root (e.g. cache/rs3-cache/947-all)
+        #[arg(long)]
+        out_dir: PathBuf,
+        /// Comma-separated archive IDs for raw-flat (default: all)
+        #[arg(long)]
+        archives: Option<String>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -812,6 +822,14 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::DumpConfigs { out_dir } => {
             run_dump_configs(&cache, &tar_path, &out_dir, version.build)
         }
+        Command::PrepareOverlay {out_dir, archives} => run_prepare_overlay(
+            &cache,
+            &tar_path,
+            &out_dir,
+            version.build,
+            version.subbuild,
+            archives.as_deref(),
+        ),
     }
 }
 
@@ -3775,6 +3793,62 @@ fn run_dump_configs(
     }
     let cache2 = FlatCache::open(cache.root())?;
     crate::config_dump::dump_config_texts(&cache2, out_dir, build)?;
+    Ok(())
+}
+
+fn run_prepare_overlay(
+    cache: &FlatCache,
+    tar_path: &Path,
+    semantic_root: &Path,
+    build: u32,
+    subbuild: u32,
+    archives: Option<&str>,
+) -> Result<()> {
+    let mut commands_run = Vec::new();
+
+    let raw_flat_dir = semantic_root.join("raw-flat");
+    run_dump_raw_flat(cache, tar_path, &raw_flat_dir, archives)?;
+    commands_run.push("dump-raw-flat".to_string());
+
+    let refs_dir = semantic_root.join("refs");
+    run_dump_refs(cache, tar_path, &refs_dir, build)?;
+    commands_run.push("dump-refs".to_string());
+
+    let cache_fingerprint = crate::overlay_manifest::cache_fingerprint(cache);
+    let artifacts = vec![
+        crate::overlay_manifest::artifact_record("raw-flat", semantic_root)?,
+        crate::overlay_manifest::artifact_record("refs", semantic_root)?,
+    ];
+
+    let manifest = crate::overlay_manifest::Rs3CacheManifest {
+        tool_version: env!("CARGO_PKG_VERSION").to_string(),
+        build,
+        subbuild,
+        cache_dir: cache
+            .root()
+            .canonicalize()
+            .unwrap_or_else(|_| cache.root().to_path_buf())
+            .to_string_lossy()
+            .into_owned(),
+        cache_fingerprint,
+        semantic_root: semantic_root
+            .canonicalize()
+            .unwrap_or_else(|_| semantic_root.to_path_buf())
+            .to_string_lossy()
+            .into_owned(),
+        artifacts,
+        commands_run,
+        finished_at: crate::overlay_manifest::now_rfc3339(),
+        skip_config_dumps: Some(true),
+    };
+
+    let manifest_path = crate::overlay_manifest::write_manifest(&manifest, semantic_root)?;
+    eprintln!(
+        "Prepared overlay semantic tree at {} (manifest: {})",
+        semantic_root.display(),
+        manifest_path.display()
+    );
+    let _ = print_json(&manifest);
     Ok(())
 }
 
