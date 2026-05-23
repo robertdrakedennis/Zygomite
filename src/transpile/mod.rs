@@ -412,7 +412,7 @@ pub fn sanitize_ts_ident(name: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::sanitize_ts_ident;
+    use super::{extract_script_name_suffix, sanitize_ts_ident};
 
     #[test]
     fn extract_script_name_suffix_parses_tag_syntax() {

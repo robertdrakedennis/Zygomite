@@ -260,6 +260,13 @@ pub enum Command {
         #[arg(long)]
         out_dir: PathBuf,
     },
+    /// Dump config text files (config/dump.{type}) for CacheOverlay compatibility.
+    #[command(name = "dump-configs")]
+    DumpConfigs {
+        /// Output directory (writes config/dump.{obj,npc,loc,...})
+        #[arg(long)]
+        out_dir: PathBuf,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -801,6 +808,9 @@ pub fn run(cli: Cli) -> Result<()> {
         } => run_dump_raw_flat(&cache, &tar_path, &out_dir, archives.as_deref()),
         Command::DumpRefs { out_dir } => {
             run_dump_refs(&cache, &tar_path, &out_dir, version.build)
+        }
+        Command::DumpConfigs { out_dir } => {
+            run_dump_configs(&cache, &tar_path, &out_dir, version.build)
         }
     }
 }
@@ -3747,6 +3757,24 @@ fn run_dump_refs(
     let cache = FlatCache::open(cache.root())?;
     let graph = crate::config_refs::build_config_ref_graph(&cache, build)?;
     crate::config_refs::write_refs_json(&graph, out_dir)?;
+    Ok(())
+}
+
+fn run_dump_configs(
+    cache: &FlatCache,
+    tar_path: &Path,
+    out_dir: &Path,
+    build: u32,
+) -> Result<()> {
+    for archive in [
+        ARCHIVE_CONFIG, ARCHIVE_ENUM_CONFIG, ARCHIVE_OBJ_CONFIG,
+        ARCHIVE_NPC_CONFIG, ARCHIVE_LOC_CONFIG, ARCHIVE_SEQ_CONFIG,
+        ARCHIVE_SPOT_CONFIG, ARCHIVE_STRUCT_CONFIG,
+    ] {
+        ensure_archive_complete(cache.root(), tar_path, archive)?;
+    }
+    let cache2 = FlatCache::open(cache.root())?;
+    crate::config_dump::dump_config_texts(&cache2, out_dir, build)?;
     Ok(())
 }
 

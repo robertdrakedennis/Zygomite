@@ -43,6 +43,7 @@ pub mod audio;
 pub mod cache;
 pub mod cli;
 pub mod config;
+pub mod config_dump;
 pub mod config_refs;
 pub mod constants;
 pub mod cutscene2d;

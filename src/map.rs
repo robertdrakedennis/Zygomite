@@ -888,10 +888,7 @@ mod tests {
     #[test]
     fn decodes_empty_mapsquare() {
         let files = BTreeMap::new();
-        let decoded = match decode_map_square(&files, 947) {
-            Ok(value) => value,
-            Err(error) => panic!("mapsquare decode should succeed: {error}"),
-        };
+        let decoded = decode_map_square(&files, 947);
         assert!(decoded.environment.is_none());
         assert!(decoded.lights.is_empty());
         assert!(decoded.water.is_empty());
@@ -917,10 +914,7 @@ mod tests {
         push_u16_be(&mut payload, 9);
         files.insert(8, payload);
 
-        let decoded = match decode_map_square(&files, 947) {
-            Ok(value) => value,
-            Err(error) => panic!("mapsquare decode should succeed: {error}"),
-        };
+        let decoded = decode_map_square(&files, 947);
         assert_eq!(1, decoded.water.len());
         assert_eq!(1, decoded.water[0].x);
         assert_eq!(9, decoded.water[0].type_id);

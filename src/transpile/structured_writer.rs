@@ -149,10 +149,11 @@ impl StructuredWriter {
 
         // ── Function signature with detected return type ──
         let return_type = detect_return_type(&structured);
-        let function_name = super::script_function_name(
-            decl.script_id,
-            decl.name.as_deref(),
-        );
+        let resolved_name = decl
+            .name
+            .as_deref()
+            .or_else(|| self.script_names.get(&decl.script_id).map(String::as_str));
+        let function_name = super::script_function_name(decl.script_id, resolved_name);
         let _ = writeln!(
             &mut out,
             "export function {function_name}({args}): {return_type} {{",

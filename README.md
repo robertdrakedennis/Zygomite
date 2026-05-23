@@ -22,7 +22,7 @@ Current target snapshot:
 - Cache data available one of two ways:
   - extracted flat cache dir (default: `../eval/cache-flat/cache`)
   - OpenRS2 tar (default: `../cache-runescape-live-en-b947.1-2026-04-20-10-45-34-openrs2#2519.tar`)
-- Java repo data files for opcode/name lookups (default: `../rs3-cache/data`)
+- Java repo data files for opcode/name lookups (default: `../rs3-cache/data`; Alerion: `tools/zwyz-rs3-cache/data`)
 
 ## Build
 
@@ -101,6 +101,36 @@ cargo run -- models --out-dir /tmp/models --out-file /tmp/models.json
 # audio (limit for quick scan)
 cargo run -- audio --out-dir /tmp/audio --max-files 5000
 ```
+
+# CS2 TypeScript export / transpile
+
+```bash
+cargo run --release -- \
+  --cache-dir /path/to/cache/unpacked/910 \
+  --data-dir /path/to/tools/zwyz-rs3-cache/data \
+  --build 910 --subbuild 0 \
+  ts-export --out-dir /tmp/rs3-ts-export-910
+```
+
+Writes typed definitions: `vars.ts`, `varbits.ts`, `enums.ts`, `params.ts`, `interfaces.ts` (with `ComponentId` / `InterfaceId` UIDs), `scripts.d.ts`, `named_objs.ts`, `dbtables.ts`, and `index.ts`.
+
+Transpile CS2 to structured TypeScript (subset by default):
+
+```bash
+cargo run --release -- \
+  --cache-dir /path/to/cache/unpacked/910 \
+  --data-dir /path/to/tools/zwyz-rs3-cache/data \
+  --build 910 --subbuild 0 \
+  transpile-scripts --out-dir /tmp/rs3-transpile-910 \
+  --filter-script bank_build --max-scripts 5
+```
+
+Use `--all-scripts` to transpile the full clientscript archive (slow).
+
+Alerion defaults for integration tests:
+
+- `RS3_CACHE_DIR=/Users/robert/projects/alerion/cache/unpacked/910`
+- `RS3_DATA_DIR=/Users/robert/projects/alerion/tools/zwyz-rs3-cache/data`
 
 ## Expected unpack output
 
