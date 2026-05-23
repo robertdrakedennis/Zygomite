@@ -14,7 +14,7 @@ pub fn dump_config_texts(cache: &FlatCache, out_dir: &Path, build: u32) -> Resul
     fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
     let mut wrote = 0usize;
 
-    // ── OpList types: raw key=value strings already contain ref tokens ──
+    // ── OpList types: rewrite values with type prefixes ──
     macro_rules! dump_ops {
         ($name:expr, $archive:expr, $group:expr, $parse:expr) => {
             let path = dir.join(concat!("dump.", $name));
@@ -25,7 +25,9 @@ pub fn dump_config_texts(cache: &FlatCache, out_dir: &Path, build: u32) -> Resul
                 for (id, bytes) in js5::unpack_group(&index, $group, &data)? {
                     let entry = $parse(id, &bytes)?;
                     write!(w, "[{}_{id}]\n", $name)?;
-                    for op in &entry.ops { write!(w, "{op}\n")?; }
+                    for op in &entry.ops {
+                        write!(w, "{}\n", rewrite_op_value(op))?;
+                    }
                     write!(w, "\n")?;
                 }
             }
@@ -185,4 +187,48 @@ pub fn dump_config_texts(cache: &FlatCache, out_dir: &Path, build: u32) -> Resul
 
     eprintln!("Wrote {wrote} text dumps to {}", dir.display());
     Ok(wrote)
+}
+
+/// Rewrite an op string to include type-prefixed values for dependency scanning.
+/// e.g., "model=2595" → "model=model_2595"
+fn rewrite_op_value(op: &str) -> String {
+    if let Some((key, value)) = op.split_once('=') {
+        if let Some(prefix) = key_to_ref_prefix(key) {
+            let num = value.split([',', ' ']).next().unwrap_or(value);
+            if num.parse::<i32>().is_ok() {
+                return format!("{key}={prefix}_{num}{}", &value[num.len()..]);
+            }
+        }
+    }
+    op.to_string()
+}
+
+fn key_to_ref_prefix(key: &str) -> Option<&'static str> {
+    match key {
+        "model" | "manwear" | "manwear2" | "manwear3" | "womanwear" | "womanwear2"
+        | "womanwear3" | "manhead" | "manhead2" | "womanhead" | "womanhead2"
+        | "covermarker" | "modela" | "modelb" | "model1" | "model2" | "model3"
+        | "model4" | "model5" | "model6" | "model7" | "model8" => Some("model"),
+        "anim" | "readyanim" | "walkanim" | "turnleftanim" | "turnrightanim"
+        | "crawlanim" | "crawlanim_b" | "crawlanim_l" | "crawlanim_r" | "runanim"
+        | "runanim_b" | "runanim_l" | "runanim_r" | "walkanim_b" | "walkanim_l"
+        | "walkanim_r" | "readyanim_l" | "readyanim_r" | "crawlturn_l" | "crawlturn_r"
+        | "runturn_l" | "runturn_r" | "walkturn_l" | "walkturn_r" => Some("seq"),
+        "bas" => Some("bas"),
+        "msi" => Some("msi"),
+        "vfx" => Some("vfx"),
+        "quest" => Some("quest"),
+        "cursor1" | "cursor2" | "cursor3" | "cursor4" | "cursor5" | "cursor6"
+        | "icursor1" | "icursor2" | "icursor3" | "icursor4" | "icursor5"
+        | "cursorattack" => Some("cursor"),
+        "texture" | "bloomtexture" => Some("texture"),
+        "material" => Some("material"),
+        "certlink" | "certtemplate" | "lentlink" | "lenttemplate" | "boughtlink"
+        | "boughttemplate" | "shardlink" | "shardtemplate" | "placeholderlink"
+        | "placeholdertemplate" => Some("obj"),
+        "multiloc" => Some("loc"),
+        "multinpc" => Some("npc"),
+        "multimodel" => Some("model"),
+        _ => None,
+    }
 }
