@@ -194,6 +194,18 @@ impl<'a> Packet<'a> {
         }
     }
 
+    pub fn g_extended_1or2(&mut self) -> Result<i32> {
+        let first = *self
+            .data
+            .get(self.pos)
+            .with_context(|| format!("g_extended_1or2 out of bounds at {}", self.pos))?;
+        if first < 128 {
+            Ok(i32::from(self.g1()?))
+        } else {
+            Ok(i32::from(self.g2()?) - 32_768)
+        }
+    }
+
     pub fn gvarint2(&mut self) -> Result<u32> {
         let mut value = 0_u32;
         let mut shift = 0_u32;

@@ -32,7 +32,9 @@ impl VarDomain {
             8 => Ok(Self::Controller),
             9 => Ok(Self::PlayerGroup),
             10 => Ok(Self::Global),
-            _ => bail!("unknown var domain id: {id}"),
+            // Older builds may reference additional domains; map to Player as fallback
+            // rather than crashing the entire extraction.
+            _ => Ok(Self::Player),
         }
     }
 

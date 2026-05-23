@@ -45,7 +45,7 @@ use crate::fixture::{default_tar_path, ensure_archive_complete, open_cache};
 use crate::interface::render_interface_group;
 use crate::map::decode_map_square;
 use crate::model::Model;
-use crate::script::{CompiledScript, Instruction, OpcodeBook, Operand, decode_script};
+use crate::script::{CompiledScript, Instruction, OpcodeBook, Operand, decode_script, MIN_SCRIPT_BUILD};
 use crate::transpile::Transpiler;
 use crate::vars::{VarDomain, parse_var, parse_varbit};
 use crate::vfx::decode as decode_vfx;
@@ -1616,7 +1616,16 @@ fn run_cs2(
             let single_file_group = files.len() == 1;
 
             for (file, bytes) in files {
-                let script = decode_script(&bytes, &opcode_book, version.build)?;
+                let script = match decode_script(&bytes, &opcode_book, version.build) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        if version.build < MIN_SCRIPT_BUILD {
+                            eprintln!("warning: skipping script {file} in group {group}: {e}");
+                            continue;
+                        }
+                        return Err(e);
+                    }
+                };
                 scripts += 1;
                 instructions += script.code.len();
                 for instruction in &script.code {
@@ -1662,7 +1671,15 @@ fn run_cs2(
                 let mut decoded = Vec::new();
 
                 for (_, bytes) in files {
-                    let script = decode_script(&bytes, &opcode_book, version.build)?;
+                    let script = match decode_script(&bytes, &opcode_book, version.build) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            if version.build < MIN_SCRIPT_BUILD {
+                                continue;
+                            }
+                            return Err(e);
+                        }
+                    };
                     for instruction in &script.code {
                         *opcode_counts
                             .entry(instruction.command.clone())

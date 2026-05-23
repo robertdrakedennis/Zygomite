@@ -301,7 +301,8 @@ pub fn unpack_group(
     let file_count = index.file_count_for_group(group)?;
     if file_count == 1 {
         let mut out = BTreeMap::new();
-        out.insert(0, group_data);
+        let file_id = index.file_ids_for_group(group)?.get(0).copied().unwrap_or(0);
+        out.insert(file_id, group_data);
         return Ok(out);
     }
 

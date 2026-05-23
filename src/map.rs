@@ -1,13 +1,55 @@
 use crate::packet::Packet;
-use anyhow::Result;
+use anyhow::{Result, bail};
 use serde::Serialize;
 use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct MapSquare {
+    pub landscape: Option<LandscapeData>,
+    #[serde(rename = "underwaterLandscape")]
+    pub underwater_landscape: Option<LandscapeData>,
+    pub locs: Vec<MapLoc>,
+    #[serde(rename = "underwaterLocs")]
+    pub underwater_locs: Vec<MapLoc>,
     pub environment: Option<Environment>,
     pub lights: Vec<PointLight>,
     pub water: Vec<WaterPatch>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct LandscapeData {
+    #[serde(rename = "sceneFlags")]
+    pub scene_flags: Vec<Vec<Vec<i8>>>,
+    pub heights: Vec<Vec<Vec<i32>>>,
+    #[serde(rename = "underlayIds")]
+    pub underlay_ids: Vec<Vec<Vec<u16>>>,
+    #[serde(rename = "overlayIds")]
+    pub overlay_ids: Vec<Vec<Vec<u16>>>,
+    #[serde(rename = "overlayShapes")]
+    pub overlay_shapes: Vec<Vec<Vec<u8>>>,
+    #[serde(rename = "overlayRotations")]
+    pub overlay_rotations: Vec<Vec<Vec<u8>>>,
+    #[serde(rename = "nonMemberAreas")]
+    pub non_member_areas: Option<Vec<u8>>,
+    pub extras: Option<Vec<serde_json::Value>>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct MapLoc {
+    pub id: i32,
+    pub x: u8,
+    pub z: u8,
+    pub level: u8,
+    pub shape: u8,
+    pub angle: u8,
+    pub transform: Option<LocTransform>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct LocTransform {
+    pub rotation: [f32; 4],
+    pub translation: [i32; 3],
+    pub scale: [f32; 3],
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -214,6 +256,28 @@ pub struct Vector4 {
 }
 
 pub fn decode_map_square(files: &BTreeMap<u32, Vec<u8>>, build: u32) -> Result<MapSquare> {
+    let landscape = files
+        .get(&3)
+        .map(|data| decode_landscape(&mut Packet::new(data), false, build))
+        .transpose()?;
+
+    let underwater_landscape = files
+        .get(&4)
+        .map(|data| decode_landscape(&mut Packet::new(data), true, build))
+        .transpose()?;
+
+    let locs = files
+        .get(&0)
+        .map(|data| decode_locs(&mut Packet::new(data)))
+        .transpose()?
+        .unwrap_or_default();
+
+    let underwater_locs = files
+        .get(&1)
+        .map(|data| decode_locs(&mut Packet::new(data)))
+        .transpose()?
+        .unwrap_or_default();
+
     let environment = files
         .get(&6)
         .map(|data| decode_environment(&mut Packet::new(data), build))
@@ -232,10 +296,288 @@ pub fn decode_map_square(files: &BTreeMap<u32, Vec<u8>>, build: u32) -> Result<M
     };
 
     Ok(MapSquare {
+        landscape,
+        underwater_landscape,
+        locs,
+        underwater_locs,
         environment,
         lights,
         water,
     })
+}
+
+// ── Landscape decoder ──
+
+fn has_jagx_header(packet: &mut Packet<'_>) -> Result<bool> {
+    if packet.len() < 5 {
+        return Ok(false);
+    }
+    let pos = packet.pos();
+    if packet.g1()? != b'j'
+        || packet.g1()? != b'a'
+        || packet.g1()? != b'g'
+        || packet.g1()? != b'x'
+    {
+        packet.set_pos(pos)?;
+        return Ok(false);
+    }
+    if packet.g1()? != 1 {
+        bail!("unsupported jagx landscape version");
+    }
+    Ok(true)
+}
+
+fn decode_landscape(packet: &mut Packet<'_>, underwater: bool, _build: u32) -> Result<LandscapeData> {
+    let has_jagx = has_jagx_header(packet)?;
+    let level_count: usize = if underwater { 1 } else { 4 };
+
+    let mut scene_flags = vec![vec![vec![0i8; 64]; 64]; level_count];
+    let mut heights = vec![vec![vec![0i32; 64]; 64]; level_count];
+    let mut underlay_ids = vec![vec![vec![0u16; 64]; 64]; level_count];
+    let mut overlay_ids = vec![vec![vec![0u16; 64]; 64]; level_count];
+    let mut overlay_shapes = vec![vec![vec![0u8; 64]; 64]; level_count];
+    let mut overlay_rotations = vec![vec![vec![0u8; 64]; 64]; level_count];
+
+    for level in 0..level_count {
+        for x in 0..64 {
+            for z in 0..64 {
+                let opcode = packet.g1()?;
+                if (opcode & 0xF0) != 0 {
+                    bail!("unsupported landscape tile opcode 0x{opcode:02x}");
+                }
+                if (opcode & 0x1) != 0 {
+                    let overlay_info = packet.g1()?;
+                    overlay_ids[level][x][z] = packet.gsmart1or2()?;
+                    overlay_shapes[level][x][z] = overlay_info >> 2;
+                    overlay_rotations[level][x][z] = overlay_info & 0x3;
+                }
+                if (opcode & 0x2) != 0 {
+                    scene_flags[level][x][z] = packet.g1s()?;
+                }
+                if (opcode & 0x4) != 0 {
+                    underlay_ids[level][x][z] = packet.gsmart1or2()?;
+                }
+                if (opcode & 0x8) != 0 {
+                    let height = i32::from(if has_jagx { packet.g2()? } else { u16::from(packet.g1()?) });
+                    if underwater {
+                        heights[0][x][z] = height * 8 << 2;
+                    } else {
+                        let h = if height == 1 { 0 } else { height };
+                        if level == 0 {
+                            heights[0][x][z] = -(h * 8) << 2;
+                        } else {
+                            heights[level][x][z] = heights[level - 1][x][z] - (h * 8 << 2);
+                        }
+                    }
+                } else if underwater {
+                    heights[0][x][z] = 0;
+                } else if level == 0 {
+                    heights[0][x][z] = -(perlin(x as i32 + 932731, z as i32 + 556238) * 8) << 2;
+                } else {
+                    heights[level][x][z] = heights[level - 1][x][z] - 960;
+                }
+            }
+        }
+    }
+
+    let non_member_areas = if has_jagx && !underwater && packet.pos().saturating_add(8) <= packet.len() {
+        let mut areas = vec![0u8; 8];
+        for a in areas.iter_mut() {
+            *a = packet.g1()?;
+        }
+        Some(areas)
+    } else {
+        None
+    };
+
+    // Try extras only if there are 2+ bytes remaining (minimum for opcode + data)
+    let extras = if has_jagx && packet.pos().saturating_add(2) <= packet.len() {
+        match decode_landscape_extras(packet) {
+            Ok(e) if !e.is_empty() => Some(e),
+            _ => None,
+        }
+    } else {
+        None
+    };
+
+    Ok(LandscapeData {
+        scene_flags,
+        heights,
+        underlay_ids,
+        overlay_ids,
+        overlay_shapes,
+        overlay_rotations,
+        non_member_areas,
+        extras,
+    })
+}
+
+fn decode_landscape_extras(packet: &mut Packet<'_>) -> Result<Vec<serde_json::Value>> {
+    let mut extras = Vec::new();
+    while packet.pos() < packet.len() {
+        let opcode = packet.g1()?;
+        let mut entry = serde_json::Map::new();
+        entry.insert("opcode".into(), opcode.into());
+        match opcode {
+            0x00 => decode_extra_00(packet, &mut entry)?,
+            0x01 => decode_extra_01(packet, &mut entry)?,
+            0x02 => {
+                entry.insert("name".into(), "unk02".into());
+                entry.insert("values".into(), serde_json::json!([
+                    read_f32_be(packet)?,
+                    read_f32_be(packet)?,
+                    read_f32_be(packet)?
+                ]));
+            }
+            0x03 => {
+                entry.insert("name".into(), "unk03".into());
+                entry.insert("short".into(), packet.g2s()?.into());
+                entry.insert("float".into(), read_f32_be(packet)?.into());
+            }
+            0x80 => {
+                entry.insert("name".into(), "unk80".into());
+                entry.insert("environment".into(), packet.g2()?.into());
+                entry.insert("always00".into(), read_bytes(packet, 8)?.into());
+            }
+            0x81 => decode_extra_81(packet, &mut entry)?,
+            0x82 => {
+                entry.insert("name".into(), "unk82".into());
+            }
+            _ => bail!("unknown landscape extra opcode 0x{opcode:02x}"),
+        }
+        extras.push(serde_json::Value::Object(entry));
+    }
+    Ok(extras)
+}
+
+fn decode_extra_00(packet: &mut Packet<'_>, entry: &mut serde_json::Map<String, serde_json::Value>) -> Result<()> {
+    entry.insert("name".into(), "unk00".into());
+    let flags = packet.g1()?;
+    entry.insert("flags".into(), flags.into());
+    if (flags & 0x01) != 0 { entry.insert("unk01".into(), read_bytes(packet, 4)?.into()); }
+    if (flags & 0x02) != 0 { entry.insert("unk02".into(), packet.g2()?.into()); }
+    if (flags & 0x04) != 0 { entry.insert("unk04".into(), packet.g2()?.into()); }
+    if (flags & 0x08) != 0 { entry.insert("unk08".into(), packet.g2()?.into()); }
+    if (flags & 0x10) != 0 {
+        entry.insert("unk10".into(), serde_json::json!([
+            packet.g2()?, packet.g2()?, packet.g2()?
+        ]));
+    }
+    if (flags & 0x20) != 0 { entry.insert("unk20".into(), read_bytes(packet, 4)?.into()); }
+    if (flags & 0x40) != 0 { entry.insert("unk40".into(), packet.g2()?.into()); }
+    if (flags & 0x80) != 0 { entry.insert("unk80".into(), packet.g2()?.into()); }
+    Ok(())
+}
+
+fn decode_extra_01(packet: &mut Packet<'_>, entry: &mut serde_json::Map<String, serde_json::Value>) -> Result<()> {
+    entry.insert("name".into(), "unk01".into());
+    let count = usize::from(packet.g1()?);
+    let mut entries = Vec::with_capacity(count);
+    for _ in 0..count {
+        let mut e = serde_json::Map::new();
+        e.insert("byte2".into(), packet.g1()?.into());
+        e.insert("short0".into(), packet.g2()?.into());
+        e.insert("short1".into(), packet.g2()?.into());
+        e.insert("short2".into(), packet.g2()?.into());
+        let array_count = usize::from(packet.g1()?);
+        let mut arrays: Vec<Vec<u8>> = Vec::with_capacity(array_count);
+        for _ in 0..array_count {
+            arrays.push(read_bytes(packet, 4)?);
+        }
+        e.insert("array5".into(), serde_json::to_value(arrays).unwrap_or_default());
+        e.insert("short3".into(), packet.g2()?.into());
+        e.insert("short4".into(), packet.g2()?.into());
+        let extra_flags = packet.g1()?;
+        e.insert("extraflags".into(), extra_flags.into());
+        e.insert("extra08".into(), packet.g2()?.into());
+        if (extra_flags & 0x1F) == 0x1F {
+            e.insert("extra1f".into(), packet.g2()?.into());
+        }
+        entries.push(serde_json::Value::Object(e));
+    }
+    entry.insert("entries".into(), entries.into());
+    Ok(())
+}
+
+fn decode_extra_81(packet: &mut Packet<'_>, entry: &mut serde_json::Map<String, serde_json::Value>) -> Result<()> {
+    entry.insert("name".into(), "unk81".into());
+    let mut entries = Vec::with_capacity(4);
+    for _ in 0..4 {
+        let mut e = serde_json::Map::new();
+        let flag = packet.g1()?;
+        e.insert("flag".into(), flag.into());
+        if (flag & 0x01) != 0 {
+            e.insert("data".into(), read_bytes(packet, 256)?.into());
+        }
+        entries.push(serde_json::Value::Object(e));
+    }
+    entry.insert("entries".into(), entries.into());
+    Ok(())
+}
+
+fn read_bytes(packet: &mut Packet<'_>, count: usize) -> Result<Vec<u8>> {
+    packet.gdata(count)
+}
+
+// ── Locs decoder ──
+
+fn decode_locs(packet: &mut Packet<'_>) -> Result<Vec<MapLoc>> {
+    let mut entries = Vec::new();
+    let mut id: i32 = -1;
+    let mut id_offset = packet.g_extended_1or2()?;
+
+    while id_offset != 0 {
+        id += id_offset;
+        let mut packed: i32 = 0;
+        let mut packed_offset = i32::from(packet.gsmart1or2()?);
+
+        while packed_offset != 0 {
+            packed += packed_offset - 1;
+            let z = (packed & 0x3F) as u8;
+            let x = ((packed >> 6) & 0x3F) as u8;
+            let level = (packed >> 12) as u8;
+            let info = packet.g1()?;
+            let transform = if (info & 0x80) != 0 {
+                Some(decode_loc_transform(packet)?)
+            } else {
+                None
+            };
+            let shape = (info >> 2) & 0x1F;
+            let angle = info & 0x3;
+            entries.push(MapLoc { id, x, z, level, shape, angle, transform });
+            packed_offset = i32::from(packet.gsmart1or2()?);
+        }
+        id_offset = packet.g_extended_1or2()?;
+    }
+
+    Ok(entries)
+}
+
+fn decode_loc_transform(packet: &mut Packet<'_>) -> Result<LocTransform> {
+    let flags = packet.g1()?;
+    let mut rotation = [0.0f32, 0.0, 0.0, 1.0];
+    let mut translation = [0i32; 3];
+    let mut scale = [1.0f32; 3];
+
+    if (flags & 0x1) != 0 {
+        rotation[0] = packet.g2s()? as f32 / 32768.0;
+        rotation[1] = packet.g2s()? as f32 / 32768.0;
+        rotation[2] = packet.g2s()? as f32 / 32768.0;
+        rotation[3] = packet.g2s()? as f32 / 32768.0;
+    }
+    if (flags & 0x2) != 0 { translation[0] = i32::from(packet.g2s()?); }
+    if (flags & 0x4) != 0 { translation[1] = i32::from(packet.g2s()?); }
+    if (flags & 0x8) != 0 { translation[2] = i32::from(packet.g2s()?); }
+    if (flags & 0x10) != 0 {
+        let s = packet.g2s()? as f32 / 128.0;
+        scale = [s, s, s];
+    } else {
+        if (flags & 0x20) != 0 { scale[0] = packet.g2s()? as f32 / 128.0; }
+        if (flags & 0x40) != 0 { scale[1] = packet.g2s()? as f32 / 128.0; }
+        if (flags & 0x80) != 0 { scale[2] = packet.g2s()? as f32 / 128.0; }
+    }
+
+    Ok(LocTransform { rotation, translation, scale })
 }
 
 fn decode_environment(packet: &mut Packet<'_>, build: u32) -> Result<Environment> {
@@ -479,6 +821,53 @@ fn read_vec4(packet: &mut Packet<'_>) -> Result<Vector4> {
 
 fn read_f32_be(packet: &mut Packet<'_>) -> Result<f32> {
     Ok(f32::from_bits(packet.g4s()? as u32))
+}
+
+// ── Perlin noise (for default landscape heights) ──
+
+fn perlin(x: i32, z: i32) -> i32 {
+    let mut value = perlin_scale(x + 45365, z + 91923, 4) - 128;
+    value += (perlin_scale(x + 10294, z + 37821, 2) - 128) >> 1;
+    value += (perlin_scale(x, z, 1) - 128) >> 2;
+    let result = (value as f64 * 0.3) as i32 + 35;
+    result.clamp(10, 60)
+}
+
+fn perlin_scale(x: i32, z: i32, scale: i32) -> i32 {
+    let sx = x / scale;
+    let fx = x & (scale - 1);
+    let sz = z / scale;
+    let fz = z & (scale - 1);
+    let a = smooth_noise(sx, sz);
+    let b = smooth_noise(sx + 1, sz);
+    let c = smooth_noise(sx, sz + 1);
+    let d = smooth_noise(sx + 1, sz + 1);
+    let xb = interpolate(a, b, fx, scale);
+    let zb = interpolate(c, d, fx, scale);
+    interpolate(xb, zb, fz, scale)
+}
+
+fn interpolate(a: i32, b: i32, frac: i32, scale: i32) -> i32 {
+    let theta = frac as f64 * std::f64::consts::PI / scale as f64;
+    let cosine = (theta.cos() * 16384.0) as i64;
+    let weight = (65536 - cosine) >> 1;
+    let a = a as i64;
+    let b = b as i64;
+    (((65536 - weight) * a >> 16) + (b * weight >> 16)) as i32
+}
+
+fn smooth_noise(x: i32, z: i32) -> i32 {
+    let corners = noise(x - 1, z - 1) + noise(x + 1, z - 1) + noise(x - 1, z + 1) + noise(x + 1, z + 1);
+    let sides = noise(x - 1, z) + noise(x + 1, z) + noise(x, z - 1) + noise(x, z + 1);
+    let center = noise(x, z);
+    center / 4 + corners / 16 + sides / 8
+}
+
+fn noise(x: i32, z: i32) -> i32 {
+    let mixed = z.wrapping_mul(57).wrapping_add(x);
+    let hashed = (mixed << 13) ^ mixed;
+    let value = (hashed as i64 * hashed as i64 * 15731 + 789221) * hashed as i64 + 1376312589;
+    ((value & i64::from(i32::MAX)) >> 19) as i32 & 0xFF
 }
 
 #[cfg(test)]
