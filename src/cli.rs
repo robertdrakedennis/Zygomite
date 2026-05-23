@@ -182,6 +182,9 @@ pub enum Command {
         filter_script: Option<String>,
         #[arg(long, default_value_t = 100)]
         max_scripts: usize,
+        /// Transpile every script in the cache (ignores max-scripts cap).
+        #[arg(long)]
+        all_scripts: bool,
     },
     MigrateCheck {
         #[arg(long)]
@@ -713,6 +716,7 @@ pub fn run(cli: Cli) -> Result<()> {
             out_dir,
             filter_script,
             max_scripts,
+            all_scripts,
         } => run_transpile_scripts(
             &cache,
             &tar_path,
@@ -720,6 +724,7 @@ pub fn run(cli: Cli) -> Result<()> {
             &out_dir,
             filter_script.as_deref(),
             max_scripts,
+            all_scripts,
             version,
         ),
         Command::MigrateCheck {
@@ -2215,27 +2220,14 @@ fn export_mapsquares_json(
 
     let index = cache.archive_index(ARCHIVE_MAPSQUARES)?;
     let mut count = 0_usize;
-    let mut parse_errors = 0_usize;
     for group in &index.group_id {
         let files = cache.group_files_with_index(&index, ARCHIVE_MAPSQUARES, *group)?;
         let square_x = group & 0b111_1111;
         let square_z = group >> 7;
-        match decode_map_square(&files, build) {
-            Ok(decoded) => {
-                let path = out_dir.join(format!("{square_x}_{square_z}.json"));
-                write_json(&path, &decoded)?;
-                count += 1;
-            }
-            Err(error) => {
-                parse_errors += 1;
-                let error_path = out_dir.join(format!("{square_x}_{square_z}.error.txt"));
-                write_text(&error_path, &format!("{error:#}"))?;
-            }
-        }
-    }
-
-    if parse_errors > 0 {
-        eprintln!("mapsquares: parsed={count} errors={parse_errors}");
+        let decoded = decode_map_square(&files, build);
+        let path = out_dir.join(format!("{square_x}_{square_z}.json"));
+        write_json(&path, &decoded)?;
+        count += 1;
     }
 
     Ok(count)
@@ -3365,6 +3357,14 @@ fn load_script_group_names(
     Ok(by_group)
 }
 
+fn load_script_group_names_from_cache(
+    cache: &FlatCache,
+    data_dir: &Path,
+) -> Result<HashMap<u32, String>> {
+    let index = cache.archive_index(ARCHIVE_CLIENTSCRIPTS)?;
+    load_script_group_names(&index, data_dir)
+}
+
 fn load_hash_name_map(path: &Path) -> Result<HashMap<i32, String>> {
     let content =
         fs::read_to_string(path).with_context(|| format!("failed reading {}", path.display()))?;
@@ -3858,6 +3858,8 @@ fn run_ts_export(
     version: RuntimeVersion,
 ) -> Result<()> {
     let ctx = ResolverContext::load(cache, tar_path, data_dir, version.build, version.subbuild)?;
+    let opcode_book = OpcodeBook::load(data_dir, version.build, version.subbuild)?;
+    let script_group_names = load_script_group_names_from_cache(cache, data_dir)?;
     fs::create_dir_all(out_dir)?;
 
     export_var_types(&ctx, out_dir)?;
@@ -3872,7 +3874,9 @@ fn run_ts_export(
     export_loc_types(&ctx, out_dir)?;
     export_seq_types(&ctx, out_dir)?;
     export_spot_types(&ctx, out_dir)?;
+    export_named_config_ids(&ctx, out_dir)?;
     export_db_types(&ctx, out_dir)?;
+    export_script_signatures(&ctx, out_dir, &opcode_book, version.build, &script_group_names)?;
     export_index(out_dir)?;
 
     eprintln!("typescript definitions exported to {}", out_dir.display());
@@ -3886,11 +3890,13 @@ fn run_transpile_scripts(
     out_dir: &Path,
     filter_script: Option<&str>,
     max_scripts: usize,
+    all_scripts: bool,
     version: RuntimeVersion,
 ) -> Result<()> {
     let ctx = ResolverContext::load(cache, tar_path, data_dir, version.build, version.subbuild)?;
 
     let opcode_book = OpcodeBook::load(data_dir, version.build, version.subbuild)?;
+    let script_group_names = load_script_group_names_from_cache(cache, data_dir)?;
 
     let transpiler = Transpiler::new()
         .with_enums(&ctx.enums)
@@ -3899,6 +3905,7 @@ fn run_transpile_scripts(
         .with_varbits(&ctx.varbits)
         .with_params(&ctx.params)
         .with_script_names(&ctx.scripts, &opcode_book, version.build)
+        .with_script_group_names(&ctx.scripts, &script_group_names)
         .with_script_signatures(&ctx.scripts, &opcode_book, version.build)
         .with_components(&ctx.parsed_components);
 
@@ -3918,9 +3925,17 @@ fn run_transpile_scripts(
         export_loc_types(&ctx, out_dir)?;
         export_seq_types(&ctx, out_dir)?;
         export_spot_types(&ctx, out_dir)?;
+        export_named_config_ids(&ctx, out_dir)?;
         export_db_types(&ctx, out_dir)?;
+        export_script_signatures(&ctx, out_dir, &opcode_book, version.build, &script_group_names)?;
         export_index(out_dir)?;
     }
+
+    let script_limit = if all_scripts {
+        usize::MAX
+    } else {
+        max_scripts
+    };
 
     let mut script_count = 0;
     let mut errors = 0;
@@ -3941,16 +3956,17 @@ fn run_transpile_scripts(
                 let script_name = transpiler
                     .script_name_for(script_id)
                     .unwrap_or_else(|| format!("script_{script_id}"));
+                let function_name =
+                    crate::transpile::script_function_name(script_id, Some(&script_name));
                 let filename = format!("{}.ts", sanitize_file_component(&script_name));
                 let out_path = out_dir.join(&filename);
                 fs::write(&out_path, &ts.source)?;
                 barrel_exports.push(format!(
-                    "export {{ script_{id} }} from './{filename_no_ext}';",
-                    id = script_id,
+                    "export {{ {function_name} }} from './{filename_no_ext}';",
                     filename_no_ext = filename.trim_end_matches(".ts")
                 ));
                 script_count += 1;
-                if script_count >= max_scripts {
+                if script_count >= script_limit {
                     break;
                 }
             }
@@ -4667,6 +4683,136 @@ fn extract_oplist_name(ops: &[String]) -> String {
     "null".to_string()
 }
 
+fn extract_oplist_name_raw(ops: &[String]) -> Option<String> {
+    for op in ops {
+        if let Some(name) = op.strip_prefix("name=") {
+            return Some(name.to_string());
+        }
+    }
+    None
+}
+
+fn export_named_config_ids(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
+    export_named_oplist_ids("Obj", "objs", &ctx.objs, out_dir)?;
+    export_named_oplist_ids("Npc", "npcs", &ctx.npcs, out_dir)?;
+    export_named_oplist_ids("Loc", "locs", &ctx.locs, out_dir)?;
+    Ok(())
+}
+
+fn export_named_oplist_ids(
+    prefix: &str,
+    source_file: &str,
+    entries: &BTreeMap<u32, crate::config::OpListEntry>,
+    out_dir: &Path,
+) -> Result<()> {
+    let const_name = format!("Named{prefix}Ids");
+    let mut lines = vec![
+        format!("// Auto-generated named {prefix} ID constants"),
+        format!("// Source: RS3 cache {source_file} config (named entries only)"),
+        String::new(),
+    ];
+
+    let mut named: Vec<(String, u32)> = Vec::new();
+    for entry in entries.values() {
+        if let Some(raw_name) = extract_oplist_name_raw(&entry.ops) {
+            let prop = str_to_screaming_snake(&raw_name);
+            if !prop.is_empty() {
+                named.push((prop, entry.id));
+            }
+        }
+    }
+    named.sort_by(|a, b| a.0.cmp(&b.0));
+    named.dedup_by(|a, b| a.0 == b.0);
+
+    if named.is_empty() {
+        lines.push(format!("export const {const_name} = {{}} as const;"));
+    } else {
+        lines.push(format!("export const {const_name} = {{"));
+        for (prop, id) in &named {
+            lines.push(format!("    {prop}: {id},"));
+        }
+        lines.push("} as const;".to_string());
+    }
+    lines.push(String::new());
+    lines.push(format!(
+        "export const NAMED_{}_COUNT = {};",
+        prefix.to_uppercase(),
+        named.len()
+    ));
+
+    write_text(
+        &out_dir.join(format!("named_{source_file}.ts")),
+        &lines.join("\n"),
+    )
+}
+
+fn export_script_signatures(
+    ctx: &ResolverContext,
+    out_dir: &Path,
+    opcode_book: &OpcodeBook,
+    build: u32,
+    group_names: &HashMap<u32, String>,
+) -> Result<()> {
+    let empty_components = HashMap::new();
+    let empty_enums = HashMap::new();
+    let empty_sigs = HashMap::new();
+
+    let mut lines = vec![
+        "// Auto-generated CS2 script signatures".to_string(),
+        "// Source: RS3 cache clientscript archive".to_string(),
+        String::new(),
+    ];
+
+    let mut entries: Vec<(String, String)> = Vec::new();
+    for (&script_id_raw, data) in &ctx.scripts {
+        let script_id = crate::transpile::ScriptId(script_id_raw as i32);
+        let Ok(script) = decode_script(data, opcode_book, build) else {
+            continue;
+        };
+        let group = script_id_raw >> 16;
+        let display_name = script
+            .name
+            .as_deref()
+            .map(crate::transpile::extract_script_name_suffix)
+            .filter(|name| !name.is_empty())
+            .or_else(|| group_names.get(&group).cloned());
+        let function_name =
+            crate::transpile::script_function_name(script_id, display_name.as_deref());
+        let return_type = crate::transpile::infer_return_type_for_script(
+            &script,
+            script_id,
+            &empty_components,
+            &empty_enums,
+            &empty_sigs,
+        );
+
+        let mut arg_types: Vec<&str> = Vec::new();
+        arg_types.extend(std::iter::repeat_n("number", script.argument_count_int as usize));
+        arg_types.extend(std::iter::repeat_n(
+            "string",
+            script.argument_count_object as usize,
+        ));
+        arg_types.extend(std::iter::repeat_n(
+            "bigint",
+            script.argument_count_long as usize,
+        ));
+        let args = (0..arg_types.len())
+            .map(|i| format!("arg{i}: {}", arg_types[i]))
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        entries.push((
+            function_name.clone(),
+            format!("export function {function_name}({args}): {return_type};"),
+        ));
+    }
+
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+    lines.extend(entries.into_iter().map(|(_, line)| line));
+
+    write_text(&out_dir.join("scripts.d.ts"), &lines.join("\n"))
+}
+
 fn export_db_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
     let mut lines = vec![
         "// Auto-generated Database definitions".to_string(),
@@ -5198,13 +5344,25 @@ fn row_column_int_array(row: &crate::config::DbRowEntry, col: u8) -> Option<Vec<
 }
 
 fn export_interface_ids(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
-    // Flatten all component deps into a single map: component_id → ComponentDeps
-    let all_components: std::collections::BTreeMap<u32, &crate::interface::ComponentDeps> = ctx
-        .parsed_components
-        .values()
-        .flat_map(|group| group.iter())
-        .map(|(&id, deps)| (id, deps))
-        .collect();
+    struct ComponentExportEntry<'a> {
+        uid: u32,
+        interface_id: u32,
+        component_id: u32,
+        deps: &'a crate::interface::ComponentDeps,
+    }
+
+    let mut all_components: Vec<ComponentExportEntry<'_>> = Vec::new();
+    for (&interface_id, comps) in &ctx.parsed_components {
+        for (&component_id, deps) in comps {
+            all_components.push(ComponentExportEntry {
+                uid: crate::interface::component_uid(interface_id, component_id),
+                interface_id,
+                component_id,
+                deps,
+            });
+        }
+    }
+    all_components.sort_by_key(|entry| entry.uid);
 
     let mut lines = vec![
         "// Auto-generated Interface Component definitions".to_string(),
@@ -5212,27 +5370,59 @@ fn export_interface_ids(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
         String::new(),
     ];
 
-    // ── Named component ID constants ──
-    let mut named_entries: Vec<(String, u32, &str)> = Vec::new();
-    for (&id, deps) in &all_components {
-        if let Some(ref name) = deps.name {
-            let prop = sanitize_ts_prop(name);
-            if !prop.is_empty() {
-                named_entries.push((prop, id, &deps.component_type));
-            }
+    // ── Interface ID constants ──
+    let mut interface_ids: Vec<u32> = ctx.parsed_components.keys().copied().collect();
+    interface_ids.sort_unstable();
+    interface_ids.dedup();
+    if !interface_ids.is_empty() {
+        lines.push("// Root interface group IDs.".to_string());
+        lines.push("export const InterfaceId = {".to_string());
+        for interface_id in &interface_ids {
+            lines.push(format!("    interface_{interface_id}: {interface_id},"));
         }
+        lines.push("} as const;".to_string());
+        lines.push(String::new());
+        lines.push(
+            "export type InterfaceId = (typeof InterfaceId)[keyof typeof InterfaceId];".to_string(),
+        );
+        lines.push(String::new());
     }
-    // Deduplicate by property name (keep first occurrence)
+
+    // ── Named component ID constants (full UID keys) ──
+    let mut named_entries: Vec<(String, u32, u32, u32, &str)> = Vec::new();
+    for entry in &all_components {
+        let label = entry
+            .deps
+            .name
+            .as_deref()
+            .map(sanitize_ts_prop)
+            .filter(|prop| !prop.is_empty() && prop != "unnamed")
+            .unwrap_or_else(|| {
+                sanitize_ts_prop(&crate::interface::component_fallback_name(
+                    entry.interface_id,
+                    entry.component_id,
+                ))
+            });
+        named_entries.push((
+            label,
+            entry.uid,
+            entry.interface_id,
+            entry.component_id,
+            &entry.deps.component_type,
+        ));
+    }
     named_entries.sort_by(|a, b| a.0.cmp(&b.0));
     named_entries.dedup_by(|a, b| a.0 == b.0);
     named_entries.sort_by_key(|e| e.1);
 
     if !named_entries.is_empty() {
-        lines.push("// Named component IDs with their numeric values.".to_string());
+        lines.push("// Named component UIDs used by CS2 cc_* / if_* opcodes.".to_string());
         lines.push("export const ComponentId = {".to_string());
-        for (prop, id, comp_type) in &named_entries {
-            lines.push(format!("    /** {comp_type} (id={id}) */"));
-            lines.push(format!("    {prop}: {id},"));
+        for (prop, uid, interface_id, component_id, comp_type) in &named_entries {
+            lines.push(format!(
+                "    /** {comp_type} interface={interface_id} com={component_id} uid={uid} */"
+            ));
+            lines.push(format!("    {prop}: {uid},"));
         }
         lines.push("} as const;".to_string());
         lines.push(String::new());
@@ -5245,6 +5435,8 @@ fn export_interface_ids(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
     // ── ComponentInfo interface and data ──
     lines.push("export interface ComponentInfo {".to_string());
     lines.push("    id: number;".to_string());
+    lines.push("    interfaceId: number;".to_string());
+    lines.push("    componentId: number;".to_string());
     lines.push("    type: string;".to_string());
     lines.push("    name: string | null;".to_string());
     lines.push("    children: number[];".to_string());
@@ -5262,7 +5454,8 @@ fn export_interface_ids(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
     lines.push(
         "export const ALL_COMPONENTS: ReadonlyMap<number, ComponentInfo> = new Map([".to_string(),
     );
-    for (&id, deps) in &all_components {
+    for entry in &all_components {
+        let deps = entry.deps;
         let varp_items: Vec<String> = deps
             .varps
             .iter()
@@ -5302,8 +5495,10 @@ fn export_interface_ids(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
             None => "null".to_string(),
         };
         lines.push(format!(
-            "    [{id}, {{ id:{id}, type:'{type}', name:{name}, children:[{children}], scripts:[{scripts}], varps:[{varps}], varbits:[{varbits}], enums:[{enums}], params:[{params}], invs:[{invs}], models:[{models}], seqs:[{seqs}] }}],",
-            id = id,
+            "    [{uid}, {{ id:{uid}, interfaceId:{interface_id}, componentId:{component_id}, type:'{type}', name:{name}, children:[{children}], scripts:[{scripts}], varps:[{varps}], varbits:[{varbits}], enums:[{enums}], params:[{params}], invs:[{invs}], models:[{models}], seqs:[{seqs}] }}],",
+            uid = entry.uid,
+            interface_id = entry.interface_id,
+            component_id = entry.component_id,
             type = deps.component_type,
             name = name_str,
             children = children_json,
@@ -5381,10 +5576,12 @@ fn export_index(out_dir: &Path) -> Result<()> {
         "} from './params';".to_string(),
         String::new(),
         "export {".to_string(),
+        "    InterfaceId,".to_string(),
         "    ComponentId,".to_string(),
         "    ALL_COMPONENTS,".to_string(),
         "    COMPONENT_COUNT,".to_string(),
         "    type ComponentInfo,".to_string(),
+        "    type InterfaceId as InterfaceIdType,".to_string(),
         "} from './interfaces';".to_string(),
         "export {{ type InvEntry, INVS, INV_COUNT }} from './invs';".to_string(),
         "export {{ type ObjEntry, OBJS, OBJ_COUNT }} from './objs';".to_string(),
@@ -5392,6 +5589,9 @@ fn export_index(out_dir: &Path) -> Result<()> {
         "export {{ type LocEntry, LOCS, LOC_COUNT }} from './locs';".to_string(),
         "export {{ type SeqEntry, SEQS, SEQ_COUNT }} from './seqs';".to_string(),
         "export {{ type SpotEntry, SPOTS, SPOT_COUNT }} from './spots';".to_string(),
+        "export {{ NamedObjIds, NAMED_OBJ_COUNT }} from './named_objs';".to_string(),
+        "export {{ NamedNpcIds, NAMED_NPC_COUNT }} from './named_npcs';".to_string(),
+        "export {{ NamedLocIds, NAMED_LOC_COUNT }} from './named_locs';".to_string(),
         "export {{ type ItemEntry, ITEMS, ITEM_COUNT,".to_string(),
         "    type ItemCategoryEntry, ITEM_CATEGORIES, ITEM_CATEGORY_COUNT,".to_string(),
         "    type ItemSetEntry, ITEM_SETS, ITEM_SET_COUNT,".to_string(),

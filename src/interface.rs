@@ -4,6 +4,16 @@ use serde::Serialize;
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 
+/// Full component UID used by CS2 opcodes: `(interface_id << 16) | component_id`.
+pub fn component_uid(interface_id: u32, component_id: u32) -> u32 {
+    (interface_id << 16) | (component_id & 0xFFFF)
+}
+
+/// Fallback TypeScript property name when the interface binary has no explicit name.
+pub fn component_fallback_name(interface_id: u32, component_id: u32) -> String {
+    format!("Interface_{interface_id}_Com_{component_id}")
+}
+
 pub fn render_interface_group(
     group: u32,
     files: &BTreeMap<u32, Vec<u8>>,

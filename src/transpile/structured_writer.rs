@@ -10,6 +10,7 @@ pub struct StructuredWriter {
     component_names: HashMap<u32, String>,
     enum_value_names: HashMap<i32, String>,
     script_signatures: HashMap<ScriptId, ScriptSignature>,
+    script_names: HashMap<ScriptId, String>,
 }
 
 impl StructuredWriter {
@@ -17,12 +18,14 @@ impl StructuredWriter {
         component_names: HashMap<u32, String>,
         enum_value_names: HashMap<i32, String>,
         script_signatures: HashMap<ScriptId, ScriptSignature>,
+        script_names: HashMap<ScriptId, String>,
     ) -> Self {
         Self {
             indent: 0,
             component_names,
             enum_value_names,
             script_signatures,
+            script_names,
         }
     }
 
@@ -70,6 +73,7 @@ impl StructuredWriter {
             &self.component_names,
             &self.enum_value_names,
             &self.script_signatures,
+            &self.script_names,
         );
         let structured = emit_structured(blocks);
 
@@ -87,6 +91,15 @@ impl StructuredWriter {
         if !decl.locals.is_empty() {
             body.push('\n');
         }
+
+        let array_ids = collect_array_ids(&decl.instructions);
+        if !array_ids.is_empty() {
+            for array_id in &array_ids {
+                let _ = writeln!(&mut body, "    let array_{array_id}: number[] = [];");
+            }
+            body.push('\n');
+        }
+
         self.write_structured(&structured, &mut body);
 
         // ── Detect which imports are needed ──
@@ -96,6 +109,7 @@ impl StructuredWriter {
         let needs_params = body.contains("PARAMS.");
         let needs_components = body.contains("ComponentId.");
         let needs_enum_refs = body.contains("Enum_");
+        let needs_db = body.contains("DB_TABLES.");
 
         // ── Emit imports ──
         if needs_vars
@@ -104,6 +118,7 @@ impl StructuredWriter {
             || needs_params
             || needs_components
             || needs_enum_refs
+            || needs_db
         {
             let mut imports = Vec::new();
             if needs_vars {
@@ -121,6 +136,9 @@ impl StructuredWriter {
             if needs_components {
                 imports.push("ComponentId");
             }
+            if needs_db {
+                imports.push("DB_TABLES");
+            }
             let _ = writeln!(
                 &mut out,
                 "import {{ {} }} from './index';",
@@ -131,10 +149,13 @@ impl StructuredWriter {
 
         // ── Function signature with detected return type ──
         let return_type = detect_return_type(&structured);
+        let function_name = super::script_function_name(
+            decl.script_id,
+            decl.name.as_deref(),
+        );
         let _ = writeln!(
             &mut out,
-            "export function script_{id}({args}): {return_type} {{",
-            id = decl.script_id,
+            "export function {function_name}({args}): {return_type} {{",
             args = decl
                 .arguments
                 .iter()
@@ -260,8 +281,23 @@ impl StructuredWriter {
     }
 }
 
+fn collect_array_ids(instructions: &[super::ast::InstructionNode]) -> Vec<u32> {
+    use super::ast::OperandNode;
+    let mut ids = Vec::new();
+    for instr in instructions {
+        if instr.command == "define_array"
+            && let OperandNode::Array(id) = instr.operand
+        {
+            ids.push(id as u32);
+        }
+    }
+    ids.sort_unstable();
+    ids.dedup();
+    ids
+}
+
 impl Default for StructuredWriter {
     fn default() -> Self {
-        Self::new(HashMap::new(), HashMap::new(), HashMap::new())
+        Self::new(HashMap::new(), HashMap::new(), HashMap::new(), HashMap::new())
     }
 }

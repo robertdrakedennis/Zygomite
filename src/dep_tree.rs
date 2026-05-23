@@ -21,8 +21,8 @@ use crate::constants::{
     CONFIG_GROUP_SEQ, CONFIG_GROUP_SPOT, CONFIG_GROUP_VAR_BIT, CONFIG_GROUP_VAR_CLAN,
     CONFIG_GROUP_VAR_CLAN_SETTING, CONFIG_GROUP_VAR_CLIENT, CONFIG_GROUP_VAR_CONTROLLER,
     CONFIG_GROUP_VAR_GLOBAL, CONFIG_GROUP_VAR_NPC, CONFIG_GROUP_VAR_OBJECT,
-    CONFIG_GROUP_VAR_PLAYER, CONFIG_GROUP_VAR_PLAYER_GROUP, CONFIG_GROUP_VAR_REGION,
-    CONFIG_GROUP_VAR_SHARED, CONFIG_GROUP_VAR_WORLD,
+    CONFIG_GROUP_PARAM, CONFIG_GROUP_VAR_PLAYER, CONFIG_GROUP_VAR_PLAYER_GROUP,
+    CONFIG_GROUP_VAR_REGION, CONFIG_GROUP_VAR_WORLD,
 };
 use crate::interface::{ComponentDeps, parse_component_deps};
 use crate::js5;
@@ -541,9 +541,9 @@ impl ResolverContext {
         }
 
         let mut params = BTreeMap::new();
-        if let Some(payload) = cache.get(ARCHIVE_CONFIG, CONFIG_GROUP_VAR_SHARED)? {
+        if let Some(payload) = cache.get(ARCHIVE_CONFIG, CONFIG_GROUP_PARAM)? {
             let config_index = cache.archive_index(ARCHIVE_CONFIG)?;
-            let raw = js5::unpack_group(&config_index, CONFIG_GROUP_VAR_SHARED, &payload)?;
+            let raw = js5::unpack_group(&config_index, CONFIG_GROUP_PARAM, &payload)?;
             for (id, bytes) in raw {
                 if let Ok(entry) = crate::config::parse_param(id, &bytes) {
                     params.insert(id, entry);

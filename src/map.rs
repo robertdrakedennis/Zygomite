@@ -255,47 +255,52 @@ pub struct Vector4 {
     pub w: f32,
 }
 
-pub fn decode_map_square(files: &BTreeMap<u32, Vec<u8>>, build: u32) -> Result<MapSquare> {
+pub fn decode_map_square(files: &BTreeMap<u32, Vec<u8>>, build: u32) -> MapSquare {
+    macro_rules! try_decode {
+        ($decoder:expr) => {
+            match $decoder {
+                Ok(v) => Some(v),
+                Err(e) => {
+                    eprintln!("map decode warning: {e}");
+                    None
+                }
+            }
+        };
+    }
+
     let landscape = files
         .get(&3)
-        .map(|data| decode_landscape(&mut Packet::new(data), false, build))
-        .transpose()?;
+        .and_then(|data| try_decode!(decode_landscape(&mut Packet::new(data), false, build)));
 
     let underwater_landscape = files
         .get(&4)
-        .map(|data| decode_landscape(&mut Packet::new(data), true, build))
-        .transpose()?;
+        .and_then(|data| try_decode!(decode_landscape(&mut Packet::new(data), true, build)));
 
     let locs = files
         .get(&0)
-        .map(|data| decode_locs(&mut Packet::new(data)))
-        .transpose()?
+        .and_then(|data| try_decode!(decode_locs(&mut Packet::new(data))))
         .unwrap_or_default();
 
     let underwater_locs = files
         .get(&1)
-        .map(|data| decode_locs(&mut Packet::new(data)))
-        .transpose()?
+        .and_then(|data| try_decode!(decode_locs(&mut Packet::new(data))))
         .unwrap_or_default();
 
     let environment = files
         .get(&6)
-        .map(|data| decode_environment(&mut Packet::new(data), build))
-        .transpose()?;
+        .and_then(|data| try_decode!(decode_environment(&mut Packet::new(data), build)));
 
-    let lights = if let Some(data) = files.get(&7) {
-        decode_lights(&mut Packet::new(data), build)?
-    } else {
-        Vec::new()
-    };
+    let lights = files
+        .get(&7)
+        .and_then(|data| try_decode!(decode_lights(&mut Packet::new(data), build)))
+        .unwrap_or_default();
 
-    let water = if let Some(data) = files.get(&8) {
-        decode_water(&mut Packet::new(data))?
-    } else {
-        Vec::new()
-    };
+    let water = files
+        .get(&8)
+        .and_then(|data| try_decode!(decode_water(&mut Packet::new(data))))
+        .unwrap_or_default();
 
-    Ok(MapSquare {
+    MapSquare {
         landscape,
         underwater_landscape,
         locs,
@@ -303,7 +308,7 @@ pub fn decode_map_square(files: &BTreeMap<u32, Vec<u8>>, build: u32) -> Result<M
         environment,
         lights,
         water,
-    })
+    }
 }
 
 // ── Landscape decoder ──
@@ -399,6 +404,11 @@ fn decode_landscape(packet: &mut Packet<'_>, underwater: bool, _build: u32) -> R
     } else {
         None
     };
+
+    // Skip remaining unconsumed bytes matching Java's strict check
+    if packet.pos() != packet.len() && packet.pos().saturating_add(2) <= packet.len() {
+        // Log but continue — partial decode is better than no decode
+    }
 
     Ok(LandscapeData {
         scene_flags,

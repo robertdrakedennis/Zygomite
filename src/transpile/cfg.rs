@@ -44,12 +44,14 @@ impl CfgBuilder {
         component_names: &std::collections::HashMap<u32, String, S>,
         enum_value_names: &std::collections::HashMap<i32, String, S>,
         script_signatures: &std::collections::HashMap<super::ScriptId, super::ScriptSignature, S>,
+        script_names: &std::collections::HashMap<super::ScriptId, String, S>,
     ) -> Self {
         let recovered = ExprRecovery::new(
             &instructions,
             component_names,
             enum_value_names,
             script_signatures,
+            script_names,
         )
         .recover();
         Self {
@@ -332,12 +334,14 @@ pub fn build_cfg<S: std::hash::BuildHasher>(
     component_names: &std::collections::HashMap<u32, String, S>,
     enum_value_names: &std::collections::HashMap<i32, String, S>,
     script_signatures: &std::collections::HashMap<super::ScriptId, super::ScriptSignature, S>,
+    script_names: &std::collections::HashMap<super::ScriptId, String, S>,
 ) -> Vec<Block> {
     CfgBuilder::new(
         instructions,
         component_names,
         enum_value_names,
         script_signatures,
+        script_names,
     )
     .build()
 }

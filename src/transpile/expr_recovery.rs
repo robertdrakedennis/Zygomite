@@ -185,6 +185,8 @@ pub struct ExprRecovery<'a, S: std::hash::BuildHasher = std::collections::hash_m
     enum_value_names: &'a std::collections::HashMap<i32, String, S>,
     /// Maps script IDs to their parameter/return types for cross-script calls.
     script_signatures: &'a std::collections::HashMap<super::ScriptId, super::ScriptSignature, S>,
+    /// Maps script IDs to decoded script names from cache metadata.
+    script_names: &'a std::collections::HashMap<super::ScriptId, String, S>,
 }
 
 impl<'a, S: std::hash::BuildHasher> ExprRecovery<'a, S> {
@@ -197,6 +199,7 @@ impl<'a, S: std::hash::BuildHasher> ExprRecovery<'a, S> {
             super::ScriptSignature,
             S,
         >,
+        script_names: &'a std::collections::HashMap<super::ScriptId, String, S>,
     ) -> Self {
         Self {
             instructions,
@@ -205,6 +208,7 @@ impl<'a, S: std::hash::BuildHasher> ExprRecovery<'a, S> {
             component_names,
             enum_value_names,
             script_signatures,
+            script_names,
         }
     }
 
@@ -642,11 +646,36 @@ impl<'a, S: std::hash::BuildHasher> ExprRecovery<'a, S> {
                     let mut args: Vec<Expression> =
                         (0..total_args).map(|_| self.pop_or_unknown()).collect();
                     args.reverse();
+                    let callee_name = self
+                        .script_names
+                        .get(&sid)
+                        .map(|name| {
+                            super::sanitize_export_name(&super::extract_script_name_suffix(name))
+                        })
+                        .unwrap_or_else(|| format!("script_{id}"));
                     let expr = Expression::Call(CallExpr {
                         callee: Box::new(Expression::Identifier(Identifier {
-                            name: format!("script_{id}"),
+                            name: callee_name,
                         })),
                         arguments: args,
+                    });
+                    self.stack.push(expr);
+                }
+                None
+            }
+
+            "db_getrowtable" | "db_find" | "db_find_with_count" => {
+                if let OperandNode::Int(table_id) = op {
+                    let expr = Expression::Call(CallExpr {
+                        callee: Box::new(Expression::PropertyAccess(super::ast::PropertyAccess {
+                            object: Box::new(Expression::Identifier(Identifier {
+                                name: "DB_TABLES".to_string(),
+                            })),
+                            property: "get".to_string(),
+                        })),
+                        arguments: vec![Expression::NumberLiteral(NumberLiteral {
+                            value: *table_id,
+                        })],
                     });
                     self.stack.push(expr);
                 }
@@ -828,7 +857,7 @@ impl<'a, S: std::hash::BuildHasher> ExprRecovery<'a, S> {
                 object: Box::new(Expression::Identifier(Identifier {
                     name: "ComponentId".to_string(),
                 })),
-                property: name.clone(),
+                property: super::sanitize_ts_ident(name),
             })
         } else {
             Expression::NumberLiteral(NumberLiteral { value: id as i32 })

@@ -105,10 +105,31 @@ impl Transpiler {
             if let Ok(script) = decode_script(data, opcode_book, version)
                 && let Some(name) = &script.name
             {
-                names.insert(ScriptId(script_id as i32), name.clone());
+                names.insert(
+                    ScriptId(script_id as i32),
+                    extract_script_name_suffix(name),
+                );
             }
         }
         self.symbol_table.script_names = names;
+        self
+    }
+
+    /// Fill script names from archive group name hashes (`names/scripts.txt`).
+    pub fn with_script_group_names(
+        mut self,
+        scripts: &BTreeMap<u32, Vec<u8>>,
+        group_names: &HashMap<u32, String>,
+    ) -> Self {
+        for &script_id_raw in scripts.keys() {
+            let group = script_id_raw >> 16;
+            if let Some(name) = group_names.get(&group) {
+                self.symbol_table
+                    .script_names
+                    .entry(ScriptId(script_id_raw as i32))
+                    .or_insert_with(|| name.clone());
+            }
+        }
         self
     }
 
@@ -117,11 +138,14 @@ impl Transpiler {
         parsed_components: &BTreeMap<u32, BTreeMap<u32, crate::interface::ComponentDeps>>,
     ) -> Self {
         let mut names = HashMap::new();
-        for group in parsed_components.values() {
-            for (&id, deps) in group {
-                if let Some(ref name) = deps.name {
-                    names.insert(id, name.clone());
-                }
+        for (&interface_id, comps) in parsed_components {
+            for (&comp_id, deps) in comps {
+                let uid = crate::interface::component_uid(interface_id, comp_id);
+                let name = deps
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| crate::interface::component_fallback_name(interface_id, comp_id));
+                names.insert(uid, name);
             }
         }
         self.symbol_table.component_names = names;
@@ -160,15 +184,21 @@ impl Transpiler {
         opcode_book: &OpcodeBook,
         version: u32,
     ) -> Self {
+        let empty_components = HashMap::new();
+        let empty_enums = HashMap::new();
+        let empty_sigs = HashMap::new();
         for (&id, data) in scripts {
             if let Ok(script) = decode_script(data, opcode_book, version) {
+                let script_id = ScriptId(id as i32);
+                let return_type =
+                    infer_return_type_for_script(&script, script_id, &empty_components, &empty_enums, &empty_sigs);
                 self.script_signatures.insert(
-                    ScriptId(id as i32),
+                    script_id,
                     ScriptSignature {
                         arg_count_int: script.argument_count_int,
                         arg_count_obj: script.argument_count_object,
                         arg_count_long: script.argument_count_long,
-                        return_type: String::new(),
+                        return_type,
                     },
                 );
             }
@@ -216,6 +246,7 @@ impl Transpiler {
             self.symbol_table.component_names.clone(),
             self.symbol_table.enum_value_names.clone(),
             self.script_signatures.clone(),
+            self.symbol_table.script_names.clone(),
         );
         let source = writer.write_declaration(&decl);
         TranspiledScript {
@@ -284,6 +315,63 @@ fn collect_script_refs(script: &CompiledScript) -> Vec<ScriptId> {
     refs
 }
 
+pub fn sanitize_export_name(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for c in value.chars() {
+        if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+            out.push(c);
+        } else {
+            out.push('_');
+        }
+    }
+    if out.is_empty() {
+        "script".to_string()
+    } else {
+        out
+    }
+}
+
+pub fn script_function_name(script_id: ScriptId, script_name: Option<&str>) -> String {
+    script_name
+        .map(extract_script_name_suffix)
+        .map(|name| sanitize_export_name(&name))
+        .filter(|name| name != "script")
+        .unwrap_or_else(|| format!("script_{script_id}"))
+}
+
+/// Strip `[clientscript,name]` / `[proc,name]` tag syntax to the suffix identifier.
+pub fn extract_script_name_suffix(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.starts_with('[') && trimmed.ends_with(']') {
+        let inner = &trimmed[1..trimmed.len() - 1];
+        if let Some((_, suffix)) = inner.split_once(',') {
+            return suffix.to_string();
+        }
+    }
+    trimmed.to_string()
+}
+
+pub fn infer_return_type_for_script(
+    script: &CompiledScript,
+    script_id: ScriptId,
+    component_names: &HashMap<u32, String>,
+    enum_value_names: &HashMap<i32, String>,
+    script_signatures: &HashMap<ScriptId, ScriptSignature>,
+) -> String {
+    let codegen = CodeGen::new(SymbolTable::new());
+    let decl = codegen.generate(script, script_id);
+    let empty_names: HashMap<ScriptId, String> = HashMap::new();
+    let blocks = build_cfg(
+        decl.instructions,
+        component_names,
+        enum_value_names,
+        script_signatures,
+        &empty_names,
+    );
+    let structured = emit_structured(blocks);
+    detect_return_type(&structured).to_string()
+}
+
 fn str_to_screaming_snake(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
@@ -325,6 +413,15 @@ pub fn sanitize_ts_ident(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::sanitize_ts_ident;
+
+    #[test]
+    fn extract_script_name_suffix_parses_tag_syntax() {
+        assert_eq!(
+            "bank_build_init",
+            extract_script_name_suffix("[clientscript,bank_build_init]")
+        );
+        assert_eq!("plain_name", extract_script_name_suffix("plain_name"));
+    }
 
     #[test]
     fn sanitize_ident() {
