@@ -1276,10 +1276,10 @@ fn push_transmit_list(lines: &mut Vec<String>, key: &str, value: Option<String>)
 
 fn format_transmit(kind: TransmitListType, id: i32) -> String {
     match kind {
-        TransmitListType::VarPlayer => format!("varplayer_{id}"),
+        TransmitListType::VarPlayer => format!("varplayerint_{id}"),
         TransmitListType::Inv => format!("inv_{id}"),
         TransmitListType::Stat => format!("stat_{id}"),
-        TransmitListType::VarClient => format!("varclient_{id}"),
+        TransmitListType::VarClient => format!("varclientint_{id}"),
         TransmitListType::VarClientString => format!("varclientstring_{id}"),
     }
 }
@@ -1304,7 +1304,7 @@ fn format_clientscript(id: i32) -> String {
     if id == -1 {
         "null".to_string()
     } else {
-        format!("clientscript_{id}")
+        format!("script{id}")
     }
 }
 
