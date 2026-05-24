@@ -69,7 +69,7 @@ pub struct Cli {
     pub cache_dir: Option<PathBuf>,
     #[arg(long)]
     pub cache_tar: Option<PathBuf>,
-    #[arg(long, default_value = "../rs3-cache/data")]
+    #[arg(long, default_value = "data")]
     pub data_dir: PathBuf,
     #[arg(long, default_value_t = BUILD)]
     pub build: u32,
@@ -137,6 +137,10 @@ pub enum Command {
         id: u32,
         #[arg(long, default_value_t = 50)]
         max_depth: u32,
+        #[arg(long)]
+        out_file: PathBuf,
+    },
+    InterfaceIndex {
         #[arg(long)]
         out_file: PathBuf,
     },
@@ -675,6 +679,13 @@ pub fn run(cli: Cli) -> Result<()> {
             &cli.data_dir,
             id,
             max_depth,
+            &out_file,
+            version,
+        ),
+        Command::InterfaceIndex { out_file } => run_interface_index(
+            &cache,
+            &tar_path,
+            &cli.data_dir,
             &out_file,
             version,
         ),
@@ -3518,6 +3529,17 @@ fn run_dep_tree_interface(
         tree.max_depth_hits
     );
     Ok(())
+}
+
+fn run_interface_index(
+    cache: &FlatCache,
+    tar_path: &Path,
+    data_dir: &Path,
+    out_file: &Path,
+    version: RuntimeVersion,
+) -> Result<()> {
+    let ctx = ResolverContext::load(cache, tar_path, data_dir, version.build, version.subbuild)?;
+    crate::interface_index::write_interface_index(&ctx, out_file)
 }
 
 fn run_dep_tree_script(

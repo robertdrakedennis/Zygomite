@@ -1,6 +1,6 @@
 # rs3-cache-rs
 
-CLI-first Rust port of `rs3-cache` for RS3 cache extraction and decoding.
+CLI-first Rust toolkit for RS3 cache extraction, CS2, and overlay semantic trees.
 
 Current target snapshot:
 
@@ -22,7 +22,7 @@ Current target snapshot:
 - Cache data available one of two ways:
   - extracted flat cache dir (default: `../eval/cache-flat/cache`)
   - OpenRS2 tar (default: `../cache-runescape-live-en-b947.1-2026-04-20-10-45-34-openrs2#2519.tar`)
-- Java repo data files for opcode/name lookups (default: `../rs3-cache/data`; Alerion: `tools/zwyz-rs3-cache/data`)
+- Opcode/name tables in `data/` (default `--data-dir data` when run from this crate; Alerion: `tools/rs3-cache-rs/data`)
 
 ## Build
 
@@ -52,7 +52,7 @@ Main options:
 cargo run -- \
   --cache-dir ../eval/cache-flat/cache \
   --cache-tar ../cache-runescape-live-en-b947.1-2026-04-20-10-45-34-openrs2#2519.tar \
-  --data-dir ../rs3-cache/data \
+  --data-dir data \
   unpack --out-dir /tmp/rs3-cache-rs-out
 ```
 
@@ -68,7 +68,7 @@ RS3 build `910` example:
 cargo run -- \
   --cache-dir /tmp/rs3-cache-rs-910/cache \
   --cache-tar /Users/robert/projects/ignis/static/cache-runescape-live-en-b910-2019-12-11-00-00-00-openrs2#1730.tar \
-  --data-dir ../rs3-cache/data \
+  --data-dir data \
   --build 910 \
   --subbuild 0 \
   unpack --out-dir /tmp/rs3-cache-rs-910-out-audio --sample-models --max-audio-files 500
@@ -115,42 +115,47 @@ Legacy `config/dump.*` text is not produced here; use the separate `dump-configs
 ```bash
 cargo run --release -- \
   --cache-dir /path/to/cache/unpacked/947 \
-  --data-dir /path/to/tools/zwyz-rs3-cache/data \
+  --data-dir /path/to/tools/rs3-cache-rs/data \
   --build 947 --subbuild 1 \
   prepare-overlay --out-dir /path/to/cache/rs3-cache/947-all
 ```
 
 Alerion server shortcut: `bun run cache:semantic:sync-947` (947 + 910 trees), then `bun run cacheoverlay:ensure-947-overlay`.
 
-# CS2 TypeScript export / transpile
+# CS2 workflow (947 active, 910 base)
+
+Full agent workflow: [docs/cs2_roundtrip_workflow.md](../../docs/cs2_roundtrip_workflow.md).
+
+**947 (donor / runtime truth)** — subbuild `1`:
 
 ```bash
-cargo run --release -- \
-  --cache-dir /path/to/cache/unpacked/910 \
-  --data-dir /path/to/tools/zwyz-rs3-cache/data \
-  --build 910 --subbuild 0 \
-  ts-export --out-dir /tmp/rs3-ts-export-910
+C947="--cache-dir /path/to/cache/unpacked/947 --data-dir /path/to/tools/rs3-cache-rs/data --build 947 --subbuild 1"
+
+# Typed defs + transpiled corpus
+cargo run --release -- $C947 ts-export --out-dir /path/to/cache/rsmv/947/clientscript
+cargo run --release -- $C947 transpile-scripts --out-dir /path/to/cache/rsmv/947/clientscript --all-scripts
+
+# Validate / assemble / deps
+cargo run --release -- $C947 validate-script --script-id 4330
+cargo run --release -- $C947 assemble-script --input script.asm.ts --output /tmp/out.cs2
+cargo run --release -- $C947 dep-tree-script --id 4330 --out-file /tmp/deps.json
 ```
 
-Writes typed definitions: `vars.ts`, `varbits.ts`, `enums.ts`, `params.ts`, `interfaces.ts` (with `ComponentId` / `InterfaceId` UIDs), `scripts.d.ts`, `named_objs.ts`, `dbtables.ts`, and `index.ts`.
+**910 (overlay base)** — subbuild `0`: same commands with `--build 910 --subbuild 0` and `cache/unpacked/910`.
 
-Transpile CS2 to structured TypeScript (subset by default):
+**Roundtrip tests** (100 scripts per build):
 
 ```bash
-cargo run --release -- \
-  --cache-dir /path/to/cache/unpacked/910 \
-  --data-dir /path/to/tools/zwyz-rs3-cache/data \
-  --build 910 --subbuild 0 \
-  transpile-scripts --out-dir /tmp/rs3-transpile-910 \
-  --filter-script bank_build --max-scripts 5
+RS3_CACHE_DIR=.../947 cargo test asm_encode_roundtrip_byte_perfect --release
+RS3_CACHE_DIR=.../910 cargo test asm_encode_roundtrip_byte_perfect_910 --release
 ```
 
-Use `--all-scripts` to transpile the full clientscript archive (slow).
+**Repack into Alerion runtime:** patch a temp copy of `cache/rs3-cache/947-all/raw-flat`, then `bun run js5pack:pack-flat --archives scripts` in `server/` (see workflow doc).
 
-Alerion defaults for integration tests:
+Alerion env defaults:
 
-- `RS3_CACHE_DIR=/Users/robert/projects/alerion/cache/unpacked/910`
-- `RS3_DATA_DIR=/Users/robert/projects/alerion/tools/zwyz-rs3-cache/data`
+- `RS3_CACHE_DIR` → `cache/unpacked/947` (947 tests) or `910` (910 tests)
+- `RS3_DATA_DIR` → `tools/rs3-cache-rs/data`
 
 ## Expected unpack output
 

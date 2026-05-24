@@ -28,4 +28,4 @@ Git history uses short imperative subjects, such as `Add 910 cache compatibility
 
 ## Security & Configuration Tips
 
-Do not commit cache dumps, generated unpack output, or local absolute paths. Keep large outputs under `/tmp` or ignored workspace dirs. Verify data-dir changes against `../rs3-cache/data` compatibility.
+Do not commit cache dumps, generated unpack output, or local absolute paths. Keep large outputs under `/tmp` or ignored workspace dirs. Verify data-dir changes against `data/` in this crate (Alerion: `tools/rs3-cache-rs/data`).

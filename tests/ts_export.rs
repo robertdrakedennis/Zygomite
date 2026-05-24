@@ -4,7 +4,7 @@
 //!
 //! Defaults (Alerion workspace):
 //! - `RS3_CACHE_DIR=/Users/robert/projects/alerion/cache/unpacked/910`
-//! - `RS3_DATA_DIR=/Users/robert/projects/alerion/tools/zwyz-rs3-cache/data`
+//! - `RS3_DATA_DIR=/Users/robert/projects/alerion/tools/rs3-cache-rs/data`
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -14,7 +14,7 @@ fn default_cache_dir() -> PathBuf {
 }
 
 fn default_data_dir() -> PathBuf {
-    PathBuf::from("/Users/robert/projects/alerion/tools/zwyz-rs3-cache/data")
+    PathBuf::from("/Users/robert/projects/alerion/tools/rs3-cache-rs/data")
 }
 
 fn cache_dir() -> PathBuf {

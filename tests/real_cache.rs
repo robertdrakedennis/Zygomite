@@ -76,7 +76,7 @@ fn data_dir() -> PathBuf {
     if let Ok(path) = std::env::var("RS3_DATA_DIR") {
         return PathBuf::from(path);
     }
-    PathBuf::from("../rs3-cache/data")
+    PathBuf::from("data")
 }
 
 fn lock_guard() -> std::sync::MutexGuard<'static, ()> {
