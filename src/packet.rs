@@ -55,6 +55,13 @@ impl<'a> Packet<'a> {
         Ok(byte)
     }
 
+    pub fn peek1(&self) -> Result<u8> {
+        self.data
+            .get(self.pos)
+            .copied()
+            .with_context(|| format!("peek1 out of bounds at {}", self.pos))
+    }
+
     pub fn g1s(&mut self) -> Result<i8> {
         Ok(i8::from_ne_bytes([self.g1()?]))
     }
@@ -183,6 +190,18 @@ impl<'a> Packet<'a> {
         }
     }
 
+    pub fn gsmart2or4(&mut self) -> Result<i32> {
+        let first = *self
+            .data
+            .get(self.pos)
+            .with_context(|| format!("gsmart2or4 out of bounds at {}", self.pos))?;
+        if (first as i8) < 0 {
+            Ok(self.g4s()? & i32::MAX)
+        } else {
+            Ok(i32::from(self.g2()?))
+        }
+    }
+
     pub fn gsmart1or2(&mut self) -> Result<u16> {
         let first = *self
             .data
@@ -195,15 +214,26 @@ impl<'a> Packet<'a> {
         }
     }
 
-    pub fn g_extended_1or2(&mut self) -> Result<i32> {
+    pub fn gsmart1or2s(&mut self) -> Result<i32> {
         let first = *self
             .data
             .get(self.pos)
-            .with_context(|| format!("g_extended_1or2 out of bounds at {}", self.pos))?;
+            .with_context(|| format!("gsmart1or2s out of bounds at {}", self.pos))?;
         if first < 128 {
-            Ok(i32::from(self.g1()?))
+            Ok(i32::from(self.g1()?) - 64)
         } else {
-            Ok(i32::from(self.g2()?) - 32_768)
+            Ok(i32::from(self.g2()?) - 49_152)
+        }
+    }
+
+    pub fn g_extended_1or2(&mut self) -> Result<i32> {
+        let mut value = 0_i32;
+        loop {
+            let next = i32::from(self.gsmart1or2()?);
+            value += next;
+            if next != 32_767 {
+                return Ok(value);
+            }
         }
     }
 

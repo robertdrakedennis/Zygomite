@@ -10,6 +10,7 @@ pub const ARCHIVE_TEXTURES: u32 = 9;
 pub const ARCHIVE_BINARY: u32 = 10;
 pub const ARCHIVE_JINGLES: u32 = 11;
 pub const ARCHIVE_CLIENTSCRIPTS: u32 = 12;
+pub const ARCHIVE_CHUNK_INSTANCES: u32 = 0x29;
 pub const ARCHIVE_LOC_CONFIG: u32 = 16;
 pub const ARCHIVE_ENUM_CONFIG: u32 = 17;
 pub const ARCHIVE_NPC_CONFIG: u32 = 18;

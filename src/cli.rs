@@ -13,13 +13,13 @@ use crate::config::{
 };
 use crate::constants::{
     ARCHIVE_ACHIEVEMENTS, ARCHIVE_ANIMATOR, ARCHIVE_BILLBOARDS, ARCHIVE_BINARY,
-    ARCHIVE_CLIENTSCRIPTS, ARCHIVE_CONFIG, ARCHIVE_CUTSCENE2D, ARCHIVE_DEFAULTS,
-    ARCHIVE_ENUM_CONFIG, ARCHIVE_FONTMETRICS, ARCHIVE_INTERFACES, ARCHIVE_LOC_CONFIG,
-    ARCHIVE_MAPSQUARES, ARCHIVE_MATERIALS, ARCHIVE_MODELS_RT7, ARCHIVE_NPC_CONFIG,
-    ARCHIVE_OBJ_CONFIG, ARCHIVE_PARTICLES, ARCHIVE_QUICKCHAT_CONFIG, ARCHIVE_SEQ_CONFIG,
-    ARCHIVE_SPOT_CONFIG, ARCHIVE_STRUCT_CONFIG, ARCHIVE_STYLESHEETS, ARCHIVE_TEXTURES, ARCHIVE_TTF,
-    ARCHIVE_UI_ANIM, ARCHIVE_VFX, ARCHIVE_WORLDMAP, AUDIO_ARCHIVES, BUILD,
-    CONFIG_GROUP_ACHIEVEMENT_ARCHIVE57, CONFIG_GROUP_AREA, CONFIG_GROUP_BAS,
+    ARCHIVE_CHUNK_INSTANCES, ARCHIVE_CLIENTSCRIPTS, ARCHIVE_CONFIG, ARCHIVE_CUTSCENE2D,
+    ARCHIVE_DEFAULTS, ARCHIVE_ENUM_CONFIG, ARCHIVE_FONTMETRICS, ARCHIVE_INTERFACES,
+    ARCHIVE_LOC_CONFIG, ARCHIVE_MAPSQUARES, ARCHIVE_MATERIALS, ARCHIVE_MODELS_RT7,
+    ARCHIVE_NPC_CONFIG, ARCHIVE_OBJ_CONFIG, ARCHIVE_PARTICLES, ARCHIVE_QUICKCHAT_CONFIG,
+    ARCHIVE_SEQ_CONFIG, ARCHIVE_SPOT_CONFIG, ARCHIVE_STRUCT_CONFIG, ARCHIVE_STYLESHEETS,
+    ARCHIVE_TEXTURES, ARCHIVE_TTF, ARCHIVE_UI_ANIM, ARCHIVE_VFX, ARCHIVE_WORLDMAP, AUDIO_ARCHIVES,
+    BUILD, CONFIG_GROUP_ACHIEVEMENT_ARCHIVE57, CONFIG_GROUP_AREA, CONFIG_GROUP_BAS,
     CONFIG_GROUP_BILLBOARD_ARCHIVE29, CONFIG_GROUP_BUGTEMPLATE, CONFIG_GROUP_CATEGORY,
     CONFIG_GROUP_CONTROLLER, CONFIG_GROUP_CURSOR, CONFIG_GROUP_DBROW, CONFIG_GROUP_DBTABLE,
     CONFIG_GROUP_GAMELOGEVENT, CONFIG_GROUP_HEADBAR, CONFIG_GROUP_HITMARK, CONFIG_GROUP_HUNT,
@@ -43,7 +43,7 @@ use crate::cutscene2d::decode as decode_cutscene2d;
 use crate::dep_tree::{EntityRef, EntityType, ResolverContext, build_tree};
 use crate::fixture::{default_tar_path, ensure_archive_complete, open_cache};
 use crate::interface::render_interface_group;
-use crate::map::{decode_map_square, decode_map_square_best_effort};
+use crate::map::{decode_chunk_instance_stream, decode_map_square, decode_map_square_best_effort};
 use crate::model::Model;
 use crate::script::{
     CompiledScript, Instruction, MIN_SCRIPT_BUILD, OpcodeBook, Operand, decode_script,
@@ -2044,6 +2044,13 @@ fn run_top_level_exports(
         best_effort_maps,
     )
     .context("export mapsquares")?;
+    export_chunk_instances_json(
+        cache,
+        tar_path,
+        &out_dir.join("chunk-instances"),
+        best_effort_maps,
+    )
+    .context("export chunk instances")?;
     export_defaults_text(
         cache,
         tar_path,
@@ -2275,9 +2282,46 @@ fn export_mapsquares_json(
         let decoded = if best_effort {
             decode_map_square_best_effort(&files, build)
         } else {
-            decode_map_square(&files, build)?
+            decode_map_square(&files, build).with_context(|| {
+                format!("decode mapsquare group {group} ({square_x}_{square_z})")
+            })?
         };
         let path = out_dir.join(format!("{square_x}_{square_z}.json"));
+        write_json(&path, &decoded)?;
+        count += 1;
+    }
+
+    Ok(count)
+}
+
+fn export_chunk_instances_json(
+    cache: &FlatCache,
+    tar_path: &Path,
+    out_dir: &Path,
+    best_effort: bool,
+) -> Result<usize> {
+    if ensure_archive_complete(cache.root(), tar_path, ARCHIVE_CHUNK_INSTANCES).is_err() {
+        return Ok(0);
+    }
+    fs::create_dir_all(out_dir)
+        .with_context(|| format!("failed creating {}", out_dir.display()))?;
+
+    let index = cache.archive_index(ARCHIVE_CHUNK_INSTANCES)?;
+    let mut count = 0_usize;
+    for group in &index.group_id {
+        let files = cache.group_files_with_index(&index, ARCHIVE_CHUNK_INSTANCES, *group)?;
+        let Some(data) = files.get(&0) else {
+            continue;
+        };
+        let decoded = match decode_chunk_instance_stream(data) {
+            Ok(decoded) => decoded,
+            Err(err) if best_effort => {
+                eprintln!("chunk instance decode warning group {group}: {err}");
+                continue;
+            }
+            Err(err) => return Err(err).with_context(|| format!("decode chunk instance {group}")),
+        };
+        let path = out_dir.join(format!("{group}.json"));
         write_json(&path, &decoded)?;
         count += 1;
     }
