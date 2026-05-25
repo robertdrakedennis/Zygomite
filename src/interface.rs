@@ -45,7 +45,7 @@ pub fn render_interface_group(
     out
 }
 
-fn parse_component(component_id: u32, data: &[u8], build: u32) -> Result<Vec<String>> {
+pub fn parse_component(component_id: u32, data: &[u8], build: u32) -> Result<Vec<String>> {
     let mut packet = Packet::new(data);
     let mut lines = Vec::new();
     lines.push(format!("[com{}]", component_id & 0xFFFF));

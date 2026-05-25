@@ -52,7 +52,6 @@ pub mod dump;
 pub mod error;
 pub mod fixture;
 pub mod interface;
-pub mod interface_index;
 pub mod js5;
 pub mod map;
 pub mod migrate;

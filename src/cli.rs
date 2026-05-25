@@ -140,10 +140,6 @@ pub enum Command {
         #[arg(long)]
         out_file: PathBuf,
     },
-    InterfaceIndex {
-        #[arg(long)]
-        out_file: PathBuf,
-    },
     DepTreeScript {
         #[arg(long)]
         id: u32,
@@ -679,13 +675,6 @@ pub fn run(cli: Cli) -> Result<()> {
             &cli.data_dir,
             id,
             max_depth,
-            &out_file,
-            version,
-        ),
-        Command::InterfaceIndex { out_file } => run_interface_index(
-            &cache,
-            &tar_path,
-            &cli.data_dir,
             &out_file,
             version,
         ),
@@ -3529,17 +3518,6 @@ fn run_dep_tree_interface(
         tree.max_depth_hits
     );
     Ok(())
-}
-
-fn run_interface_index(
-    cache: &FlatCache,
-    tar_path: &Path,
-    data_dir: &Path,
-    out_file: &Path,
-    version: RuntimeVersion,
-) -> Result<()> {
-    let ctx = ResolverContext::load(cache, tar_path, data_dir, version.build, version.subbuild)?;
-    crate::interface_index::write_interface_index(&ctx, out_file)
 }
 
 fn run_dep_tree_script(
