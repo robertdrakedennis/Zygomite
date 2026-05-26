@@ -8,31 +8,41 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::OnceLock;
 
-fn default_cache_dir() -> PathBuf {
-    PathBuf::from("/Users/robert/projects/alerion/cache/unpacked/910")
+fn default_cache_dir(build: u32) -> PathBuf {
+    PathBuf::from(format!(
+        "/Users/robert/projects/alerion/cache/unpacked/{build}"
+    ))
 }
 
 fn default_data_dir() -> PathBuf {
     PathBuf::from("/Users/robert/projects/alerion/tools/rs3-cache-rs/data")
 }
 
-fn cache_dir() -> PathBuf {
-    std::env::var_os("RS3_CACHE_DIR").map_or_else(default_cache_dir, PathBuf::from)
+fn default_script_dir_947() -> PathBuf {
+    PathBuf::from("/Users/robert/projects/alerion/cache/rs3-cache/947-all/script")
+}
+
+fn cache_dir(build: u32) -> PathBuf {
+    let scoped_key = format!("RS3_CACHE_DIR_{build}");
+    std::env::var_os(&scoped_key)
+        .or_else(|| std::env::var_os("RS3_CACHE_DIR"))
+        .map_or_else(|| default_cache_dir(build), PathBuf::from)
 }
 
 fn data_dir() -> PathBuf {
     std::env::var_os("RS3_DATA_DIR").map_or_else(default_data_dir, PathBuf::from)
 }
 
-fn require_fixture() -> Option<(PathBuf, PathBuf)> {
-    let cache = cache_dir();
+fn require_fixture(build: u32) -> Option<(PathBuf, PathBuf)> {
+    let cache = cache_dir(build);
     let data = data_dir();
     if cache.is_dir() && data.is_dir() {
         Some((cache, data))
     } else {
         eprintln!(
-            "skip: missing fixture (cache={}, data={})",
+            "skip: missing fixture build={build} (cache={}, data={})",
             cache.display(),
             data.display()
         );
@@ -40,8 +50,22 @@ fn require_fixture() -> Option<(PathBuf, PathBuf)> {
     }
 }
 
-fn run_rs3(subcommand: &str, out_dir: &Path, extra: &[&str]) {
-    let (cache, data) = require_fixture().expect("fixture");
+fn require_script_fixture_947() -> Option<PathBuf> {
+    let script_dir =
+        std::env::var_os("RS3_SCRIPT_DIR_947").map_or_else(default_script_dir_947, PathBuf::from);
+    if script_dir.is_dir() {
+        Some(script_dir)
+    } else {
+        eprintln!(
+            "skip: missing 947 script fixture ({})",
+            script_dir.display()
+        );
+        None
+    }
+}
+
+fn run_rs3(build: u32, subcommand: &str, out_dir: &Path, extra: &[&str]) {
+    let (cache, data) = require_fixture(build).expect("fixture");
     let bin = env!("CARGO_BIN_EXE_rs3-cache-rs");
     let output = Command::new(bin)
         .args([
@@ -50,7 +74,7 @@ fn run_rs3(subcommand: &str, out_dir: &Path, extra: &[&str]) {
             "--data-dir",
             &data.to_string_lossy(),
             "--build",
-            "910",
+            &build.to_string(),
             "--subbuild",
             "0",
             subcommand,
@@ -69,14 +93,29 @@ fn run_rs3(subcommand: &str, out_dir: &Path, extra: &[&str]) {
     );
 }
 
+fn ts_export_fixture_910() -> PathBuf {
+    static EXPORT_DIR: OnceLock<PathBuf> = OnceLock::new();
+
+    EXPORT_DIR
+        .get_or_init(|| {
+            let out = std::env::temp_dir()
+                .join(format!("rs3-cache-rs-ts-export-910-{}", std::process::id()));
+            if out.exists() {
+                std::fs::remove_dir_all(&out).expect("clear cached ts-export dir");
+            }
+            std::fs::create_dir_all(&out).expect("create cached ts-export dir");
+            run_rs3(910, "ts-export", &out, &[]);
+            out
+        })
+        .clone()
+}
+
 #[test]
 fn ts_export_param_count_910() {
-    if require_fixture().is_none() {
+    if require_fixture(910).is_none() {
         return;
     }
-    let dir = tempfile::tempdir().expect("tempdir");
-    let out = dir.path().to_path_buf();
-    run_rs3("ts-export", &out, &[]);
+    let out = ts_export_fixture_910();
     let params = std::fs::read_to_string(out.join("params.ts")).expect("params.ts");
     assert!(
         params.contains("export const PARAM_COUNT = "),
@@ -102,12 +141,10 @@ fn ts_export_param_count_910() {
 
 #[test]
 fn ts_export_component_uids_910() {
-    if require_fixture().is_none() {
+    if require_fixture(910).is_none() {
         return;
     }
-    let dir = tempfile::tempdir().expect("tempdir");
-    let out = dir.path().to_path_buf();
-    run_rs3("ts-export", &out, &[]);
+    let out = ts_export_fixture_910();
     let interfaces = std::fs::read_to_string(out.join("interfaces.ts")).expect("interfaces.ts");
     // interface 517 comp 1 => (517 << 16) | 1 = 33882113
     assert!(
@@ -122,38 +159,276 @@ fn ts_export_component_uids_910() {
 
 #[test]
 fn script_signatures_d_ts_910() {
-    if require_fixture().is_none() {
+    if require_fixture(910).is_none() {
         return;
     }
-    let dir = tempfile::tempdir().expect("tempdir");
-    let out = dir.path().to_path_buf();
-    run_rs3("ts-export", &out, &[]);
+    let out = ts_export_fixture_910();
     let signatures = std::fs::read_to_string(out.join("scripts.d.ts")).expect("scripts.d.ts");
     assert!(
-        signatures.contains("export function bank_build_init"),
-        "expected named bank_build_init signature in scripts.d.ts"
+        signatures.contains("export function bank_build_init")
+            || signatures.contains("export function bank_build_scrollbar"),
+        "expected named bank build signature in scripts.d.ts"
     );
 }
 
 #[test]
 fn transpile_bank_script_names_910() {
-    if require_fixture().is_none() {
+    if require_fixture(910).is_none() {
         return;
     }
     let dir = tempfile::tempdir().expect("tempdir");
     let out = dir.path().to_path_buf();
     run_rs3(
+        910,
         "transpile-scripts",
         &out,
         &["--filter-script", "bank_build", "--max-scripts", "5"],
     );
-    let init = std::fs::read_to_string(out.join("bank_build_init.ts")).expect("bank_build_init.ts");
+    let script = ["bank_build_init.ts", "bank_build_scrollbar.ts"]
+        .iter()
+        .find_map(|name| std::fs::read_to_string(out.join(name)).ok())
+        .expect("bank build transpile output");
     assert!(
-        init.contains("export function bank_build_init"),
-        "transpiled bank_build_init should use named export"
+        script.contains("export function bank_build_init")
+            || script.contains("export function bank_build_scrollbar"),
+        "transpiled bank build script should use named export"
+    );
+}
+
+#[test]
+fn transpile_stockmarket_oninvtransmit_947_imports_script621() {
+    let Some(raw_dir) = require_script_fixture_947() else {
+        return;
+    };
+    if require_fixture(947).is_none() {
+        return;
+    }
+    let dir = tempfile::tempdir().expect("tempdir");
+    let out = dir.path().to_path_buf();
+    run_rs3(
+        947,
+        "transpile-scripts",
+        &out,
+        &[
+            "--filter-script",
+            "stockmarket_oninvtransmit",
+            "--max-scripts",
+            "2",
+        ],
+    );
+    let script = std::fs::read_to_string(out.join("stockmarket_oninvtransmit.ts"))
+        .expect("stockmarket_oninvtransmit.ts");
+    assert!(
+        script.contains("import { script621 } from './script621';"),
+        "expected direct script621 import"
     );
     assert!(
-        init.contains("Enum_"),
-        "expected named enum reference in bank_build_init"
+        script.contains("export function stockmarket_oninvtransmit(): void"),
+        "expected void return after canonical call resolution"
+    );
+    assert!(
+        script.contains("script621();"),
+        "expected direct script621 call"
+    );
+    assert!(
+        !script.contains("script_621(pop())"),
+        "legacy unresolved call form should be gone"
+    );
+    let raw = std::fs::read_to_string(raw_dir.join("[clientscript,stockmarket_oninvtransmit].cs2"))
+        .expect("raw stockmarket_oninvtransmit");
+    assert!(raw.contains("~script621;"), "expected raw parity anchor");
+}
+
+#[test]
+fn transpile_stockmarket_onvartransmit_947_imports_script621() {
+    let Some(raw_dir) = require_script_fixture_947() else {
+        return;
+    };
+    if require_fixture(947).is_none() {
+        return;
+    }
+    let dir = tempfile::tempdir().expect("tempdir");
+    let out = dir.path().to_path_buf();
+    run_rs3(
+        947,
+        "transpile-scripts",
+        &out,
+        &[
+            "--filter-script",
+            "stockmarket_onvartransmit",
+            "--max-scripts",
+            "2",
+        ],
+    );
+    let script = std::fs::read_to_string(out.join("stockmarket_onvartransmit.ts"))
+        .expect("stockmarket_onvartransmit.ts");
+    assert!(
+        script.contains("import { script621 } from './script621';"),
+        "expected direct script621 import"
+    );
+    assert!(
+        script.contains("export function stockmarket_onvartransmit(): void"),
+        "expected void return after canonical call resolution"
+    );
+    assert!(
+        script.contains("script621();"),
+        "expected direct script621 call"
+    );
+    let raw = std::fs::read_to_string(raw_dir.join("[clientscript,stockmarket_onvartransmit].cs2"))
+        .expect("raw stockmarket_onvartransmit");
+    assert!(raw.contains("~script621;"), "expected raw parity anchor");
+}
+
+#[test]
+fn transpile_stockmarket_onload_947_imports_named_callees() {
+    let Some(raw_dir) = require_script_fixture_947() else {
+        return;
+    };
+    if require_fixture(947).is_none() {
+        return;
+    }
+    let dir = tempfile::tempdir().expect("tempdir");
+    let out = dir.path().to_path_buf();
+    run_rs3(
+        947,
+        "transpile-scripts",
+        &out,
+        &[
+            "--filter-script",
+            "stockmarket_onload",
+            "--max-scripts",
+            "2",
+        ],
+    );
+    let script =
+        std::fs::read_to_string(out.join("stockmarket_onload.ts")).expect("stockmarket_onload.ts");
+    assert!(
+        script.contains("import { script621 } from './script621';"),
+        "expected direct import for script621"
+    );
+    assert!(
+        script.contains("import { stockmarket_search_init } from './stockmarket_search_init';"),
+        "expected direct import for stockmarket_search_init"
+    );
+    assert!(
+        script.contains("import { script8841 } from './script8841';"),
+        "expected direct import for script8841"
+    );
+    assert!(
+        script
+            .contains("UI.Setonvartransmit(callback(\"script588\", [varplayerint_135]), 6881479);"),
+        "expected decoded var transmit hook callback"
+    );
+    assert!(
+        script.contains(
+            "UI.Setonstocktransmit(callback(\"stockmarket_onstocktransmit\", []), 6881280);"
+        ),
+        "expected decoded stock transmit hook callback"
+    );
+    assert!(
+        script.contains(
+            "UI.Setonvartransmit(callback(\"script11743\", [varplayerint_429, varplayerint_431]), 6881470);"
+        ),
+        "expected decoded multi-watch var transmit hook callback"
+    );
+    assert!(
+        script.contains("UI.Setoninvtransmit(callback(\"script11743\", [inv_540]), 6881470);"),
+        "expected decoded inventory transmit hook callback"
+    );
+    assert!(
+        !script.contains("UI.Setonvartransmit(\"Y\","),
+        "legacy descriptor-only hook output should be gone"
+    );
+    let raw = std::fs::read_to_string(raw_dir.join("[clientscript,stockmarket_onload].cs2"))
+        .expect("raw stockmarket_onload");
+    assert!(
+        raw.contains("~script621;"),
+        "expected raw script621 call in source"
+    );
+}
+
+#[test]
+fn transpile_script621_947_uses_group_name_and_signature() {
+    let Some(raw_dir) = require_script_fixture_947() else {
+        return;
+    };
+    if require_fixture(947).is_none() {
+        return;
+    }
+    let dir = tempfile::tempdir().expect("tempdir");
+    let out = dir.path().to_path_buf();
+    run_rs3(
+        947,
+        "transpile-scripts",
+        &out,
+        &["--filter-script", "script621", "--max-scripts", "12"],
+    );
+    let script = std::fs::read_to_string(out.join("script621.ts")).expect("script621.ts");
+    assert!(
+        script.contains("// Meta: packed=40697856 group=621 file=0"),
+        "expected raw script identity metadata for script621"
+    );
+    assert!(
+        script.contains("export function script621(): void"),
+        "expected canonical group-based export name"
+    );
+
+    let signatures = std::fs::read_to_string(out.join("scripts.d.ts")).expect("scripts.d.ts");
+    assert!(
+        signatures.contains("export function script621(): void;"),
+        "expected canonical script621 declaration in scripts.d.ts"
+    );
+    let diagnostics = std::fs::read_to_string(out.join("transpile-diagnostics.json"))
+        .expect("transpile-diagnostics.json");
+    assert!(
+        diagnostics.contains("\"build\": 947"),
+        "expected diagnostics report for transpile-scripts run"
+    );
+    let raw = std::fs::read_to_string(raw_dir.join("[proc,script621].cs2")).expect("raw script621");
+    assert!(
+        raw.contains("[proc,script621]"),
+        "expected raw script621 fixture"
+    );
+}
+
+#[test]
+fn transpile_stockmarket_choosecancel_947_disambiguates_collisions() {
+    if require_fixture(947).is_none() || require_script_fixture_947().is_none() {
+        return;
+    }
+    let dir = tempfile::tempdir().expect("tempdir");
+    let out = dir.path().to_path_buf();
+    run_rs3(
+        947,
+        "transpile-scripts",
+        &out,
+        &[
+            "--filter-script",
+            "stockmarket_choosecancel",
+            "--max-scripts",
+            "6",
+        ],
+    );
+    assert!(
+        out.join("stockmarket_choosecancel_591.ts").is_file(),
+        "expected clientscript collision file"
+    );
+    assert!(
+        out.join("stockmarket_choosecancel_9261.ts").is_file(),
+        "expected proc collision file"
+    );
+
+    let barrel = std::fs::read_to_string(out.join("scripts.ts")).expect("scripts.ts");
+    assert!(
+        barrel.contains(
+            "export { stockmarket_choosecancel_591 } from './stockmarket_choosecancel_591';"
+        ),
+        "expected first disambiguated barrel export"
+    );
+    assert!(
+        barrel.contains(
+            "export { stockmarket_choosecancel_9261 } from './stockmarket_choosecancel_9261';"
+        ),
+        "expected second disambiguated barrel export"
     );
 }

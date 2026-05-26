@@ -424,6 +424,14 @@ pub struct ResolverContext {
     pub dbrows: BTreeMap<u32, DbRowEntry>,
 }
 
+#[derive(Clone, Copy)]
+struct ResolverLoadOptions {
+    decode_scripts: bool,
+    retain_script_bytes: bool,
+    retain_interface_bytes: bool,
+    load_export_configs: bool,
+}
+
 impl ResolverContext {
     /// Decodes a script on demand when lazy loading is enabled.
     /// Checks the cache first, then falls back to raw bytes.
@@ -448,7 +456,19 @@ impl ResolverContext {
         build: u32,
         subbuild: u32,
     ) -> Result<Self> {
-        Self::load_inner(cache, tar_path, data_dir, build, subbuild, false)
+        Self::load_inner(
+            cache,
+            tar_path,
+            data_dir,
+            build,
+            subbuild,
+            ResolverLoadOptions {
+                decode_scripts: true,
+                retain_script_bytes: true,
+                retain_interface_bytes: true,
+                load_export_configs: true,
+            },
+        )
     }
 
     /// Load with lazy script decoding — scripts are only decoded on
@@ -461,7 +481,67 @@ impl ResolverContext {
         build: u32,
         subbuild: u32,
     ) -> Result<Self> {
-        Self::load_inner(cache, tar_path, data_dir, build, subbuild, true)
+        Self::load_inner(
+            cache,
+            tar_path,
+            data_dir,
+            build,
+            subbuild,
+            ResolverLoadOptions {
+                decode_scripts: false,
+                retain_script_bytes: true,
+                retain_interface_bytes: true,
+                load_export_configs: true,
+            },
+        )
+    }
+
+    /// Load only metadata needed by `ts-export`.
+    /// Raw scripts and interface payloads are not retained after decode.
+    pub fn load_ts_export(
+        cache: &FlatCache,
+        tar_path: &Path,
+        data_dir: &Path,
+        build: u32,
+        subbuild: u32,
+    ) -> Result<Self> {
+        Self::load_inner(
+            cache,
+            tar_path,
+            data_dir,
+            build,
+            subbuild,
+            ResolverLoadOptions {
+                decode_scripts: false,
+                retain_script_bytes: false,
+                retain_interface_bytes: false,
+                load_export_configs: true,
+            },
+        )
+    }
+
+    /// Load metadata needed by structured script transpile when type exports
+    /// already exist in output dir.
+    pub fn load_transpile(
+        cache: &FlatCache,
+        tar_path: &Path,
+        data_dir: &Path,
+        build: u32,
+        subbuild: u32,
+    ) -> Result<Self> {
+        Self::load_inner(
+            cache,
+            tar_path,
+            data_dir,
+            build,
+            subbuild,
+            ResolverLoadOptions {
+                decode_scripts: false,
+                retain_script_bytes: true,
+                retain_interface_bytes: false,
+                load_export_configs: false,
+            },
+        )
     }
 
     fn load_inner(
@@ -470,11 +550,12 @@ impl ResolverContext {
         data_dir: &Path,
         build: u32,
         subbuild: u32,
-        lazy_scripts: bool,
+        options: ResolverLoadOptions,
     ) -> Result<Self> {
         let opcode_book = OpcodeBook::load(data_dir, build, subbuild)?;
 
         let mut interfaces = BTreeMap::new();
+        let mut parsed_components = BTreeMap::new();
         if crate::fixture::ensure_archive_complete(cache.root(), tar_path, ARCHIVE_INTERFACES)
             .is_ok()
         {
@@ -482,12 +563,28 @@ impl ResolverContext {
             let index = cache2.archive_index(ARCHIVE_INTERFACES)?;
             for group in &index.group_id {
                 let files = cache2.group_files_with_index(&index, ARCHIVE_INTERFACES, *group)?;
-                interfaces.insert(*group, files);
+                let mut comps = BTreeMap::new();
+                for (&comp_id, data) in &files {
+                    if let Ok(deps) = parse_component_deps(comp_id, data, build) {
+                        comps.insert(comp_id, deps);
+                    }
+                }
+                if !comps.is_empty() {
+                    parsed_components.insert(*group, comps);
+                }
+                if options.retain_interface_bytes {
+                    interfaces.insert(*group, files);
+                }
             }
         }
 
         let mut scripts = BTreeMap::new();
-        if crate::fixture::ensure_archive_complete(cache.root(), tar_path, ARCHIVE_CLIENTSCRIPTS)
+        if options.retain_script_bytes
+            && crate::fixture::ensure_archive_complete(
+                cache.root(),
+                tar_path,
+                ARCHIVE_CLIENTSCRIPTS,
+            )
             .is_ok()
         {
             let cache2 = FlatCache::open(cache.root())?;
@@ -578,7 +675,12 @@ impl ResolverContext {
         }
 
         let mut structs = BTreeMap::new();
-        if crate::fixture::ensure_archive_complete(cache.root(), tar_path, ARCHIVE_STRUCT_CONFIG)
+        if options.load_export_configs
+            && crate::fixture::ensure_archive_complete(
+                cache.root(),
+                tar_path,
+                ARCHIVE_STRUCT_CONFIG,
+            )
             .is_ok()
         {
             let cache2 = FlatCache::open(cache.root())?;
@@ -628,29 +730,46 @@ impl ResolverContext {
             Ok(BTreeMap::new())
         };
 
-        let npcs = load_config_archive(
-            ARCHIVE_NPC_CONFIG,
-            7,
-            CONFIG_GROUP_NPC_LEGACY,
-            crate::config::parse_npc,
-        )?;
-        let objs = load_config_archive(
-            ARCHIVE_OBJ_CONFIG,
-            8,
-            CONFIG_GROUP_OBJ_LEGACY,
-            crate::config::parse_obj,
-        )?;
-        let locs = load_config_archive(
-            ARCHIVE_LOC_CONFIG,
-            8,
-            CONFIG_GROUP_LOC_LEGACY,
-            crate::config::parse_loc,
-        )?;
+        let npcs = if options.load_export_configs {
+            load_config_archive(
+                ARCHIVE_NPC_CONFIG,
+                7,
+                CONFIG_GROUP_NPC_LEGACY,
+                crate::config::parse_npc,
+            )?
+        } else {
+            BTreeMap::new()
+        };
+        let objs = if options.load_export_configs {
+            load_config_archive(
+                ARCHIVE_OBJ_CONFIG,
+                8,
+                CONFIG_GROUP_OBJ_LEGACY,
+                crate::config::parse_obj,
+            )?
+        } else {
+            BTreeMap::new()
+        };
+        let locs = if options.load_export_configs {
+            load_config_archive(
+                ARCHIVE_LOC_CONFIG,
+                8,
+                CONFIG_GROUP_LOC_LEGACY,
+                crate::config::parse_loc,
+            )?
+        } else {
+            BTreeMap::new()
+        };
 
         // Sequences and spots use dedicated archives
         let seqs: BTreeMap<u32, SeqEntry> = {
             let mut map = BTreeMap::new();
-            if crate::fixture::ensure_archive_complete(cache.root(), tar_path, ARCHIVE_SEQ_CONFIG)
+            if options.load_export_configs
+                && crate::fixture::ensure_archive_complete(
+                    cache.root(),
+                    tar_path,
+                    ARCHIVE_SEQ_CONFIG,
+                )
                 .is_ok()
             {
                 let c2 = FlatCache::open(cache.root())?;
@@ -680,7 +799,12 @@ impl ResolverContext {
 
         let spots: BTreeMap<u32, SpotEntry> = {
             let mut map = BTreeMap::new();
-            if crate::fixture::ensure_archive_complete(cache.root(), tar_path, ARCHIVE_SPOT_CONFIG)
+            if options.load_export_configs
+                && crate::fixture::ensure_archive_complete(
+                    cache.root(),
+                    tar_path,
+                    ARCHIVE_SPOT_CONFIG,
+                )
                 .is_ok()
             {
                 let c2 = FlatCache::open(cache.root())?;
@@ -711,7 +835,8 @@ impl ResolverContext {
         // Inventories: CONFIG_GROUP_INV within ARCHIVE_CONFIG
         let invs: BTreeMap<u32, InvEntry> = {
             let mut map = BTreeMap::new();
-            if config_archive_available
+            if options.load_export_configs
+                && config_archive_available
                 && let Some(payload) = cache.get(ARCHIVE_CONFIG, CONFIG_GROUP_INV)?
             {
                 let config_index = cache.archive_index(ARCHIVE_CONFIG)?;
@@ -728,7 +853,8 @@ impl ResolverContext {
         // DB tables and rows — the embedded SQLite-like database system
         let dbtables: BTreeMap<u32, DbTableEntry> = {
             let mut map = BTreeMap::new();
-            if config_archive_available
+            if options.load_export_configs
+                && config_archive_available
                 && let Some(payload) = cache.get(ARCHIVE_CONFIG, CONFIG_GROUP_DBTABLE)?
             {
                 let config_index = cache.archive_index(ARCHIVE_CONFIG)?;
@@ -744,7 +870,8 @@ impl ResolverContext {
 
         let dbrows: BTreeMap<u32, DbRowEntry> = {
             let mut map = BTreeMap::new();
-            if config_archive_available
+            if options.load_export_configs
+                && config_archive_available
                 && let Some(payload) = cache.get(ARCHIVE_CONFIG, CONFIG_GROUP_DBROW)?
             {
                 let config_index = cache.archive_index(ARCHIVE_CONFIG)?;
@@ -760,24 +887,11 @@ impl ResolverContext {
 
         // ── Decode scripts ──
         let mut decoded_scripts = BTreeMap::new();
-        if !lazy_scripts {
+        if options.decode_scripts {
             for (&script_id, bytes) in &scripts {
                 if let Ok(script) = decode_script(bytes, &opcode_book, build) {
                     decoded_scripts.insert(script_id, script);
                 }
-            }
-        }
-
-        let mut parsed_components = BTreeMap::new();
-        for (&group, files) in &interfaces {
-            let mut comps = BTreeMap::new();
-            for (&comp_id, data) in files {
-                if let Ok(deps) = parse_component_deps(comp_id, data, build) {
-                    comps.insert(comp_id, deps);
-                }
-            }
-            if !comps.is_empty() {
-                parsed_components.insert(group, comps);
             }
         }
 

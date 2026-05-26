@@ -1,31 +1,33 @@
-use super::ScriptId;
-use super::ScriptSignature;
 use super::ast::{Declaration, TypeAnnotation};
 use super::cfg::{StructuredStmt, build_cfg, detect_return_type, emit_structured};
-use std::collections::HashMap;
+use super::{ScriptCatalog, ScriptId, ScriptSignature, resolve_script_signature};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt::Write as _;
 
-pub struct StructuredWriter {
+pub struct StructuredWriter<'a> {
     indent: usize,
-    component_names: HashMap<u32, String>,
-    enum_value_names: HashMap<i32, String>,
-    script_signatures: HashMap<ScriptId, ScriptSignature>,
-    script_names: HashMap<ScriptId, String>,
+    var_names: &'a HashMap<(crate::vars::VarDomain, u16), String>,
+    component_names: &'a HashMap<u32, String>,
+    enum_value_names: &'a HashMap<i32, String>,
+    script_catalog: &'a ScriptCatalog,
+    script_signatures: &'a HashMap<ScriptId, ScriptSignature>,
 }
 
-impl StructuredWriter {
+impl<'a> StructuredWriter<'a> {
     pub fn new(
-        component_names: HashMap<u32, String>,
-        enum_value_names: HashMap<i32, String>,
-        script_signatures: HashMap<ScriptId, ScriptSignature>,
-        script_names: HashMap<ScriptId, String>,
+        var_names: &'a HashMap<(crate::vars::VarDomain, u16), String>,
+        component_names: &'a HashMap<u32, String>,
+        enum_value_names: &'a HashMap<i32, String>,
+        script_catalog: &'a ScriptCatalog,
+        script_signatures: &'a HashMap<ScriptId, ScriptSignature>,
     ) -> Self {
         Self {
             indent: 0,
+            var_names,
             component_names,
             enum_value_names,
+            script_catalog,
             script_signatures,
-            script_names,
         }
     }
 
@@ -36,6 +38,17 @@ impl StructuredWriter {
         let _ = writeln!(&mut out, "// Auto-generated CS2 to TypeScript");
         if let Some(ref name) = decl.name {
             let _ = writeln!(&mut out, "// Script name: {name}");
+        }
+        if let Some(metadata) = self.script_catalog.get(decl.script_id) {
+            let _ = writeln!(
+                &mut out,
+                "// Meta: packed={} group={} file={} kind={} short_name={}",
+                metadata.packed_id,
+                metadata.group_id,
+                metadata.file_id,
+                metadata.kind.as_label(),
+                metadata.short_name
+            );
         }
         let _ = writeln!(
             &mut out,
@@ -69,11 +82,12 @@ impl StructuredWriter {
 
         // ── Build function body ──
         let blocks = build_cfg(
-            decl.instructions.clone(),
-            &self.component_names,
-            &self.enum_value_names,
-            &self.script_signatures,
-            &self.script_names,
+            &decl.instructions,
+            self.var_names,
+            self.component_names,
+            self.enum_value_names,
+            self.script_catalog,
+            self.script_signatures,
         );
         let structured = emit_structured(blocks);
 
@@ -102,58 +116,21 @@ impl StructuredWriter {
 
         self.write_structured(&structured, &mut body);
 
-        // ── Detect which imports are needed ──
-        let needs_vars = body.contains("VARS.");
-        let needs_varbits = body.contains("VARBITS.");
-        let needs_enums = body.contains("ENUMS.");
-        let needs_params = body.contains("PARAMS.");
-        let needs_components = body.contains("ComponentId.");
-        let needs_enum_refs = body.contains("Enum_");
-        let needs_db = body.contains("DB_TABLES.");
-
-        // ── Emit imports ──
-        if needs_vars
-            || needs_varbits
-            || needs_enums
-            || needs_params
-            || needs_components
-            || needs_enum_refs
-            || needs_db
-        {
-            let mut imports = Vec::new();
-            if needs_vars {
-                imports.push("VARS");
-            }
-            if needs_varbits {
-                imports.push("VARBITS");
-            }
-            if needs_enums || needs_enum_refs {
-                imports.push("ENUMS");
-            }
-            if needs_params {
-                imports.push("PARAMS");
-            }
-            if needs_components {
-                imports.push("ComponentId");
-            }
-            if needs_db {
-                imports.push("DB_TABLES");
-            }
-            let _ = writeln!(
-                &mut out,
-                "import {{ {} }} from './index';",
-                imports.join(", ")
-            );
-        }
+        self.write_imports(decl, &mut out);
         out.push('\n');
 
         // ── Function signature with detected return type ──
-        let return_type = detect_return_type(&structured);
-        let resolved_name = decl
-            .name
-            .as_deref()
-            .or_else(|| self.script_names.get(&decl.script_id).map(String::as_str));
-        let function_name = super::script_function_name(decl.script_id, resolved_name);
+        let return_type =
+            resolve_script_signature(self.script_catalog, self.script_signatures, decl.script_id)
+                .and_then(|signature| {
+                    (signature.return_type != "unknown").then_some(signature.return_type.as_str())
+                })
+                .unwrap_or_else(|| detect_return_type(&structured));
+        let function_name = self
+            .script_catalog
+            .export_name(decl.script_id)
+            .map(str::to_owned)
+            .unwrap_or_else(|| format!("script{}", decl.script_id));
         let _ = writeln!(
             &mut out,
             "export function {function_name}({args}): {return_type} {{",
@@ -169,6 +146,82 @@ impl StructuredWriter {
         out.push_str("}\n");
 
         out
+    }
+
+    fn write_imports(&self, decl: &Declaration, out: &mut String) {
+        let mut index_imports = BTreeSet::new();
+        let mut enum_imports = BTreeSet::new();
+        let mut module_imports: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+
+        for instruction in &decl.instructions {
+            match instruction.command.as_str() {
+                "push_var"
+                | "pop_var"
+                | "push_varc_int"
+                | "pop_varc_int"
+                | "push_varc_string"
+                | "pop_varc_string"
+                | "push_varclan"
+                | "push_varclan_long"
+                | "push_varclan_string"
+                | "push_varclansetting"
+                | "push_varclansetting_long"
+                | "push_varclansetting_string" => {
+                    if let super::ast::OperandNode::VarRef(var_ref) = &instruction.operand
+                        && var_ref.name.is_none()
+                    {
+                        index_imports.insert("VARS");
+                    }
+                }
+                "push_varbit" | "pop_varbit" | "push_varclanbit" | "push_varclansettingbit" => {
+                    if let super::ast::OperandNode::VarBitRef(varbit_ref) = &instruction.operand
+                        && varbit_ref.name.is_none()
+                    {
+                        index_imports.insert("VARBITS");
+                    }
+                }
+                "cc_create" => {
+                    if let super::ast::OperandNode::Int(component_id) = instruction.operand
+                        && self.component_names.contains_key(&(component_id as u32))
+                    {
+                        index_imports.insert("ComponentId");
+                    }
+                }
+                "push_constant_string" => {
+                    if let super::ast::OperandNode::Int(value) = instruction.operand
+                        && let Some(qualified) = self.enum_value_names.get(&value)
+                        && let Some((object, _)) = qualified.split_once('.')
+                    {
+                        enum_imports.insert(object.to_string());
+                    }
+                }
+                "gosub_with_params" => {
+                    if let super::ast::OperandNode::Script(group_id) = instruction.operand
+                        && let Some(target) = self.script_catalog.resolve_call_target(group_id)
+                        && target.packed_id != decl.script_id
+                    {
+                        module_imports
+                            .entry(format!("./{}", target.module_name))
+                            .or_default()
+                            .insert(target.export_name.clone());
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if !index_imports.is_empty() {
+            let names = index_imports.into_iter().collect::<Vec<_>>().join(", ");
+            let _ = writeln!(out, "import {{ {names} }} from './index';");
+        }
+        if !enum_imports.is_empty() {
+            let names = enum_imports.into_iter().collect::<Vec<_>>().join(", ");
+            let _ = writeln!(out, "import {{ {names} }} from './enums';");
+        }
+        for (module, names) in module_imports {
+            let names = names.into_iter().collect::<Vec<_>>().join(", ");
+            let _ = writeln!(out, "import {{ {names} }} from '{module}';");
+        }
     }
 
     fn write_structured(&mut self, stmts: &[StructuredStmt], out: &mut String) {
@@ -295,15 +348,4 @@ fn collect_array_ids(instructions: &[super::ast::InstructionNode]) -> Vec<u32> {
     ids.sort_unstable();
     ids.dedup();
     ids
-}
-
-impl Default for StructuredWriter {
-    fn default() -> Self {
-        Self::new(
-            HashMap::new(),
-            HashMap::new(),
-            HashMap::new(),
-            HashMap::new(),
-        )
-    }
 }

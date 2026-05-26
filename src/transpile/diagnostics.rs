@@ -1,6 +1,7 @@
+use serde::Serialize;
 use std::fmt;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum Severity {
     Error,
     Warning,
@@ -17,7 +18,7 @@ impl fmt::Display for Severity {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Span {
     pub start: usize,
     pub end: usize,
@@ -49,7 +50,7 @@ impl fmt::Display for Span {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Diagnostic {
     pub severity: Severity,
     pub message: String,
@@ -116,7 +117,7 @@ impl fmt::Display for Diagnostic {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, Serialize)]
 pub struct Diagnostics {
     pub diagnostics: Vec<Diagnostic>,
 }
@@ -158,6 +159,10 @@ impl Diagnostics {
         self.diagnostics
             .iter()
             .any(|d| d.severity == Severity::Error)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.diagnostics.is_empty()
     }
 
     pub fn diagnostics(self) -> impl Iterator<Item = Diagnostic> {

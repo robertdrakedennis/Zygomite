@@ -22,6 +22,8 @@ Use Rust 2024, 4-space indentation, and rustfmt defaults. Keep `unsafe` absent; 
 
 Tests use Rust built-in harness and often return `anyhow::Result<()>`. Put cross-module tests in `tests/`; use clear behavior names like `parses_every_interface_file`. Set `RS3_CACHE_DIR`, `RS3_CACHE_TAR`, and `RS3_DATA_DIR` when cache assets are outside README defaults. Prefer targeted tests for new decoder behavior, plus one CLI smoke path when output shape changes.
 
+Avoid parallel heavy runs in this repo. Full `cargo test --test ts_export`, full `cs2 --out-dir ...`, and broad `transpile-scripts` runs can compile, decode cache, and write many files at once; that can spike memory and keep background jobs alive after interrupts. Prefer one heavy command at a time, keep runs scoped, and check for leftover `cargo` or `rs3-cache-rs` processes before starting another full-cache pass.
+
 ## Commit & Pull Request Guidelines
 
 Git history uses short imperative subjects, such as `Add 910 cache compatibility support` and `Remove parity artifacts`. Keep subject concise and scoped. PRs should state cache build tested, commands run, output directory or artifact touched, and linked issue when relevant. Include screenshots only for rendered assets such as interface or map image changes.

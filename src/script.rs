@@ -24,24 +24,15 @@ pub const MIN_SCRIPT_BUILD: u32 = 947;
 pub struct OpcodeBook {
     pub by_id: Vec<Option<String>>,
     by_name: BTreeMap<String, u16>,
+    large_by_id: Vec<bool>,
 }
 
 impl OpcodeBook {
     pub fn load(data_dir: &Path, version: u32, subversion: u32) -> Result<Self> {
         // Build-specific opcode file (e.g. opcodes-910.txt, opcodes-947.txt).
         // Falls back to opcodes-unscrambled.txt if no version-specific file exists.
-        let mut path = data_dir.join("opcodes-unscrambled.txt");
-        if version >= 685 {
-            let scoped = data_dir.join(format!("opcodes-{version}-{subversion}.txt"));
-            if scoped.is_file() {
-                path = scoped;
-            } else {
-                let fallback = data_dir.join(format!("opcodes-{version}.txt"));
-                if fallback.is_file() {
-                    path = fallback;
-                }
-            }
-        }
+        let path = scoped_data_file(data_dir, "opcodes", version, subversion)
+            .unwrap_or_else(|| data_dir.join("opcodes-unscrambled.txt"));
 
         let content = fs::read_to_string(&path)
             .with_context(|| format!("failed reading opcode file {}", path.display()))?;
@@ -82,7 +73,43 @@ impl OpcodeBook {
         for (name, id) in &by_name {
             by_id[usize::from(*id)] = Some(name.clone());
         }
-        Ok(Self { by_id, by_name })
+
+        let mut large_by_id = vec![false; by_id.len()];
+        if let Some(large_path) = scoped_data_file(data_dir, "opcodes-large", version, subversion) {
+            let large_content = fs::read_to_string(&large_path).with_context(|| {
+                format!("failed reading large-operand file {}", large_path.display())
+            })?;
+            for raw in large_content.lines() {
+                let line = raw.trim();
+                if line.is_empty() || line.starts_with("//") {
+                    continue;
+                }
+                let mut parts = line.split(',');
+                let id = parts
+                    .next()
+                    .context("large-operand row missing id")?
+                    .trim()
+                    .parse::<usize>()
+                    .with_context(|| format!("invalid large-operand id in row: {line}"))?;
+                let is_large = parts
+                    .next()
+                    .context("large-operand row missing flag")?
+                    .trim()
+                    .parse::<u8>()
+                    .with_context(|| format!("invalid large-operand flag in row: {line}"))?
+                    != 0;
+                if id >= large_by_id.len() {
+                    large_by_id.resize(id + 1, false);
+                }
+                large_by_id[id] = is_large;
+            }
+        }
+
+        Ok(Self {
+            by_id,
+            by_name,
+            large_by_id,
+        })
     }
 
     pub fn name(&self, opcode: u16) -> Result<&str> {
@@ -98,6 +125,30 @@ impl OpcodeBook {
             .copied()
             .with_context(|| format!("missing opcode mapping for name '{name}'"))
     }
+
+    pub fn has_large_operand(&self, opcode: u16) -> bool {
+        self.large_by_id
+            .get(usize::from(opcode))
+            .copied()
+            .unwrap_or(false)
+    }
+}
+
+fn scoped_data_file(
+    data_dir: &Path,
+    stem: &str,
+    version: u32,
+    subversion: u32,
+) -> Option<std::path::PathBuf> {
+    if version < 685 {
+        return None;
+    }
+    let scoped = data_dir.join(format!("{stem}-{version}-{subversion}.txt"));
+    if scoped.is_file() {
+        return Some(scoped);
+    }
+    let fallback = data_dir.join(format!("{stem}-{version}.txt"));
+    fallback.is_file().then_some(fallback)
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -153,6 +204,64 @@ pub struct VarBitRef {
 pub struct SwitchCase {
     pub value: i32,
     pub target: i32,
+}
+
+fn fixed_var_command_domain(command: &str) -> Option<VarDomain> {
+    match command {
+        "push_varc_int" | "pop_varc_int" | "push_varc_string" | "pop_varc_string" => {
+            Some(VarDomain::Client)
+        }
+        "push_varclan" | "push_varclan_long" | "push_varclan_string" => Some(VarDomain::Clan),
+        "push_varclansetting" | "push_varclansetting_long" | "push_varclansetting_string" => {
+            Some(VarDomain::ClanSetting)
+        }
+        _ => None,
+    }
+}
+
+fn is_fixed_varbit_command(command: &str) -> bool {
+    matches!(command, "push_varclanbit" | "push_varclansettingbit")
+}
+
+fn parse_fixed_var_ref_operand(command: &str, operand_text: &str) -> Result<Operand> {
+    let Some(expected_domain) = fixed_var_command_domain(command) else {
+        bail!("fixed var command expected");
+    };
+    if let Ok(id) = operand_text.parse::<u16>() {
+        return Ok(Operand::VarRef(VarRef {
+            domain: expected_domain,
+            id,
+            transmog: false,
+        }));
+    }
+    let Some((domain_str, id_str)) = operand_text.split_once(':') else {
+        bail!("expected integer or domain:id format for {command}, got: {operand_text}");
+    };
+    let domain = VarDomain::from_label(domain_str).context("unknown var domain")?;
+    if domain != expected_domain {
+        bail!(
+            "expected {} domain for {command}, got {domain_str}",
+            expected_domain.as_label()
+        );
+    }
+    let id = id_str.parse::<u16>().context("expected var id")?;
+    Ok(Operand::VarRef(VarRef {
+        domain,
+        id,
+        transmog: false,
+    }))
+}
+
+fn parse_fixed_varbit_operand(command: &str, operand_text: &str) -> Result<Operand> {
+    if !is_fixed_varbit_command(command) {
+        bail!("fixed varbit command expected");
+    }
+    let text = operand_text.strip_prefix("varbit:").unwrap_or(operand_text);
+    let id = text.parse::<u16>().context("expected varbit id")?;
+    Ok(Operand::VarBitRef(VarBitRef {
+        id,
+        transmog: false,
+    }))
 }
 
 pub fn decode_script(
@@ -227,6 +336,7 @@ pub fn decode_script(
         let index = i32::try_from(code.len()).context("script too large")?;
         let operand = decode_operand(
             &command,
+            opcode_book.has_large_operand(opcode),
             &mut packet,
             version,
             index,
@@ -266,6 +376,7 @@ pub fn decode_script(
 
 fn decode_operand(
     command: &str,
+    is_large_operand: bool,
     packet: &mut Packet<'_>,
     version: u32,
     index: i32,
@@ -321,18 +432,21 @@ fn decode_operand(
                 Ok(Operand::VarBitRef(VarBitRef { id, transmog }))
             }
         }
-        "push_varc_int"
-        | "pop_varc_int"
-        | "push_varc_string"
-        | "pop_varc_string"
-        | "push_varclan"
-        | "push_varclanbit"
-        | "push_varclan_long"
-        | "push_varclan_string"
-        | "push_varclansetting"
-        | "push_varclansettingbit"
-        | "push_varclansetting_long"
-        | "push_varclansetting_string" => Ok(Operand::Int(packet.g4s()?)),
+        cmd if fixed_var_command_domain(cmd).is_some() => {
+            let id = u16::try_from(packet.g4s()?).context("fixed var id out of range")?;
+            Ok(Operand::VarRef(VarRef {
+                domain: fixed_var_command_domain(cmd).expect("checked above"),
+                id,
+                transmog: false,
+            }))
+        }
+        cmd if is_fixed_varbit_command(cmd) => {
+            let id = u16::try_from(packet.g4s()?).context("fixed varbit id out of range")?;
+            Ok(Operand::VarBitRef(VarBitRef {
+                id,
+                transmog: false,
+            }))
+        }
         "branch"
         | "branch_not"
         | "branch_equals"
@@ -378,9 +492,9 @@ fn decode_operand(
         | "push_array_int_and_index"
         | "pop_array_int_leave_value_on_stack" => Ok(Operand::Array(packet.g4s()?)),
         // ── Unknown commands ──
-        // Read a 1-byte operand (the RuneScriptKt default format).
-        // Known commands above match on exact name and read the correct
-        // operand size (int, string, branch offset, etc.).
+        // Legacy handler tables still vary by build. When explicit
+        // per-build width metadata exists, preserve full i32 operands.
+        _ if is_large_operand => Ok(Operand::Int(packet.g4s()?)),
         _ => Ok(Operand::Byte(packet.g1()?)),
     }
 }
@@ -461,7 +575,13 @@ pub fn encode_script(
                 });
             }
         } else {
-            encode_operand(&instr.operand, &instr.command, version, &mut writer)?;
+            encode_operand(
+                &instr.operand,
+                &instr.command,
+                opcode_book.has_large_operand(opcode),
+                version,
+                &mut writer,
+            )?;
         }
     }
 
@@ -516,6 +636,7 @@ pub fn encode_script(
 fn encode_operand(
     operand: &Operand,
     command: &str,
+    is_large_operand: bool,
     version: u32,
     writer: &mut ByteWriter,
 ) -> Result<()> {
@@ -581,20 +702,27 @@ fn encode_operand(
             }
             _ => bail!("push/pop_varbit expected VarBitRef operand"),
         },
-        "push_varc_int"
-        | "pop_varc_int"
-        | "push_varc_string"
-        | "pop_varc_string"
-        | "push_varclan"
-        | "push_varclanbit"
-        | "push_varclan_long"
-        | "push_varclan_string"
-        | "push_varclansetting"
-        | "push_varclansettingbit"
-        | "push_varclansetting_long"
-        | "push_varclansetting_string" => match operand {
+        cmd if fixed_var_command_domain(cmd).is_some() => {
+            let expected_domain = fixed_var_command_domain(cmd).expect("checked above");
+            match operand {
+                Operand::VarRef(vr) => {
+                    if vr.domain != expected_domain {
+                        bail!(
+                            "{cmd} expected {} var domain, got {}",
+                            expected_domain.as_label(),
+                            vr.domain.as_label()
+                        );
+                    }
+                    writer.p4s(i32::from(vr.id));
+                }
+                Operand::Int(v) => writer.p4s(*v),
+                _ => bail!("{cmd} expected VarRef/Int operand"),
+            }
+        }
+        cmd if is_fixed_varbit_command(cmd) => match operand {
+            Operand::VarBitRef(vbr) => writer.p4s(i32::from(vbr.id)),
             Operand::Int(v) => writer.p4s(*v),
-            _ => bail!("varc/clan command expected Int operand"),
+            _ => bail!("{cmd} expected VarBitRef/Int operand"),
         },
         "join_string" => match operand {
             Operand::Count(v) | Operand::Int(v) => writer.p4s(*v),
@@ -614,8 +742,11 @@ fn encode_operand(
             _ => bail!("array command expected Array/Int operand"),
         },
         _ => match operand {
+            Operand::Byte(b) if is_large_operand => writer.p4s(i32::from(*b)),
             Operand::Byte(b) => writer.p1(*b),
+            Operand::Int(v) if is_large_operand => writer.p4s(*v),
             Operand::Int(v) => writer.p1(*v as u8),
+            _ if is_large_operand => writer.p4s(0),
             _ => writer.p1(0),
         },
     }
@@ -682,6 +813,11 @@ fn format_instruction_asm(instr: &Instruction) -> String {
     if instr.command == "push_constant_string" {
         return format_push_constant_string_asm(&instr.operand);
     }
+    if !command_has_explicit_asm_operand_format(&instr.command)
+        && let Operand::Int(v) = &instr.operand
+    {
+        return format!("{} raw32:{v}", instr.command);
+    }
     let operand_str = format_operand_asm(&instr.operand);
     if operand_str.is_empty() {
         instr.command.clone()
@@ -739,6 +875,61 @@ fn format_operand_asm(operand: &Operand) -> String {
     }
 }
 
+fn command_has_explicit_asm_operand_format(command: &str) -> bool {
+    matches!(
+        command,
+        "push_constant_int"
+            | "push_long_constant"
+            | "push_constant_string"
+            | "push_int_local"
+            | "pop_int_local"
+            | "push_string_local"
+            | "pop_string_local"
+            | "push_long_local"
+            | "pop_long_local"
+            | "push_var"
+            | "pop_var"
+            | "push_varbit"
+            | "pop_varbit"
+            | "push_varc_int"
+            | "pop_varc_int"
+            | "push_varc_string"
+            | "pop_varc_string"
+            | "push_varclan"
+            | "push_varclanbit"
+            | "push_varclan_long"
+            | "push_varclan_string"
+            | "push_varclansetting"
+            | "push_varclansettingbit"
+            | "push_varclansetting_long"
+            | "push_varclansetting_string"
+            | "branch"
+            | "branch_not"
+            | "branch_equals"
+            | "branch_less_than"
+            | "branch_greater_than"
+            | "branch_less_than_or_equals"
+            | "branch_greater_than_or_equals"
+            | "long_branch_not"
+            | "long_branch_equals"
+            | "long_branch_less_than"
+            | "long_branch_greater_than"
+            | "long_branch_less_than_or_equals"
+            | "long_branch_greater_than_or_equals"
+            | "branch_if_true"
+            | "branch_if_false"
+            | "switch"
+            | "join_string"
+            | "gosub_with_params"
+            | "define_array"
+            | "push_array_int"
+            | "pop_array_int"
+            | "push_array_int_leave_index_on_stack"
+            | "push_array_int_and_index"
+            | "pop_array_int_leave_value_on_stack"
+    )
+}
+
 /// Parse ASM pragma lines back into a `CompiledScript`.
 pub fn parse_cs2_asm(source: &str) -> Result<CompiledScript> {
     let mut name: Option<String> = None;
@@ -753,6 +944,7 @@ pub fn parse_cs2_asm(source: &str) -> Result<CompiledScript> {
     // In the ASM format, switch cases are emitted after the switch instruction.
     // We collect them here and process them when we encounter a `switch` line.
     let mut pending_switch_cases: Vec<SwitchCase> = Vec::new();
+    let mut pending_switch_open = false;
 
     for raw_line in source.lines() {
         let line = raw_line.trim();
@@ -811,17 +1003,27 @@ pub fn parse_cs2_asm(source: &str) -> Result<CompiledScript> {
                 let target = parts[1].parse::<i32>().context("invalid case target")?;
                 pending_switch_cases.push(SwitchCase { value, target });
             }
+            pending_switch_open = true;
             continue;
         }
 
         // Handle switch instruction marker (starts a switch body)
         if cs2_content == "switch" {
-            flush_pending_switch(&mut instructions, &mut pending_switch_cases);
+            flush_pending_switch(
+                &mut instructions,
+                &mut pending_switch_cases,
+                &mut pending_switch_open,
+            );
+            pending_switch_open = true;
             continue;
         }
 
         // Regular instruction — flush any pending switch first
-        flush_pending_switch(&mut instructions, &mut pending_switch_cases);
+        flush_pending_switch(
+            &mut instructions,
+            &mut pending_switch_cases,
+            &mut pending_switch_open,
+        );
 
         let (opcode_name, operand_text) = cs2_content
             .split_once(' ')
@@ -834,7 +1036,11 @@ pub fn parse_cs2_asm(source: &str) -> Result<CompiledScript> {
         });
     }
 
-    flush_pending_switch(&mut instructions, &mut pending_switch_cases);
+    flush_pending_switch(
+        &mut instructions,
+        &mut pending_switch_cases,
+        &mut pending_switch_open,
+    );
 
     Ok(CompiledScript {
         name,
@@ -863,13 +1069,18 @@ fn parse_counts(input: &str, int: &mut u16, obj: &mut u16, long: &mut u16) -> Re
     Ok(())
 }
 
-fn flush_pending_switch(instructions: &mut Vec<Instruction>, pending: &mut Vec<SwitchCase>) {
-    if !pending.is_empty() {
+fn flush_pending_switch(
+    instructions: &mut Vec<Instruction>,
+    pending: &mut Vec<SwitchCase>,
+    pending_open: &mut bool,
+) {
+    if *pending_open {
         instructions.push(Instruction {
             opcode: 0,
             command: "switch".to_string(),
             operand: Operand::Switch(std::mem::take(pending)),
         });
+        *pending_open = false;
     }
 }
 
@@ -962,20 +1173,10 @@ fn parse_operand_asm(opcode_name: &str, operand_text: &str) -> Result<Operand> {
                 }))
             }
         }
-        "push_varc_int"
-        | "pop_varc_int"
-        | "push_varc_string"
-        | "pop_varc_string"
-        | "push_varclan"
-        | "push_varclanbit"
-        | "push_varclan_long"
-        | "push_varclan_string"
-        | "push_varclansetting"
-        | "push_varclansettingbit"
-        | "push_varclansetting_long"
-        | "push_varclansetting_string" => Ok(Operand::Int(
-            operand_text.parse::<i32>().context("expected integer")?,
-        )),
+        cmd if fixed_var_command_domain(cmd).is_some() => {
+            parse_fixed_var_ref_operand(cmd, operand_text)
+        }
+        cmd if is_fixed_varbit_command(cmd) => parse_fixed_varbit_operand(cmd, operand_text),
         "branch"
         | "branch_not"
         | "branch_equals"
@@ -1013,6 +1214,11 @@ fn parse_operand_asm(opcode_name: &str, operand_text: &str) -> Result<Operand> {
             operand_text.parse::<i32>().context("expected array id")?,
         )),
         _ => {
+            if let Some(raw32) = operand_text.strip_prefix("raw32:") {
+                return Ok(Operand::Int(
+                    raw32.parse::<i32>().context("expected raw32 operand")?,
+                ));
+            }
             // Unknown command: 1-byte operand
             if let Ok(v) = operand_text.parse::<i32>() {
                 Ok(Operand::Byte(v as u8))
@@ -1026,6 +1232,7 @@ fn parse_operand_asm(opcode_name: &str, operand_text: &str) -> Result<Operand> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     fn assert_operand_eq(a: &Operand, b: &Operand) {
         match (a, b) {
@@ -1056,6 +1263,82 @@ mod tests {
             (Operand::Byte(av), Operand::Byte(bv)) => assert_eq!(av, bv),
             _ => panic!("operand type mismatch: {a:?} vs {b:?}"),
         }
+    }
+
+    fn test_data_dir() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("data")
+    }
+
+    #[test]
+    fn opcode_book_loads_910_client_opcode_metadata() -> Result<()> {
+        let opcode_book = OpcodeBook::load(&test_data_dir(), 910, 0)?;
+        assert_eq!(opcode_book.opcode_for("push_constant_string")?, 1376);
+        assert_eq!(opcode_book.opcode_for("if_sendtofront")?, 12);
+        assert_eq!(opcode_book.opcode_for("db_find_with_count")?, 593);
+        assert_eq!(opcode_book.name(1144)?, "field5245");
+        assert!(opcode_book.has_large_operand(1376));
+        assert!(!opcode_book.has_large_operand(842));
+        Ok(())
+    }
+
+    #[test]
+    fn asm_roundtrip_preserves_unknown_raw32_operands() -> Result<()> {
+        let script = CompiledScript {
+            name: Some("raw32_test".to_string()),
+            local_count_int: 0,
+            local_count_object: 0,
+            local_count_long: 0,
+            argument_count_int: 0,
+            argument_count_object: 0,
+            argument_count_long: 0,
+            code: vec![Instruction {
+                opcode: 0,
+                command: "field6317".to_string(),
+                operand: Operand::Int(0x1234_5678),
+            }],
+        };
+        let asm = script_to_asm(&script);
+        assert!(asm.contains("field6317 raw32:305419896"));
+        let reparsed = parse_cs2_asm(&asm)?;
+        assert_eq!(reparsed.code.len(), 1);
+        assert_operand_eq(&script.code[0].operand, &reparsed.code[0].operand);
+        Ok(())
+    }
+
+    #[test]
+    fn fixed_domain_var_operands_parse_domain_and_legacy_integer_forms() -> Result<()> {
+        assert_operand_eq(
+            &parse_operand_asm("push_varc_string", "client:42")?,
+            &Operand::VarRef(VarRef {
+                domain: VarDomain::Client,
+                id: 42,
+                transmog: false,
+            }),
+        );
+        assert_operand_eq(
+            &parse_operand_asm("push_varclan", "77")?,
+            &Operand::VarRef(VarRef {
+                domain: VarDomain::Clan,
+                id: 77,
+                transmog: false,
+            }),
+        );
+        assert_operand_eq(
+            &parse_operand_asm("push_varclansetting_string", "clan_setting:99")?,
+            &Operand::VarRef(VarRef {
+                domain: VarDomain::ClanSetting,
+                id: 99,
+                transmog: false,
+            }),
+        );
+        assert_operand_eq(
+            &parse_operand_asm("push_varclanbit", "123")?,
+            &Operand::VarBitRef(VarBitRef {
+                id: 123,
+                transmog: false,
+            }),
+        );
+        Ok(())
     }
 
     #[test]
@@ -1132,6 +1415,50 @@ mod tests {
                 },
                 Instruction {
                     opcode: 0,
+                    command: "push_varc_string".into(),
+                    operand: Operand::VarRef(VarRef {
+                        domain: VarDomain::Client,
+                        id: 9,
+                        transmog: false,
+                    }),
+                },
+                Instruction {
+                    opcode: 0,
+                    command: "pop_varc_string".into(),
+                    operand: Operand::VarRef(VarRef {
+                        domain: VarDomain::Client,
+                        id: 10,
+                        transmog: false,
+                    }),
+                },
+                Instruction {
+                    opcode: 0,
+                    command: "push_varclan".into(),
+                    operand: Operand::VarRef(VarRef {
+                        domain: VarDomain::Clan,
+                        id: 11,
+                        transmog: false,
+                    }),
+                },
+                Instruction {
+                    opcode: 0,
+                    command: "push_varclansetting_long".into(),
+                    operand: Operand::VarRef(VarRef {
+                        domain: VarDomain::ClanSetting,
+                        id: 12,
+                        transmog: false,
+                    }),
+                },
+                Instruction {
+                    opcode: 0,
+                    command: "push_varclanbit".into(),
+                    operand: Operand::VarBitRef(VarBitRef {
+                        id: 13,
+                        transmog: false,
+                    }),
+                },
+                Instruction {
+                    opcode: 0,
                     command: "branch_if_true".into(),
                     operand: Operand::Branch(15),
                 },
@@ -1197,5 +1524,43 @@ mod tests {
             assert_eq!(orig.command, round.command, "command mismatch at index {i}");
             assert_operand_eq(&orig.operand, &round.operand);
         }
+    }
+
+    #[test]
+    fn asm_roundtrip_preserves_empty_switch() -> Result<()> {
+        let script = CompiledScript {
+            name: None,
+            local_count_int: 1,
+            local_count_object: 0,
+            local_count_long: 0,
+            argument_count_int: 0,
+            argument_count_object: 0,
+            argument_count_long: 0,
+            code: vec![
+                Instruction {
+                    opcode: 0,
+                    command: "push_int_local".into(),
+                    operand: Operand::Local(0),
+                },
+                Instruction {
+                    opcode: 0,
+                    command: "switch".into(),
+                    operand: Operand::Switch(vec![]),
+                },
+                Instruction {
+                    opcode: 0,
+                    command: "return".into(),
+                    operand: Operand::Byte(0),
+                },
+            ],
+        };
+
+        let asm = script_to_asm(&script);
+        let parsed = parse_cs2_asm(&asm)?;
+
+        assert_eq!(parsed.code.len(), 3);
+        assert_eq!(parsed.code[1].command, "switch");
+        assert_operand_eq(&script.code[1].operand, &parsed.code[1].operand);
+        Ok(())
     }
 }

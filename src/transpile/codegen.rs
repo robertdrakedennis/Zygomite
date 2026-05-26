@@ -5,14 +5,13 @@ use super::ast::{
 };
 use super::scope::SymbolTable;
 use crate::script::{CompiledScript, Instruction, Operand, VarBitRef, VarRef};
-use crate::vars::VarDomain;
 
-pub struct CodeGen {
-    symbol_table: SymbolTable,
+pub struct CodeGen<'a> {
+    symbol_table: &'a SymbolTable,
 }
 
-impl CodeGen {
-    pub fn new(symbol_table: SymbolTable) -> Self {
+impl<'a> CodeGen<'a> {
+    pub fn new(symbol_table: &'a SymbolTable) -> Self {
         Self { symbol_table }
     }
 
@@ -264,12 +263,49 @@ fn format_instruction(instr: &InstructionNode) -> String {
                 format!("VARBIT({});", format_operand_raw(&instr.operand))
             }
         }
-        "push_varc_int" | "pop_varc_int" | "push_varc_string" | "pop_varc_string" => {
-            if let OperandNode::Int(v) = instr.operand {
-                format!(
-                    "push(VARS.get({} * 1000000 + {v})!);",
-                    VarDomain::Client as u64
-                )
+        "push_varc_int"
+        | "push_varc_string"
+        | "push_varclan"
+        | "push_varclan_long"
+        | "push_varclan_string"
+        | "push_varclansetting"
+        | "push_varclansetting_long"
+        | "push_varclansetting_string" => {
+            if let OperandNode::VarRef(vr) = &instr.operand {
+                if let Some(ref name) = vr.name {
+                    format!("push({name});")
+                } else {
+                    format!(
+                        "push(VARS.get({} * 1000000 + {})!);",
+                        u64::from(vr.domain),
+                        vr.id
+                    )
+                }
+            } else {
+                format!("push({});", format_operand_raw(&instr.operand))
+            }
+        }
+        "pop_varc_int" | "pop_varc_string" => {
+            if let OperandNode::VarRef(vr) = &instr.operand {
+                if let Some(ref name) = vr.name {
+                    format!("{name} = pop();")
+                } else {
+                    format!(
+                        "VARS.get({} * 1000000 + {}) = pop();",
+                        u64::from(vr.domain),
+                        vr.id
+                    )
+                }
+            } else {
+                format!("pop({});", format_operand_raw(&instr.operand))
+            }
+        }
+        "push_varclanbit" | "push_varclansettingbit" => {
+            if let OperandNode::VarBitRef(vbr) = &instr.operand {
+                match &vbr.name {
+                    Some(name) => format!("push({name});"),
+                    None => format!("push(VARBITS.get({})!);", vbr.id),
+                }
             } else {
                 format!("push({});", format_operand_raw(&instr.operand))
             }

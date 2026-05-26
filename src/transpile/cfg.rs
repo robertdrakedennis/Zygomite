@@ -33,25 +33,27 @@ impl Block {
     }
 }
 
-pub struct CfgBuilder {
-    instructions: Vec<super::ast::InstructionNode>,
+pub struct CfgBuilder<'a> {
+    instructions: &'a [super::ast::InstructionNode],
     recovered: Vec<Option<RecoveredStmt>>,
 }
 
-impl CfgBuilder {
+impl<'a> CfgBuilder<'a> {
     pub fn new<S: std::hash::BuildHasher>(
-        instructions: Vec<super::ast::InstructionNode>,
+        instructions: &'a [super::ast::InstructionNode],
+        var_names: &std::collections::HashMap<(crate::vars::VarDomain, u16), String>,
         component_names: &std::collections::HashMap<u32, String, S>,
         enum_value_names: &std::collections::HashMap<i32, String, S>,
-        script_signatures: &std::collections::HashMap<super::ScriptId, super::ScriptSignature, S>,
-        script_names: &std::collections::HashMap<super::ScriptId, String, S>,
+        script_catalog: &super::ScriptCatalog,
+        script_signatures: &std::collections::HashMap<super::ScriptId, super::ScriptSignature>,
     ) -> Self {
         let recovered = ExprRecovery::new(
-            &instructions,
+            instructions,
+            var_names,
             component_names,
             enum_value_names,
+            script_catalog,
             script_signatures,
-            script_names,
         )
         .recover();
         Self {
@@ -186,11 +188,7 @@ impl CfgBuilder {
 
         for block in &mut *blocks {
             let stmts: Vec<RecoveredStmt> = (block.start..block.end)
-                .filter_map(|idx| {
-                    self.recovered
-                        .get(idx)
-                        .and_then(|o: &Option<RecoveredStmt>| o.clone())
-                })
+                .filter_map(|idx| self.recovered.get(idx).cloned().flatten())
                 .collect();
             block.statements = stmts;
         }
@@ -205,13 +203,10 @@ impl CfgBuilder {
 
         for (bi, block) in blocks.iter().enumerate() {
             // Look at the last few instructions for branch patterns.
-            let block_instrs: Vec<_> = (block.start..block.end)
-                .filter_map(|idx| self.instructions.get(idx))
-                .collect();
-
-            let last_instr = block_instrs.last().copied();
+            let block_instrs = &self.instructions[block.start..block.end];
+            let last_instr = block_instrs.last();
             let prev_instr = if block_instrs.len() >= 2 {
-                block_instrs.get(block_instrs.len() - 2).copied()
+                block_instrs.get(block_instrs.len() - 2)
             } else {
                 None
             };
@@ -330,18 +325,20 @@ fn is_cond_flag_instr(cmd: &str) -> bool {
 }
 
 pub fn build_cfg<S: std::hash::BuildHasher>(
-    instructions: Vec<super::ast::InstructionNode>,
+    instructions: &[super::ast::InstructionNode],
+    var_names: &std::collections::HashMap<(crate::vars::VarDomain, u16), String>,
     component_names: &std::collections::HashMap<u32, String, S>,
     enum_value_names: &std::collections::HashMap<i32, String, S>,
-    script_signatures: &std::collections::HashMap<super::ScriptId, super::ScriptSignature, S>,
-    script_names: &std::collections::HashMap<super::ScriptId, String, S>,
+    script_catalog: &super::ScriptCatalog,
+    script_signatures: &std::collections::HashMap<super::ScriptId, super::ScriptSignature>,
 ) -> Vec<Block> {
     CfgBuilder::new(
         instructions,
+        var_names,
         component_names,
         enum_value_names,
+        script_catalog,
         script_signatures,
-        script_names,
     )
     .build()
 }
@@ -357,6 +354,10 @@ pub fn expr_to_string(expr: &Expression) -> String {
             let callee = expr_to_string(&c.callee);
             let args: Vec<String> = c.arguments.iter().map(expr_to_string).collect();
             format!("{callee}({})", args.join(", "))
+        }
+        Expression::CallbackLiteral(callback) => {
+            let watchers = callback.watchers.join(", ");
+            format!("callback(\"{}\", [{}])", callback.script, watchers)
         }
         Expression::BinaryOperation(bin) => {
             let left = expr_to_string(&bin.left);
@@ -499,7 +500,6 @@ impl StructuredEmitter {
                 self.emit_block(true_target);
                 return;
             }
-
             let th0 = true_target > bi;
             let th1 = true_target <= bi;
             let fh0 = false_target > bi;
