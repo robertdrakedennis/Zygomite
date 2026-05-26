@@ -7,6 +7,7 @@
 [command,if_get_gamescreen]()(component)
 [command,if_set_gamescreen_enabled](boolean $x1)
 [command,setup_messagebox](int $x1,int $x2,int $x3,int $x4,int $x5,int $x6,graphic $x7,graphic $x8,graphic $x9,rgb $x10,graphic $x11)
+[command,setup_messagebox](int $x1,int $x2,int $x3,int $x4,int $x5,int $x6,graphic $x7,graphic $x8,graphic $x9,rgb $x10,fontmetrics $x11) 910
 [command,setup_messagebox](int $x1,int $x2,int $x3,int $x4,int $x5,int $x6,graphic $x7,graphic $x8,graphic $x9,rgb $x10,fontmetrics $x11) 859
 [command,get_currentcursor]()(cursor)
 [command,force_interface_drag]
@@ -19,10 +20,12 @@
 [command,unknown_command_9](int $x1,int $x2)
 [command,unknown_command_10](int $x1,int $x2)
 [command,unknown_command_11]()(int,int)
+[command,pushCanvasSize]()(int,int) 910
 [command,unknown_command_12]()(int)
 [command,unknown_command_13]()(int,int,int)
 [command,unknown_command_14](int $x1)
 [command,unknown_command_15]()(int,int,int,int)
+[command,pushZeroInsets]()(int,int,int,int) 910
 [command,unknown_command_16](int $x1,int $x2,int $x3,int $x4)
 [command,unknown_command_17]
 [command,unknown_command_24](int $x1,int $x2,int $x3,int $x4)

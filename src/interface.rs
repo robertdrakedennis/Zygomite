@@ -45,7 +45,7 @@ pub fn render_interface_group(
     out
 }
 
-fn parse_component(component_id: u32, data: &[u8], build: u32) -> Result<Vec<String>> {
+pub fn parse_component(component_id: u32, data: &[u8], build: u32) -> Result<Vec<String>> {
     let mut packet = Packet::new(data);
     let mut lines = Vec::new();
     lines.push(format!("[com{}]", component_id & 0xFFFF));
@@ -1442,6 +1442,8 @@ pub struct ComponentDeps {
     pub name: Option<String>,
     pub children: Vec<u32>,
     pub scripts: HashSet<u32>,
+    /// Script ids from the component `onload` hook only.
+    pub onload_scripts: HashSet<u32>,
     pub varps: HashSet<VarTransmitRef>,
     pub varbits: HashSet<u32>,
     pub invs: HashSet<u32>,
@@ -1464,6 +1466,7 @@ pub fn parse_component_deps(component_id: u32, data: &[u8], build: u32) -> Resul
         name: None,
         children: Vec::new(),
         scripts: HashSet::new(),
+        onload_scripts: HashSet::new(),
         varps: HashSet::new(),
         varbits: HashSet::new(),
         invs: HashSet::new(),
@@ -1987,7 +1990,7 @@ fn collect_common_tail_deps(
         }
     }
 
-    collect_hook_deps(deps, packet)?;
+    collect_onload_hook_deps(deps, packet)?;
     collect_hook_deps(deps, packet)?;
     collect_hook_deps(deps, packet)?;
     collect_hook_deps(deps, packet)?;
@@ -2045,7 +2048,19 @@ fn collect_common_tail_deps(
     Ok(())
 }
 
+fn collect_onload_hook_deps(deps: &mut ComponentDeps, packet: &mut Packet<'_>) -> Result<()> {
+    collect_hook_deps_inner(deps, packet, true)
+}
+
 fn collect_hook_deps(deps: &mut ComponentDeps, packet: &mut Packet<'_>) -> Result<()> {
+    collect_hook_deps_inner(deps, packet, false)
+}
+
+fn collect_hook_deps_inner(
+    deps: &mut ComponentDeps,
+    packet: &mut Packet<'_>,
+    onload: bool,
+) -> Result<()> {
     let count = usize::from(packet.g1()?);
     if count == 0 {
         return Ok(());
@@ -2054,7 +2069,11 @@ fn collect_hook_deps(deps: &mut ComponentDeps, packet: &mut Packet<'_>) -> Resul
     let _unknown = packet.g1()?;
     let script = packet.g4s()?;
     if script != -1 {
-        deps.scripts.insert(script as u32);
+        let script_id = script as u32;
+        deps.scripts.insert(script_id);
+        if onload {
+            deps.onload_scripts.insert(script_id);
+        }
     }
     for _ in 0..(count - 1) {
         match packet.g1()? {

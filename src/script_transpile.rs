@@ -226,12 +226,38 @@ impl Transpiler {
                     format!("VARBIT({});", op_raw(&instruction.operand))
                 }
             }
-            "push_varc_int" | "pop_varc_int" | "push_varc_string" | "pop_varc_string" => {
-                if let Operand::Int(v) = &instruction.operand {
-                    format!(
-                        "push(VARS.get({} * 1000000 + {v})!);",
-                        VarDomain::Client as u64
-                    )
+            "push_varc_int"
+            | "push_varc_string"
+            | "push_varclan"
+            | "push_varclan_long"
+            | "push_varclan_string"
+            | "push_varclansetting"
+            | "push_varclansetting_long"
+            | "push_varclansetting_string" => {
+                if let Operand::VarRef(var_ref) = &instruction.operand {
+                    self.format_var_access(var_ref)
+                } else {
+                    format!("push({});", op_raw(&instruction.operand))
+                }
+            }
+            "pop_varc_int" | "pop_varc_string" => {
+                if let Operand::VarRef(var_ref) = &instruction.operand {
+                    if let Some(name) = self.var_map.get(&(var_ref.domain, var_ref.id)) {
+                        format!("{name} = pop();")
+                    } else {
+                        format!(
+                            "VARS.get({} * 1000000 + {}) = pop();",
+                            u64::from(var_ref.domain),
+                            var_ref.id
+                        )
+                    }
+                } else {
+                    format!("pop({});", op_raw(&instruction.operand))
+                }
+            }
+            "push_varclanbit" | "push_varclansettingbit" => {
+                if let Operand::VarBitRef(varbit_ref) = &instruction.operand {
+                    self.format_varbit_access(varbit_ref)
                 } else {
                     format!("push({});", op_raw(&instruction.operand))
                 }

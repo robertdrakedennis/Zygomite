@@ -1,4 +1,4 @@
-// Text config dumps matching zwyz-rs3-cache output format.
+// Text config dumps (legacy Java tool format; kept for human inspection via dump-configs).
 // CacheOverlay.ts SemanticRepository consumes these for dependency scanning.
 use crate::cache::FlatCache;
 use crate::config::SpotOp;

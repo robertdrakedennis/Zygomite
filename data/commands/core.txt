@@ -1,10 +1,10 @@
-[command,push_constant_int]()(unknown_int)
+[command,push_constant_int]()(int)
 [command,push_var]
 [command,pop_var]
 [command,push_constant_string]
 [command,branch]
-[command,branch_not](unknown_int $x1, unknown_int $x2)
-[command,branch_equals](unknown_int $x1, unknown_int $x2)
+[command,branch_not](int $x1,int $x2)
+[command,branch_equals](int $x1,int $x2)
 [command,branch_less_than](int $x1, int $x2)
 [command,branch_greater_than](int $x1, int $x2)
 [command,branch_less_than_or_equals](int $x1, int $x2)
@@ -12,10 +12,10 @@
 [command,return]
 [command,push_varbit]()(int)
 [command,pop_varbit](int $x1)
-[command,push_int_local]()(unknown_int)
-[command,pop_int_local](unknown_int $x1)
-[command,push_string_local]()(unknown_object)
-[command,pop_string_local](unknown_object $x1)
+[command,push_int_local]()(int)
+[command,pop_int_local](int $x1)
+[command,push_string_local]()(string)
+[command,pop_string_local](string $x1)
 [command,join_string]
 [command,pop_int_discard]
 [command,pop_string_discard]
@@ -24,12 +24,12 @@
 [command,push_array_int](int $x1)(unknown_int)
 [command,pop_array_int](int $x1, unknown_int $x2)
 [command,switch](unknown_int $x1)
-[command,push_long_constant]()(unknown_long)
+[command,push_long_constant]()(long)
 [command,pop_long_discard]
-[command,push_long_local]()(unknown_long)
-[command,pop_long_local](unknown_long $x1)
-[command,long_branch_not](unknown_long $x1, unknown_long $x2)
-[command,long_branch_equals](unknown_long $x1, unknown_long $x2)
+[command,push_long_local]()(long)
+[command,pop_long_local](long $x1)
+[command,long_branch_not](long $x1,long $x2)
+[command,long_branch_equals](long $x1,long $x2)
 [command,long_branch_less_than](long $x1, long $x2)
 [command,long_branch_greater_than](long $x1, long $x2)
 [command,long_branch_less_than_or_equals](long $x1, long $x2)
@@ -37,7 +37,7 @@
 [command,push_array_int_leave_index_on_stack](int $index)(int, unknown_int)
 [command,push_array_int_and_index]
 [command,pop_array_int_leave_value_on_stack]
-[command,branch_if_true](unknown_int $x1)
-[command,branch_if_false](unknown_int $x1)
+[command,branch_if_true](intbool $x1)
+[command,branch_if_false](intbool $x1)
 [command,opcount]()(int)
 [command,var_reference_get](var_int $x1)(int)

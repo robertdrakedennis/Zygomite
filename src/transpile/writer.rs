@@ -2,7 +2,6 @@ use super::ast::{
     Declaration, Expression, ImportStatement, InstructionNode, OperandNode, Program, Statement,
     TypeAnnotation,
 };
-use crate::vars::VarDomain;
 use std::fmt::Write;
 
 pub struct Writer {
@@ -185,12 +184,49 @@ impl Writer {
                     format!("VARBIT({});", self.write_operand_raw(&instr.operand))
                 }
             }
-            "push_varc_int" | "pop_varc_int" | "push_varc_string" | "pop_varc_string" => {
-                if let OperandNode::Int(v) = instr.operand {
-                    format!(
-                        "push(VARS.get({} * 1000000 + {v})!);",
-                        VarDomain::Client as u64
-                    )
+            "push_varc_int"
+            | "push_varc_string"
+            | "push_varclan"
+            | "push_varclan_long"
+            | "push_varclan_string"
+            | "push_varclansetting"
+            | "push_varclansetting_long"
+            | "push_varclansetting_string" => {
+                if let OperandNode::VarRef(vr) = &instr.operand {
+                    if let Some(ref name) = vr.name {
+                        format!("push({name});")
+                    } else {
+                        format!(
+                            "push(VARS.get({} * 1000000 + {})!);",
+                            u64::from(vr.domain),
+                            vr.id
+                        )
+                    }
+                } else {
+                    format!("push({});", self.write_operand_raw(&instr.operand))
+                }
+            }
+            "pop_varc_int" | "pop_varc_string" => {
+                if let OperandNode::VarRef(vr) = &instr.operand {
+                    if let Some(ref name) = vr.name {
+                        format!("{name} = pop();")
+                    } else {
+                        format!(
+                            "VARS.get({} * 1000000 + {}) = pop();",
+                            u64::from(vr.domain),
+                            vr.id
+                        )
+                    }
+                } else {
+                    format!("pop({});", self.write_operand_raw(&instr.operand))
+                }
+            }
+            "push_varclanbit" | "push_varclansettingbit" => {
+                if let OperandNode::VarBitRef(vbr) = &instr.operand {
+                    match &vbr.name {
+                        Some(name) => format!("push({name});"),
+                        None => format!("push(VARBITS.get({})!);", vbr.id),
+                    }
                 } else {
                     format!("push({});", self.write_operand_raw(&instr.operand))
                 }
@@ -434,6 +470,13 @@ impl Writer {
                 out.push('(');
                 out.push_str(&self.format_arguments(&c.arguments));
                 out.push(')');
+            }
+            Expression::CallbackLiteral(callback) => {
+                out.push_str("callback(\"");
+                out.push_str(&escape_string(&callback.script));
+                out.push_str("\", [");
+                out.push_str(&callback.watchers.join(", "));
+                out.push_str("])");
             }
             Expression::BinaryOperation(bin) => {
                 self.write_expression(&bin.left, out);

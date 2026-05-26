@@ -184,7 +184,7 @@
 [command,autosetup_dosetup]()(int,int)
 [command,unknown_command_8]
 [command,autosetup_dosetupstatus]()(int,int)
-[command,autosetup_setultra](int $x0)(int)
+[command,autosetup_setultra]
 [command,autosetup_sethigh]
 [command,autosetup_setmedium]
 [command,autosetup_setlow]

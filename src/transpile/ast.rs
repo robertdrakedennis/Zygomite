@@ -130,6 +130,7 @@ pub enum Expression {
     ArrayAccess(ArrayAccess),
     PropertyAccess(PropertyAccess),
     Call(CallExpr),
+    CallbackLiteral(CallbackLiteral),
     BinaryOperation(BinaryOperation),
     UnaryOperation(UnaryOperation),
     PushOperation(PushOperation),
@@ -178,6 +179,15 @@ pub struct PropertyAccess {
 pub struct CallExpr {
     pub callee: Box<Expression>,
     pub arguments: Vec<Expression>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CallbackLiteral {
+    pub script: String,
+    pub script_id: Option<i32>,
+    pub raw_descriptor: String,
+    pub arguments: Vec<Expression>,
+    pub watchers: Vec<String>,
 }
 
 #[derive(Debug, Clone)]

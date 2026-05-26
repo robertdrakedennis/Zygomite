@@ -22,4 +22,5 @@
 [command,quest_allreqmet](quest $x1)(boolean)
 [command,quest_started](quest $x1)(boolean)
 [command,quest_finished](quest $x1)(boolean)
-[command,quest_param](quest $x1, param $x2)(unknown)
+[command,quest_param](quest $x1, param $x2)(int)
+[command,quest_param](quest $x1, param $x2)(string)

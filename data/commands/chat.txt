@@ -26,6 +26,7 @@
 [command,activechatphrase_sendprivate](string $x1)
 [command,activechatphrase_setdynamicint](int $x1,int $x2)
 [command,activechatphrase_setdynamicobj](int $x1,obj $x2)
+[command,quickchat_dynamic_command_add](int $x1,int $x2)(int)
 [command,chatcat_findphrasebyshortcut](chatphrase $x1,char $x2)(chatphrase)
 [command,chatcat_findsubcatbyshortcut](chatcat $x1,char $x2)(chatcat)
 [command,chatcat_getdesc](chatcat $x1)(string)

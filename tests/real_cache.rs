@@ -76,7 +76,18 @@ fn data_dir() -> PathBuf {
     if let Ok(path) = std::env::var("RS3_DATA_DIR") {
         return PathBuf::from(path);
     }
-    PathBuf::from("../rs3-cache/data")
+    PathBuf::from("data")
+}
+
+fn roundtrip_limit(env_key: &str, default_limit: usize) -> usize {
+    match std::env::var(env_key)
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+    {
+        Some(0) => usize::MAX,
+        Some(limit) => limit,
+        None => default_limit,
+    }
 }
 
 fn lock_guard() -> std::sync::MutexGuard<'static, ()> {
@@ -348,23 +359,25 @@ fn asm_encode_roundtrip_byte_perfect() -> Result<()> {
     let cache = FlatCache::open(&cache_dir)?;
     let index = cache.archive_index(ARCHIVE_CLIENTSCRIPTS)?;
     let opcode_book = OpcodeBook::load(&data_dir(), BUILD, SUBBUILD)?;
+    let limit = roundtrip_limit("RS3_ROUNDTRIP_LIMIT", 100);
 
     let mut tested = 0usize;
     let mut total_instructions = 0usize;
 
     for group in &index.group_id {
         let unpacked = cache.group_files_with_index(&index, ARCHIVE_CLIENTSCRIPTS, *group)?;
-        for (_, data) in unpacked {
-            if tested >= 100 {
+        for (file, data) in unpacked {
+            if tested >= limit {
                 break;
             }
 
             let original = decode_script(&data, &opcode_book, BUILD)?;
+            let context = format!("script {:?} group {} file {}", original.name, group, file);
 
             // Roundtrip 1: ASM format (decode → asm → parse → compare)
             let asm = script_to_asm(&original);
             let from_asm = parse_cs2_asm(&asm)
-                .with_context(|| format!("parse_cs2_asm failed for script {:?}", original.name))?;
+                .with_context(|| format!("parse_cs2_asm failed for {context}"))?;
             assert_eq!(original.name, from_asm.name, "name mismatch via ASM");
             assert_eq!(original.local_count_int, from_asm.local_count_int);
             assert_eq!(original.local_count_object, from_asm.local_count_object);
@@ -378,12 +391,12 @@ fn asm_encode_roundtrip_byte_perfect() -> Result<()> {
             assert_eq!(
                 original.code.len(),
                 from_asm.code.len(),
-                "instruction count mismatch via ASM"
+                "instruction count mismatch via ASM for {context}"
             );
             for (i, (orig, parsed)) in original.code.iter().zip(from_asm.code.iter()).enumerate() {
                 assert_eq!(
                     orig.command, parsed.command,
-                    "command mismatch at [{i}] via ASM"
+                    "command mismatch at [{i}] via ASM for {context}"
                 );
                 assert_operand_eq(&orig.operand, &parsed.operand, i);
             }
@@ -404,12 +417,12 @@ fn asm_encode_roundtrip_byte_perfect() -> Result<()> {
             assert_eq!(
                 original.code.len(),
                 re_decoded.code.len(),
-                "instruction count mismatch via binary"
+                "instruction count mismatch via binary for {context}"
             );
             for (i, (orig, redec)) in original.code.iter().zip(re_decoded.code.iter()).enumerate() {
                 assert_eq!(
                     orig.command, redec.command,
-                    "command mismatch at [{i}] via binary"
+                    "command mismatch at [{i}] via binary for {context}"
                 );
                 assert_operand_eq(&orig.operand, &redec.operand, i);
             }
@@ -417,7 +430,7 @@ fn asm_encode_roundtrip_byte_perfect() -> Result<()> {
             total_instructions += original.code.len();
             tested += 1;
         }
-        if tested >= 100 {
+        if tested >= limit {
             break;
         }
     }
@@ -495,8 +508,9 @@ fn assert_operand_eq(
 #[test]
 fn asm_encode_roundtrip_byte_perfect_910() -> Result<()> {
     const BUILD_910: u32 = 910;
-    const DEFAULT_910_CACHE: &str = "/tmp/rs3-cache-rs-910/cache";
+    const DEFAULT_910_CACHE: &str = "/Users/robert/projects/alerion/cache/unpacked/910";
     const DEFAULT_910_TAR: &str = "/Users/robert/projects/ignis/static/cache-runescape-live-en-b910-2019-12-11-00-00-00-openrs2#1730.tar";
+    let limit = roundtrip_limit("RS3_ROUNDTRIP_LIMIT_910", 100);
 
     let cache_dir = std::env::var("RS3_CACHE_DIR_910")
         .map_or_else(|_| PathBuf::from(DEFAULT_910_CACHE), PathBuf::from);
@@ -519,26 +533,39 @@ fn asm_encode_roundtrip_byte_perfect_910() -> Result<()> {
 
     for group in &index.group_id {
         let unpacked = cache.group_files_with_index(&index, ARCHIVE_CLIENTSCRIPTS, *group)?;
-        for (_, data) in unpacked {
-            if tested >= 100 {
+        for (file, data) in unpacked {
+            if tested >= limit {
                 break;
             }
 
             let original = decode_script(&data, &opcode_book, BUILD_910)?;
+            let context = format!("script {:?} group {} file {}", original.name, group, file);
 
             // ASM roundtrip
             let asm = script_to_asm(&original);
-            let from_asm = parse_cs2_asm(&asm)?;
-            assert_eq!(original.name, from_asm.name, "910 name mismatch via ASM");
+            let from_asm = parse_cs2_asm(&asm)
+                .with_context(|| format!("parse_cs2_asm failed for {context}"))?;
             assert_eq!(
-                original.code.len(),
-                from_asm.code.len(),
-                "910 instr count via ASM"
+                original.name, from_asm.name,
+                "910 name mismatch via ASM for {context}"
             );
+            if original.code.len() != from_asm.code.len() {
+                let dump_path = std::env::temp_dir().join(format!(
+                    "rs3-cache-rs-910-roundtrip-group-{group}-file-{file}.asm"
+                ));
+                std::fs::write(&dump_path, &asm)
+                    .with_context(|| format!("writing debug ASM dump for {context}"))?;
+                anyhow::bail!(
+                    "910 instr count via ASM for {context}: {} != {} (dumped {})",
+                    original.code.len(),
+                    from_asm.code.len(),
+                    dump_path.display()
+                );
+            }
             for (i, (orig, parsed)) in original.code.iter().zip(from_asm.code.iter()).enumerate() {
                 assert_eq!(
                     orig.command, parsed.command,
-                    "910 cmd mismatch [{i}] via ASM"
+                    "910 cmd mismatch [{i}] via ASM for {context}"
                 );
                 assert_operand_eq(&orig.operand, &parsed.operand, i);
             }
@@ -548,17 +575,17 @@ fn asm_encode_roundtrip_byte_perfect_910() -> Result<()> {
             let re_decoded = decode_script(&encoded, &opcode_book, BUILD_910)?;
             assert_eq!(
                 original.name, re_decoded.name,
-                "910 name mismatch via binary"
+                "910 name mismatch via binary for {context}"
             );
             assert_eq!(
                 original.code.len(),
                 re_decoded.code.len(),
-                "910 instr count via binary"
+                "910 instr count via binary for {context}"
             );
             for (i, (orig, redec)) in original.code.iter().zip(re_decoded.code.iter()).enumerate() {
                 assert_eq!(
                     orig.command, redec.command,
-                    "910 cmd mismatch [{i}] via binary"
+                    "910 cmd mismatch [{i}] via binary for {context}"
                 );
                 assert_operand_eq(&orig.operand, &redec.operand, i);
             }
@@ -566,7 +593,7 @@ fn asm_encode_roundtrip_byte_perfect_910() -> Result<()> {
             total_instructions += original.code.len();
             tested += 1;
         }
-        if tested >= 100 {
+        if tested >= limit {
             break;
         }
     }

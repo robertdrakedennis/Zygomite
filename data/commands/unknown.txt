@@ -1,8 +1,8 @@
 [command,unknown_command_45]
-[command,push_varc_int]
-[command,pop_varc_int]
-[command,push_varc_string]
-[command,pop_varc_string]
+[command,push_varc_int](varclient $x1)(int)
+[command,pop_varc_int](varclient $x1)
+[command,push_varc_string](varclient $x1)(string)
+[command,pop_varc_string](varclient $x1)
 [command,unknown_command_1121](int $x1,int $x2)
 [command,unknown_command_2121](int $x1,int $x2,component $x3)
 [command,unknown_command_3333]()(int)
@@ -138,14 +138,14 @@
 [command,unknown_command_5435]()(boolean)
 [command,unknown_command_5436]()(boolean)
 [command,unknown_command_6510]()(int)
-[command,push_varclan]todo signature
-[command,push_varclanbit]todo signature
-[command,push_varclan_long]todo signature
-[command,push_varclan_string]todo signature
-[command,push_varclansetting]todo signature
-[command,push_varclansettingbit]todo signature
-[command,push_varclansetting_long]todo signature
-[command,push_varclansetting_string]todo signature
+[command,push_varclan](varclan $x1)(int)
+[command,push_varclanbit](varclanbit $x1)(int)
+[command,push_varclan_long](varclan $x1)(long)
+[command,push_varclan_string](varclan $x1)(string)
+[command,push_varclansetting](varclansetting $x1)(int)
+[command,push_varclansettingbit](varclansettingbit $x1)(int)
+[command,push_varclansetting_long](varclansetting $x1)(long)
+[command,push_varclansetting_string](varclansetting $x1)(string)
 [command,unknown_command_3328]()(boolean)
 [command,unknown_command_5202](int $x1)
 [command,unknown_command_5203](string $x1)

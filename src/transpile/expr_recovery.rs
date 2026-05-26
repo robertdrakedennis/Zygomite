@@ -1,12 +1,16 @@
 use super::ast::{
-    BinaryOp, CallExpr, Expression, Identifier, InstructionNode, NumberLiteral, OperandNode,
-    StringLiteral,
+    BinaryOp, CallExpr, CallbackLiteral, Expression, Identifier, InstructionNode, NumberLiteral,
+    OperandNode, StringLiteral,
 };
+use crate::vars::VarDomain;
 
 pub struct StackEffect {
     pub pops: usize,
     pub pushes: usize,
 }
+
+const MAX_JOIN_STRING_PARTS: usize = 1024;
+const MAX_CALLBACK_WATCHERS: usize = 4096;
 
 /// Classifies opcode commands by semantic prefix for dispatch in
 /// catch-all arms. Specific opcodes are matched by exact name first.
@@ -35,7 +39,12 @@ fn categorize(cmd: &str) -> OpcodeCategory {
     }
 }
 
-fn stack_effect(cmd: &str, operand: &OperandNode) -> StackEffect {
+fn stack_effect(
+    cmd: &str,
+    operand: &OperandNode,
+    script_catalog: &super::ScriptCatalog,
+    script_signatures: &std::collections::HashMap<super::ScriptId, super::ScriptSignature>,
+) -> StackEffect {
     match cmd {
         // Push: pops 0, pushes 1
         "push_constant_int"
@@ -60,6 +69,9 @@ fn stack_effect(cmd: &str, operand: &OperandNode) -> StackEffect {
 
         // Array push: pop index, push value
         "push_array_int" | "push_array_string" => StackEffect { pops: 1, pushes: 1 },
+        "push_array_int_leave_index_on_stack" | "push_array_int_and_index" => {
+            StackEffect { pops: 1, pushes: 2 }
+        }
 
         // Pop/discard: pops 1, pushes 0
         "pop_int_local" | "pop_string_local" | "pop_long_local" | "pop_var" | "pop_varc_int"
@@ -69,6 +81,7 @@ fn stack_effect(cmd: &str, operand: &OperandNode) -> StackEffect {
 
         // Array pop: pop value, pop index, store
         "pop_array_int" | "pop_array_string" => StackEffect { pops: 2, pushes: 0 },
+        "pop_array_int_leave_value_on_stack" => StackEffect { pops: 2, pushes: 1 },
 
         // Binary arithmetic: pops 2, pushes 1
         "add" | "sub" | "multiply" | "divide" | "mod" => StackEffect { pops: 2, pushes: 1 },
@@ -110,31 +123,305 @@ fn stack_effect(cmd: &str, operand: &OperandNode) -> StackEffect {
         "switch" => StackEffect { pops: 1, pushes: 0 },
         "return" => StackEffect { pops: 0, pushes: 0 },
 
-        // Script call: pops 1 (computed expression), pushes 1 (result)
-        "gosub_with_params" => StackEffect { pops: 1, pushes: 1 },
+        "gosub_with_params" => {
+            if let OperandNode::Script(id) = operand
+                && let Some((_target, signature)) =
+                    super::resolve_call_target_signature(script_catalog, script_signatures, *id)
+            {
+                StackEffect {
+                    pops: signature.total_args(),
+                    pushes: usize::from(signature.return_type != "void"),
+                }
+            } else {
+                StackEffect { pops: 0, pushes: 0 }
+            }
+        }
+        "player_group_find"
+        | "player_group_member_count"
+        | "player_group_banned_count"
+        | "player_group_get_max_size"
+        | "player_group_get_create_mins_since_epoch"
+        | "player_group_get_create_seconds_to_now"
+        | "player_group_is_members_only"
+        | "player_group_get_overall_status"
+        | "player_group_get_owner_slot"
+        | "player_group_get_displayname"
+        | "activeclanchannel_find_affined"
+        | "activeclanchannel_find_listened"
+        | "activeclanchannel_getclanname"
+        | "activeclanchannel_getrankkick"
+        | "activeclanchannel_getranktalk"
+        | "activeclanchannel_getusercount"
+        | "activeclansettings_find_affined"
+        | "activeclansettings_find_listened"
+        | "activeclansettings_getallowunaffined"
+        | "activeclansettings_getaffinedcount"
+        | "activeclansettings_getclanname"
+        | "activeclansettings_getbannedcount"
+        | "activeclansettings_getcoinshare"
+        | "activeclansettings_getcurrentowner_slot"
+        | "activeclansettings_getrankkick"
+        | "activeclansettings_getranklootshare"
+        | "activeclansettings_getranktalk"
+        | "activeclansettings_getreplacementowner_slot"
+        | "clanprofile_find" => StackEffect { pops: 0, pushes: 1 },
+        "player_group_member_get_rank"
+        | "player_group_member_get_team"
+        | "player_group_member_get_last_seen_node_id"
+        | "player_group_member_get_status"
+        | "player_group_member_is_online"
+        | "player_group_member_is_member"
+        | "player_group_member_get_displayname"
+        | "player_group_member_is_owner"
+        | "player_group_banned_get_displayname"
+        | "activeclanchannel_getuserdisplayname"
+        | "activeclanchannel_getuserrank"
+        | "activeclanchannel_getuserworld"
+        | "activeclanchannel_getsorteduserslot"
+        | "activeclansettings_getaffineddisplayname"
+        | "activeclansettings_getaffinedrank"
+        | "activeclansettings_getaffinedmuted"
+        | "activeclansettings_getbanneddisplayname"
+        | "activeclansettings_getaffinedjoinruneday"
+        | "activeclansettings_getsortedaffinedslot" => StackEffect { pops: 1, pushes: 1 },
+        "player_group_member_get_join_xp"
+        | "player_group_member_get_same_world_var"
+        | "activeclansettings_getaffinedextrainfo" => StackEffect { pops: 3, pushes: 1 },
+        "activeclanchannel_getuserslot" | "activeclansettings_getaffinedslot" => {
+            StackEffect { pops: 1, pushes: 1 }
+        }
+        "activeclanchannel_kickuser" | "affinedclansettings_addbanned_fromchannel" => {
+            StackEffect { pops: 1, pushes: 0 }
+        }
+        "affinedclansettings_setmuted_fromchannel" => StackEffect { pops: 2, pushes: 0 },
+        "login_last_transfer_reply" | "autosetup_dosetup" | "autosetup_dosetupstatus" => {
+            StackEffect {
+                pops: 0,
+                pushes: if cmd == "login_last_transfer_reply" {
+                    3
+                } else {
+                    2
+                },
+            }
+        }
+        "login_inprogress"
+        | "login_queue_position"
+        | "login_disallowtrigger"
+        | "create_reply"
+        | "create_email_validate_reply"
+        | "create_name_validate_reply"
+        | "create_connect_reply"
+        | "shop_requestdatastatus"
+        | "shop_getcategorycount"
+        | "autosetup_getlevel"
+        | "create_under13" => StackEffect { pops: 0, pushes: 1 },
+        "create_suggest_name_reply" => StackEffect { pops: 0, pushes: 2 },
+        "create_get_email" | "sso_displayname" => StackEffect { pops: 0, pushes: 1 },
+        "get_currentcursor" | "get_mousex" | "get_mousey" => StackEffect { pops: 0, pushes: 1 },
+        "get_mousebuttons" => StackEffect { pops: 0, pushes: 3 },
+        "get_active_minimenu_entry" | "get_second_minimenu_entry" => {
+            StackEffect { pops: 0, pushes: 4 }
+        }
+        "get_minimenu_length" => StackEffect { pops: 0, pushes: 2 },
+        "get_minimenu_target" => StackEffect { pops: 0, pushes: 3 },
+        "worldlist_start" | "worldlist_next" => StackEffect { pops: 0, pushes: 8 },
+        "worldlist_fetch" | "worldlist_specific_thisworld" => StackEffect { pops: 0, pushes: 1 },
+        "worldlist_specific" => StackEffect { pops: 1, pushes: 7 },
+        "worldlist_switch" => StackEffect { pops: 2, pushes: 1 },
+        "worldlist_sort" => StackEffect { pops: 4, pushes: 0 },
+        "worldlist_autoworld" => StackEffect { pops: 0, pushes: 0 },
+        "worldlist_pingworlds" => StackEffect { pops: 1, pushes: 0 },
+        "pushCanvasSize" | "viewport_geteffectivesize" => StackEffect { pops: 0, pushes: 2 },
+        "pushZeroInsets" => StackEffect { pops: 0, pushes: 4 },
+        "pushFontMetrics" => StackEffect { pops: 1, pushes: 5 },
+        "viewport_getzoom" | "viewport_getfov" | "fullscreen_getmode" => StackEffect {
+            pops: usize::from(cmd == "fullscreen_getmode"),
+            pushes: 2,
+        },
+        "fullscreen_enter" => StackEffect { pops: 2, pushes: 1 },
+        "fullscreen_modecount" => StackEffect { pops: 0, pushes: 1 },
+        "window_getinsets" => StackEffect { pops: 0, pushes: 4 },
+        "targetmode_active" | "if_get_gamescreen" | "interface_getpickingradius" => {
+            StackEffect { pops: 0, pushes: 1 }
+        }
+        "if_hassub" | "if_getnextsubid" => StackEffect { pops: 1, pushes: 1 },
+        "if_hassubmodal" | "if_hassuboverlay" => StackEffect { pops: 2, pushes: 1 },
+        "setup_messagebox" => StackEffect {
+            pops: 11,
+            pushes: 0,
+        },
+        "formatminimenu" => StackEffect {
+            pops: 12,
+            pushes: 0,
+        },
+        "minimenuopen" => StackEffect { pops: 2, pushes: 1 },
+        "setsubmenuminlength" => StackEffect { pops: 1, pushes: 0 },
+        "if_set_gamescreen_enabled" | "interface_setpickingradius" => {
+            StackEffect { pops: 1, pushes: 0 }
+        }
+        "if_opensubclient" => StackEffect { pops: 2, pushes: 0 },
+        "if_closesubclient" => StackEffect { pops: 1, pushes: 0 },
+        "opplayer" => StackEffect { pops: 2, pushes: 0 },
+        "opplayert" => StackEffect { pops: 1, pushes: 0 },
+        "defaultminimenu"
+        | "minimenu_close"
+        | "if_close"
+        | "force_interface_drag"
+        | "cancel_interface_drag"
+        | "targetmode_cancel" => StackEffect { pops: 0, pushes: 0 },
+        "login_accountappeal"
+        | "shop_getindexforcategoryid"
+        | "shop_getcategoryid"
+        | "shop_getproductcount"
+        | "shop_getcategorydescription"
+        | "shop_isproductavailable"
+        | "shop_isproductrecommended"
+        | "shop_getindexforcategoryname" => StackEffect { pops: 1, pushes: 1 },
+        "lobby_entergamereply"
+        | "lobby_enterlobbyreply"
+        | "shop_purchaseitemstatus"
+        | "sso_available" => StackEffect { pops: 0, pushes: 1 },
+        "shop_getproductdetails" => StackEffect { pops: 2, pushes: 9 },
+        "notifications_sendlocal" => StackEffect { pops: 4, pushes: 1 },
+        "notifications_sendgroupedlocal" => StackEffect { pops: 6, pushes: 1 },
+        "login_request_social_network" => StackEffect { pops: 3, pushes: 0 },
+        "lobby_entergame" => StackEffect { pops: 2, pushes: 0 },
+        "lobby_enterlobby" => StackEffect { pops: 4, pushes: 0 },
+        "lobby_enterlobby_sso" => StackEffect { pops: 2, pushes: 0 },
+        "create_createrequest" => StackEffect { pops: 5, pushes: 0 },
+        "db_listall" => StackEffect { pops: 1, pushes: 1 },
+        "db_find" => StackEffect { pops: 2, pushes: 0 },
+        "db_find_with_count" => StackEffect { pops: 2, pushes: 1 },
+        "db_findnext" => StackEffect { pops: 0, pushes: 1 },
+        // DB field arity depends on column schema. Recover one best-effort
+        // value here rather than dropping stack behavior entirely.
+        "db_getfield" => StackEffect { pops: 3, pushes: 1 },
+        "db_getfieldcount" => StackEffect { pops: 2, pushes: 1 },
+        "db_find_refine" => StackEffect { pops: 2, pushes: 1 },
+        "db_find_get" | "db_getrowtable" => StackEffect { pops: 1, pushes: 1 },
+        "create_availablerequest"
+        | "create_name_availablerequest"
+        | "create_step_reached"
+        | "shop_open"
+        | "notifications_cancellocal"
+        | "shop_purchaseitem"
+        | "marketing_sendevent" => StackEffect { pops: 1, pushes: 0 },
+        "create_suggest_name_request"
+        | "create_connectrequest"
+        | "login_resetreply"
+        | "login_cancel"
+        | "login_continue"
+        | "shop_requestdata"
+        | "shop_applypendingtransactions"
+        | "marketing_init"
+        | "notifications_init"
+        | "notifications_opensettings"
+        | "autosetup_setultra"
+        | "autosetup_sethigh"
+        | "autosetup_setmedium"
+        | "autosetup_setlow"
+        | "autosetup_setmin"
+        | "autosetup_setcustom"
+        | "autosetup_blackflaglast"
+        | "fullscreen_exit"
+        | "create_setunder13" => StackEffect { pops: 0, pushes: 0 },
 
         // CC ops: various stack effects
+        "cc_settext"
+        | "cc_setgraphic"
+        | "cc_sethide"
+        | "cc_setcolour"
+        | "cc_setfill"
+        | "cc_settrans"
+        | "cc_setlinewid"
+        | "cc_setmodel"
+        | "cc_set2dangle"
+        | "cc_settiling"
+        | "cc_setmodelanim"
+        | "cc_setmodelorthog"
+        | "cc_setmodelzoom"
+        | "cc_settextfont"
+        | "cc_settextshadow"
+        | "cc_settextantimacro"
+        | "cc_setoutline"
+        | "cc_setgraphicshadow"
+        | "cc_setclickmask"
+        | "cc_setheld"
+        | "cc_setfontmono"
+        | "cc_setnoclickthrough"
+        | "cc_setstylesheet" => StackEffect { pops: 1, pushes: 0 },
+        "cc_setscrollpos" | "cc_setscrollsize" | "cc_setaspect" | "cc_setmodelorigin"
+        | "cc_setparam" | "cc_setparam_int" | "cc_setparam_string" => {
+            StackEffect { pops: 2, pushes: 0 }
+        }
+        "cc_settextalign" | "cc_setrecol" | "cc_setretex" => StackEffect { pops: 3, pushes: 0 },
+        "cc_setposition" | "cc_setsize" | "cc_setmodeltint" => StackEffect { pops: 4, pushes: 0 },
+        "cc_setmodelangle" => StackEffect { pops: 6, pushes: 0 },
+        "cc_setmodellighting" => StackEffect {
+            pops: 10,
+            pushes: 0,
+        },
         "cc_delete"
-        | "cc_deleteall"
-        | "cc_find"
         | "cc_sendtofront"
         | "cc_sendtoback"
-        | "if_find"
-        | "if_sendtofront"
-        | "if_sendtoback"
-        | "cc_setnoclickthrough"
-        | "cc_setscrollpos"
-        | "cc_set2dangle"
-        | "cc_settiling" => StackEffect { pops: 1, pushes: 0 },
+        | "cc_resetmodellighting"
+        | "cc_clearops"
+        | "cc_callonresize" => StackEffect { pops: 0, pushes: 0 },
+        "cc_deleteall" | "if_sendtofront" | "if_sendtoback" => StackEffect { pops: 1, pushes: 0 },
+        "cc_find" => StackEffect { pops: 2, pushes: 1 },
+        "if_find" => StackEffect { pops: 1, pushes: 1 },
         "if_gettext" => StackEffect { pops: 1, pushes: 1 },
-        "cc_settext" | "cc_setgraphic" | "cc_sethide" | "cc_setcolour" | "cc_setfill"
-        | "cc_settrans" | "cc_setlinewid" | "cc_setmodel" | "cc_setaspect" | "cc_setposition"
-        | "cc_setsize" => StackEffect { pops: 2, pushes: 0 },
+        "if_settext"
+        | "if_sethide"
+        | "if_setcolour"
+        | "if_setfill"
+        | "if_settrans"
+        | "if_setlinewid"
+        | "if_setgraphic"
+        | "if_setmodel"
+        | "if_setmodelanim"
+        | "if_setmodelorthog"
+        | "if_setmodelzoom"
+        | "if_settextfont"
+        | "if_settextshadow"
+        | "if_settextantimacro"
+        | "if_setoutline"
+        | "if_setgraphicshadow"
+        | "if_setclickmask"
+        | "if_setheld"
+        | "if_setfontmono"
+        | "if_setnoclickthrough"
+        | "if_setstylesheet"
+        | "if_resetmodellighting"
+        | "if_setonclick"
+        | "if_setonvartransmit"
+        | "if_setonstocktransmit"
+        | "if_setoninvtransmit" => StackEffect { pops: 2, pushes: 0 },
+        "if_setscrollpos" | "if_setscrollsize" | "if_setaspect" | "if_setmodelorigin"
+        | "if_setparam_int" | "if_setparam_string" => StackEffect { pops: 3, pushes: 0 },
+        "if_settextalign" | "if_setrecol" | "if_setretex" => StackEffect { pops: 4, pushes: 0 },
+        "if_setposition" | "if_setsize" | "if_setmodeltint" => StackEffect { pops: 5, pushes: 0 },
+        "if_setmodelangle" => StackEffect { pops: 7, pushes: 0 },
+        "if_setmodellighting" => StackEffect {
+            pops: 11,
+            pushes: 0,
+        },
 
         // Misc known ops
-        "baseidkit" | "basecolour" | "setgender" | "setobj" | "cc_create" => {
-            StackEffect { pops: 0, pushes: 0 }
+        "cc_create" => StackEffect { pops: 3, pushes: 0 },
+        "baseidkit" | "basecolour" | "setgender" | "setobj" => StackEffect { pops: 0, pushes: 0 },
+        "quickchat_dynamic_command_add" => StackEffect { pops: 2, pushes: 1 },
+        "cc_param" => StackEffect { pops: 1, pushes: 1 },
+        "oc_param" | "nc_param" | "lc_param" | "struct_param" | "seq_param" | "mec_param"
+        | "quest_param" | "enum_string" => StackEffect { pops: 2, pushes: 1 },
+        "enum_hasoutput" | "enum_getreversecount" => StackEffect { pops: 3, pushes: 1 },
+        "enum_hasoutput_string" | "enum_getreversecount_string" => {
+            StackEffect { pops: 2, pushes: 1 }
         }
+        "enum" | "_enum" => StackEffect { pops: 4, pushes: 1 },
+        "enum_getoutputcount" => StackEffect { pops: 1, pushes: 1 },
+        "enum_getreverseindex" => StackEffect { pops: 5, pushes: 1 },
+        "enum_getreverseindex_string" => StackEffect { pops: 4, pushes: 1 },
 
         _ => match categorize(cmd) {
             OpcodeCategory::Push => StackEffect { pops: 0, pushes: 1 },
@@ -175,40 +462,59 @@ pub enum RecoveredStmt {
     Comment(String),
 }
 
+/// Scan recovered statements for `return` ops without building CFG or
+/// structured output. This keeps signature inference cheap even for
+/// pathological control-flow graphs.
+pub fn detect_return_type_from_recovered(stmts: &[Option<RecoveredStmt>]) -> &'static str {
+    let mut has_value_return = false;
+    let mut has_void_return = false;
+
+    for stmt in stmts.iter().flatten() {
+        if let RecoveredStmt::Return(value) = stmt {
+            if value.is_some() {
+                has_value_return = true;
+            } else {
+                has_void_return = true;
+            }
+        }
+    }
+
+    match (has_value_return, has_void_return) {
+        (true, false) => "number",
+        (false, true) => "void",
+        (true, true) => "number | void",
+        (false, false) => "void",
+    }
+}
+
 pub struct ExprRecovery<'a, S: std::hash::BuildHasher = std::collections::hash_map::RandomState> {
     instructions: &'a [InstructionNode],
     stack: Vec<Expression>,
     locals: std::collections::HashMap<String, Expression>,
-    /// Maps component IDs to their RS3 names (e.g. 5 → "`chat_box`").
-    component_names: &'a std::collections::HashMap<u32, String, S>,
+    var_names: &'a std::collections::HashMap<(VarDomain, u16), String>,
     /// Maps enum key values to qualified names (e.g. 0 → "`Enum_1234.ATTACK`").
     enum_value_names: &'a std::collections::HashMap<i32, String, S>,
-    /// Maps script IDs to their parameter/return types for cross-script calls.
-    script_signatures: &'a std::collections::HashMap<super::ScriptId, super::ScriptSignature, S>,
-    /// Maps script IDs to decoded script names from cache metadata.
-    script_names: &'a std::collections::HashMap<super::ScriptId, String, S>,
+    script_catalog: &'a super::ScriptCatalog,
+    script_signatures: &'a std::collections::HashMap<super::ScriptId, super::ScriptSignature>,
 }
 
 impl<'a, S: std::hash::BuildHasher> ExprRecovery<'a, S> {
     pub fn new(
         instructions: &'a [InstructionNode],
-        component_names: &'a std::collections::HashMap<u32, String, S>,
+        var_names: &'a std::collections::HashMap<(VarDomain, u16), String>,
+        _component_names: &'a std::collections::HashMap<u32, String, S>,
         enum_value_names: &'a std::collections::HashMap<i32, String, S>,
-        script_signatures: &'a std::collections::HashMap<
-            super::ScriptId,
-            super::ScriptSignature,
-            S,
-        >,
-        script_names: &'a std::collections::HashMap<super::ScriptId, String, S>,
+        script_catalog: &'a super::ScriptCatalog,
+        script_signatures: &'a std::collections::HashMap<super::ScriptId, super::ScriptSignature>,
     ) -> Self {
         Self {
             instructions,
             stack: Vec::new(),
             locals: std::collections::HashMap::new(),
-            component_names,
+            var_names,
             enum_value_names,
+            script_catalog,
             script_signatures,
-            script_names,
         }
     }
 
@@ -220,9 +526,14 @@ impl<'a, S: std::hash::BuildHasher> ExprRecovery<'a, S> {
         let mut stmts: Vec<Option<RecoveredStmt>> = vec![None; len];
 
         for (i, stmt_slot) in stmts.iter_mut().enumerate().take(len) {
-            let instr = self.instructions[i].clone();
-            let effect = stack_effect(&instr.command, &instr.operand);
-            *stmt_slot = self.process_instruction(&instr, &effect);
+            let instr = &self.instructions[i];
+            let effect = stack_effect(
+                &instr.command,
+                &instr.operand,
+                self.script_catalog,
+                self.script_signatures,
+            );
+            *stmt_slot = self.process_instruction(instr, &effect);
         }
 
         stmts
@@ -260,9 +571,13 @@ impl<'a, S: std::hash::BuildHasher> ExprRecovery<'a, S> {
             }
             "push_constant_string" => {
                 if let OperandNode::String(s) = op {
-                    self.stack.push(Expression::StringLiteral(StringLiteral {
-                        value: s.clone(),
-                    }));
+                    if let Some(callback) = parse_callback_literal(s) {
+                        self.stack.push(Expression::CallbackLiteral(callback));
+                    } else {
+                        self.stack.push(Expression::StringLiteral(StringLiteral {
+                            value: s.clone(),
+                        }));
+                    }
                 } else if let OperandNode::Int(v) = op {
                     // Only resolve non-negative values as enum keys.
                     // Negative values (e.g. -1) are sentinel/not-found markers.
@@ -294,7 +609,15 @@ impl<'a, S: std::hash::BuildHasher> ExprRecovery<'a, S> {
                 }
                 None
             }
-            "push_var" => {
+            "push_var"
+            | "push_varc_int"
+            | "push_varc_string"
+            | "push_varclan"
+            | "push_varclan_long"
+            | "push_varclan_string"
+            | "push_varclansetting"
+            | "push_varclansetting_long"
+            | "push_varclansetting_string" => {
                 if let OperandNode::VarRef(vr) = op {
                     let name = vr.name.clone().unwrap_or_else(|| {
                         format!("VARS.get({} * 1000000 + {})", u64::from(vr.domain), vr.id)
@@ -303,7 +626,7 @@ impl<'a, S: std::hash::BuildHasher> ExprRecovery<'a, S> {
                 }
                 None
             }
-            "push_varbit" | "pop_varbit" => {
+            "push_varbit" | "pop_varbit" | "push_varclanbit" | "push_varclansettingbit" => {
                 if let OperandNode::VarBitRef(vbr) = op {
                     let name = vbr
                         .name
@@ -332,6 +655,36 @@ impl<'a, S: std::hash::BuildHasher> ExprRecovery<'a, S> {
                             array: Box::new(arr),
                             index: Box::new(idx),
                         }));
+                }
+                None
+            }
+            "push_array_int_leave_index_on_stack" => {
+                if let OperandNode::Array(id) = op {
+                    let idx = self.pop_expr()?;
+                    let arr = Expression::Identifier(Identifier {
+                        name: format!("array_{id}"),
+                    });
+                    let access = Expression::ArrayAccess(super::ast::ArrayAccess {
+                        array: Box::new(arr),
+                        index: Box::new(idx.clone()),
+                    });
+                    self.stack.push(idx);
+                    self.stack.push(access);
+                }
+                None
+            }
+            "push_array_int_and_index" => {
+                if let OperandNode::Array(id) = op {
+                    let idx = self.pop_expr()?;
+                    let arr = Expression::Identifier(Identifier {
+                        name: format!("array_{id}"),
+                    });
+                    let access = Expression::ArrayAccess(super::ast::ArrayAccess {
+                        array: Box::new(arr),
+                        index: Box::new(idx.clone()),
+                    });
+                    self.stack.push(access);
+                    self.stack.push(idx);
                 }
                 None
             }
@@ -389,6 +742,29 @@ impl<'a, S: std::hash::BuildHasher> ExprRecovery<'a, S> {
                         .pop_expr()
                         .unwrap_or(Expression::NumberLiteral(NumberLiteral { value: 0 }));
                     let idx_str = expr_str(&idx);
+                    return Some(RecoveredStmt::Assignment {
+                        target: format!("array_{id}[{idx_str}]"),
+                        value,
+                        var_type: "number".to_string(),
+                    });
+                }
+                None
+            }
+            "pop_array_int_leave_value_on_stack" => {
+                if let OperandNode::Array(id) = op {
+                    let value = self.stack.pop().unwrap_or_else(|| {
+                        Expression::Call(CallExpr {
+                            callee: Box::new(Expression::Identifier(Identifier {
+                                name: "pop".to_string(),
+                            })),
+                            arguments: vec![],
+                        })
+                    });
+                    let idx = self
+                        .pop_expr()
+                        .unwrap_or(Expression::NumberLiteral(NumberLiteral { value: 0 }));
+                    let idx_str = expr_str(&idx);
+                    self.stack.push(value.clone());
                     return Some(RecoveredStmt::Assignment {
                         target: format!("array_{id}[{idx_str}]"),
                         value,
@@ -498,8 +874,23 @@ impl<'a, S: std::hash::BuildHasher> ExprRecovery<'a, S> {
             // ── String join ──
             "join_string" => {
                 if let OperandNode::Count(n) = op {
+                    let Some(part_count) = usize::try_from(*n)
+                        .ok()
+                        .filter(|count| *count <= self.stack.len())
+                        .filter(|count| *count <= MAX_JOIN_STRING_PARTS)
+                    else {
+                        self.stack.push(Expression::Call(CallExpr {
+                            callee: Box::new(Expression::Identifier(Identifier {
+                                name: "concat".to_string(),
+                            })),
+                            arguments: Vec::new(),
+                        }));
+                        return Some(RecoveredStmt::Comment(format!(
+                            "invalid join_string count {n}"
+                        )));
+                    };
                     let mut parts: Vec<Expression> =
-                        (0..*n).map(|_| self.pop_or_unknown()).collect();
+                        (0..part_count).map(|_| self.pop_or_unknown()).collect();
                     parts.reverse();
                     let expr = Expression::Call(CallExpr {
                         callee: Box::new(Expression::Identifier(Identifier {
@@ -515,6 +906,7 @@ impl<'a, S: std::hash::BuildHasher> ExprRecovery<'a, S> {
             // ── Control flow ──
             "branch" => {
                 if let OperandNode::Branch(target) = op {
+                    self.stack.clear();
                     return Some(RecoveredStmt::Goto(*target));
                 }
                 None
@@ -522,6 +914,7 @@ impl<'a, S: std::hash::BuildHasher> ExprRecovery<'a, S> {
             "branch_not" => {
                 if let OperandNode::Branch(target) = op {
                     let condition = self.pop_or_unknown();
+                    self.stack.clear();
                     return Some(RecoveredStmt::Branch {
                         condition,
                         target: *target,
@@ -533,6 +926,7 @@ impl<'a, S: std::hash::BuildHasher> ExprRecovery<'a, S> {
             "branch_if_true" => {
                 if let OperandNode::Branch(target) = op {
                     let condition = self.pop_or_unknown();
+                    self.stack.clear();
                     return Some(RecoveredStmt::Branch {
                         condition,
                         target: *target,
@@ -544,6 +938,7 @@ impl<'a, S: std::hash::BuildHasher> ExprRecovery<'a, S> {
             "branch_if_false" => {
                 if let OperandNode::Branch(target) = op {
                     let condition = self.pop_or_unknown();
+                    self.stack.clear();
                     return Some(RecoveredStmt::Branch {
                         condition,
                         target: *target,
@@ -556,6 +951,7 @@ impl<'a, S: std::hash::BuildHasher> ExprRecovery<'a, S> {
                 if let OperandNode::Branch(target) = op {
                     let right = self.pop_or_unknown();
                     let left = self.pop_or_unknown();
+                    self.stack.clear();
                     return Some(RecoveredStmt::BranchBinary {
                         op: BinaryOp::Eq,
                         left,
@@ -569,6 +965,7 @@ impl<'a, S: std::hash::BuildHasher> ExprRecovery<'a, S> {
                 if let OperandNode::Branch(target) = op {
                     let right = self.pop_or_unknown();
                     let left = self.pop_or_unknown();
+                    self.stack.clear();
                     return Some(RecoveredStmt::BranchBinary {
                         op: BinaryOp::Lt,
                         left,
@@ -582,6 +979,7 @@ impl<'a, S: std::hash::BuildHasher> ExprRecovery<'a, S> {
                 if let OperandNode::Branch(target) = op {
                     let right = self.pop_or_unknown();
                     let left = self.pop_or_unknown();
+                    self.stack.clear();
                     return Some(RecoveredStmt::BranchBinary {
                         op: BinaryOp::Gt,
                         left,
@@ -595,6 +993,7 @@ impl<'a, S: std::hash::BuildHasher> ExprRecovery<'a, S> {
                 if let OperandNode::Branch(target) = op {
                     let right = self.pop_or_unknown();
                     let left = self.pop_or_unknown();
+                    self.stack.clear();
                     return Some(RecoveredStmt::BranchBinary {
                         op: BinaryOp::Le,
                         left,
@@ -608,6 +1007,7 @@ impl<'a, S: std::hash::BuildHasher> ExprRecovery<'a, S> {
                 if let OperandNode::Branch(target) = op {
                     let right = self.pop_or_unknown();
                     let left = self.pop_or_unknown();
+                    self.stack.clear();
                     return Some(RecoveredStmt::BranchBinary {
                         op: BinaryOp::Ge,
                         left,
@@ -622,6 +1022,7 @@ impl<'a, S: std::hash::BuildHasher> ExprRecovery<'a, S> {
                     let discriminant = self.pop_or_unknown();
                     let case_pairs: Vec<(i32, usize)> =
                         cases.iter().map(|c| (c.value, c.target)).collect();
+                    self.stack.clear();
                     return Some(RecoveredStmt::Switch {
                         discriminant,
                         cases: case_pairs,
@@ -637,68 +1038,262 @@ impl<'a, S: std::hash::BuildHasher> ExprRecovery<'a, S> {
             // ── Script call ──
             "gosub_with_params" => {
                 if let OperandNode::Script(id) = op {
-                    let sid = super::ScriptId(*id);
-                    let total_args = self
-                        .script_signatures
-                        .get(&sid)
-                        .map(super::ScriptSignature::total_args)
-                        .unwrap_or(1);
+                    let Some((target, signature)) = super::resolve_call_target_signature(
+                        self.script_catalog,
+                        self.script_signatures,
+                        *id,
+                    ) else {
+                        return Some(RecoveredStmt::Comment(format!(
+                            "unresolved gosub_with_params target script {id}"
+                        )));
+                    };
+                    let total_args = signature.total_args();
                     let mut args: Vec<Expression> =
                         (0..total_args).map(|_| self.pop_or_unknown()).collect();
                     args.reverse();
-                    let callee_name = self
-                        .script_names
-                        .get(&sid)
-                        .map(|name| {
-                            super::sanitize_export_name(&super::extract_script_name_suffix(name))
-                        })
-                        .unwrap_or_else(|| format!("script_{id}"));
                     let expr = Expression::Call(CallExpr {
-                        callee: Box::new(Expression::Identifier(Identifier { name: callee_name })),
+                        callee: Box::new(Expression::Identifier(Identifier {
+                            name: target.export_name.clone(),
+                        })),
                         arguments: args,
                     });
+                    if signature.return_type == "void" {
+                        return Some(RecoveredStmt::Expression(expr));
+                    }
                     self.stack.push(expr);
                 }
                 None
             }
-
-            "db_getrowtable" | "db_find" | "db_find_with_count" => {
-                if let OperandNode::Int(table_id) = op {
-                    let expr = Expression::Call(CallExpr {
-                        callee: Box::new(Expression::PropertyAccess(super::ast::PropertyAccess {
-                            object: Box::new(Expression::Identifier(Identifier {
-                                name: "DB_TABLES".to_string(),
-                            })),
-                            property: "get".to_string(),
-                        })),
-                        arguments: vec![Expression::NumberLiteral(NumberLiteral {
-                            value: *table_id,
-                        })],
-                    });
-                    self.stack.push(expr);
-                }
+            "quickchat_dynamic_command_add" => {
+                let right = self.pop_or_unknown();
+                let left = self.pop_or_unknown();
+                self.stack
+                    .push(Expression::BinaryOperation(super::ast::BinaryOperation {
+                        op: BinaryOp::Sub,
+                        left: Box::new(left),
+                        right: Box::new(right),
+                    }));
                 None
+            }
+            "get_mousebuttons" => {
+                self.push_named_command_results(cmd, &["primary", "middle", "secondary"]);
+                None
+            }
+            "get_active_minimenu_entry" | "get_second_minimenu_entry" => {
+                self.push_named_command_results(
+                    cmd,
+                    &["entityType", "op", "opBase", "questIconSuffix"],
+                );
+                None
+            }
+            "get_minimenu_length" => {
+                self.push_indexed_command_results(cmd, 2);
+                None
+            }
+            "get_minimenu_target" => {
+                self.push_indexed_command_results(cmd, 3);
+                None
+            }
+            "worldlist_start" | "worldlist_next" => {
+                self.push_named_command_results(
+                    cmd,
+                    &[
+                        "id",
+                        "flags",
+                        "activity",
+                        "countryId",
+                        "countryName",
+                        "players",
+                        "ping",
+                        "host",
+                    ],
+                );
+                None
+            }
+            "worldlist_specific" => {
+                let world = self.pop_or_unknown();
+                self.push_named_call_results(
+                    cmd,
+                    vec![world],
+                    &[
+                        "flags",
+                        "activity",
+                        "countryId",
+                        "countryName",
+                        "players",
+                        "ping",
+                        "host",
+                    ],
+                );
+                None
+            }
+            "pushCanvasSize" | "viewport_geteffectivesize" => {
+                self.push_named_command_results(cmd, &["width", "height"]);
+                None
+            }
+            "pushZeroInsets" => {
+                self.push_indexed_command_results(cmd, 4);
+                None
+            }
+            "pushFontMetrics" => {
+                let font = self.pop_or_unknown();
+                self.push_indexed_call_results(cmd, vec![font], 5);
+                None
+            }
+            "viewport_getzoom" => {
+                self.push_named_command_results(cmd, &["min", "max"]);
+                None
+            }
+            "viewport_getfov" => {
+                self.push_named_command_results(cmd, &["max", "min"]);
+                None
+            }
+            "fullscreen_getmode" => {
+                let index = self.pop_or_unknown();
+                self.push_named_call_results(cmd, vec![index], &["width", "height"]);
+                None
+            }
+            "window_getinsets" => {
+                self.push_indexed_command_results(cmd, 4);
+                None
+            }
+            "if_hassub" => {
+                let component = self.pop_or_unknown();
+                self.stack
+                    .push(self.ui_call_expr("HasSub", vec![component]));
+                None
+            }
+            "if_getnextsubid" => {
+                let component = self.pop_or_unknown();
+                self.stack
+                    .push(self.ui_call_expr("GetNextSubid", vec![component]));
+                None
+            }
+            "if_hassubmodal" => {
+                let interface = self.pop_or_unknown();
+                let component = self.pop_or_unknown();
+                self.stack
+                    .push(self.ui_call_expr("HasSubmodal", vec![component, interface]));
+                None
+            }
+            "if_hassuboverlay" => {
+                let overlay = self.pop_or_unknown();
+                let component = self.pop_or_unknown();
+                self.stack
+                    .push(self.ui_call_expr("HasSuboverlay", vec![component, overlay]));
+                None
+            }
+            "if_get_gamescreen" => {
+                self.stack.push(self.ui_call_expr("GetGamescreen", vec![]));
+                None
+            }
+            "defaultminimenu"
+            | "minimenu_close"
+            | "force_interface_drag"
+            | "cancel_interface_drag"
+            | "targetmode_cancel" => {
+                return Some(RecoveredStmt::Expression(self.command_call(cmd, vec![])));
             }
 
             // ── CC / UI ops ──
-            "cc_create" => {
-                if let OperandNode::Int(id) = op {
-                    return Some(RecoveredStmt::Expression(Expression::Call(CallExpr {
-                        callee: Box::new(Expression::Identifier(Identifier {
-                            name: "UI.create".to_string(),
-                        })),
-                        arguments: vec![self.component_ref(*id as u32)],
-                    })));
+            cmd if is_interface_hook_opcode(cmd) => {
+                let has_component = cmd.starts_with("if_");
+                let component = has_component.then(|| self.pop_or_unknown());
+                let descriptor = self.pop_or_unknown();
+                let callback = self.recover_callback_literal(cmd, &descriptor);
+                let mut arguments = Vec::with_capacity(1 + usize::from(has_component));
+                arguments.push(callback.unwrap_or(descriptor));
+                if let Some(component) = component {
+                    arguments.push(component);
                 }
-                None
+                return Some(RecoveredStmt::Expression(Expression::Call(CallExpr {
+                    callee: Box::new(Expression::Identifier(Identifier {
+                        name: format!("UI.{}", sanitize_camel(&cmd[3..])),
+                    })),
+                    arguments,
+                })));
+            }
+            "cc_create" => {
+                let child_id = self.pop_or_unknown();
+                let component_type = self.pop_or_unknown();
+                let parent = self.pop_or_unknown();
+                return Some(RecoveredStmt::Expression(Expression::Call(CallExpr {
+                    callee: Box::new(Expression::Identifier(Identifier {
+                        name: "UI.create".to_string(),
+                    })),
+                    arguments: vec![parent, component_type, child_id],
+                })));
             }
             "cc_delete" => {
-                let arg = self.pop_or_unknown();
                 return Some(RecoveredStmt::Expression(Expression::Call(CallExpr {
                     callee: Box::new(Expression::Identifier(Identifier {
                         name: "UI.delete".to_string(),
                     })),
-                    arguments: vec![arg],
+                    arguments: vec![],
+                })));
+            }
+            "cc_deleteall" => {
+                let component = self.pop_or_unknown();
+                return Some(RecoveredStmt::Expression(Expression::Call(CallExpr {
+                    callee: Box::new(Expression::Identifier(Identifier {
+                        name: "UI.deleteAll".to_string(),
+                    })),
+                    arguments: vec![component],
+                })));
+            }
+            "cc_find" => {
+                let child_id = self.pop_or_unknown();
+                let component = self.pop_or_unknown();
+                self.stack.push(Expression::Call(CallExpr {
+                    callee: Box::new(Expression::Identifier(Identifier {
+                        name: "UI.find".to_string(),
+                    })),
+                    arguments: vec![component, child_id],
+                }));
+                None
+            }
+            "if_find" => {
+                let component = self.pop_or_unknown();
+                self.stack.push(Expression::Call(CallExpr {
+                    callee: Box::new(Expression::Identifier(Identifier {
+                        name: "UI.find".to_string(),
+                    })),
+                    arguments: vec![component],
+                }));
+                None
+            }
+            "cc_sendtofront" => {
+                return Some(RecoveredStmt::Expression(Expression::Call(CallExpr {
+                    callee: Box::new(Expression::Identifier(Identifier {
+                        name: "UI.sendToFront".to_string(),
+                    })),
+                    arguments: vec![],
+                })));
+            }
+            "cc_sendtoback" => {
+                return Some(RecoveredStmt::Expression(Expression::Call(CallExpr {
+                    callee: Box::new(Expression::Identifier(Identifier {
+                        name: "UI.sendToBack".to_string(),
+                    })),
+                    arguments: vec![],
+                })));
+            }
+            "if_sendtofront" => {
+                let component = self.pop_or_unknown();
+                return Some(RecoveredStmt::Expression(Expression::Call(CallExpr {
+                    callee: Box::new(Expression::Identifier(Identifier {
+                        name: "UI.sendToFront".to_string(),
+                    })),
+                    arguments: vec![component],
+                })));
+            }
+            "if_sendtoback" => {
+                let component = self.pop_or_unknown();
+                return Some(RecoveredStmt::Expression(Expression::Call(CallExpr {
+                    callee: Box::new(Expression::Identifier(Identifier {
+                        name: "UI.sendToBack".to_string(),
+                    })),
+                    arguments: vec![component],
                 })));
             }
             "if_gettext" => {
@@ -713,55 +1308,47 @@ impl<'a, S: std::hash::BuildHasher> ExprRecovery<'a, S> {
                 None
             }
             "cc_settext" => {
-                let text = self.pop_or_unknown();
-                let id = self.pop_or_unknown();
-                return Some(RecoveredStmt::Expression(Expression::Call(CallExpr {
-                    callee: Box::new(Expression::Identifier(Identifier {
-                        name: "UI.setText".to_string(),
-                    })),
-                    arguments: vec![id, text],
-                })));
+                return Some(self.ui_call("UI.setText", 1));
             }
             "cc_setgraphic" => {
-                let graphic = self.pop_or_unknown();
-                let id = self.pop_or_unknown();
-                return Some(RecoveredStmt::Expression(Expression::Call(CallExpr {
-                    callee: Box::new(Expression::Identifier(Identifier {
-                        name: "UI.setGraphic".to_string(),
-                    })),
-                    arguments: vec![id, graphic],
-                })));
+                return Some(self.ui_call("UI.setGraphic", 1));
             }
             "cc_sethide" => {
-                let hidden = self.pop_or_unknown();
-                let id = self.pop_or_unknown();
-                return Some(RecoveredStmt::Expression(Expression::Call(CallExpr {
-                    callee: Box::new(Expression::Identifier(Identifier {
-                        name: "UI.setHide".to_string(),
-                    })),
-                    arguments: vec![id, hidden],
-                })));
+                return Some(self.ui_call("UI.setHide", 1));
             }
             "cc_setcolour" => {
-                let colour = self.pop_or_unknown();
-                let id = self.pop_or_unknown();
-                return Some(RecoveredStmt::Expression(Expression::Call(CallExpr {
-                    callee: Box::new(Expression::Identifier(Identifier {
-                        name: "UI.setColour".to_string(),
-                    })),
-                    arguments: vec![id, colour],
-                })));
+                return Some(self.ui_call("UI.setColour", 1));
             }
+            "cc_setfill" => return Some(self.ui_call("UI.setFill", 1)),
+            "cc_settrans" => return Some(self.ui_call("UI.setTrans", 1)),
+            "cc_setlinewid" => return Some(self.ui_call("UI.setLineWid", 1)),
+            "cc_setmodel" => return Some(self.ui_call("UI.setModel", 1)),
+            "cc_setscrollpos" => return Some(self.ui_call("UI.setScrollPos", 2)),
+            "cc_setscrollsize" => return Some(self.ui_call("UI.setScrollSize", 2)),
+            "cc_setaspect" => return Some(self.ui_call("UI.setAspect", 2)),
+            "cc_setposition" => return Some(self.ui_call("UI.setPosition", 4)),
             "cc_setsize" => {
-                let size = self.pop_or_unknown();
-                let id = self.pop_or_unknown();
-                return Some(RecoveredStmt::Expression(Expression::Call(CallExpr {
-                    callee: Box::new(Expression::Identifier(Identifier {
-                        name: "UI.setSize".to_string(),
-                    })),
-                    arguments: vec![id, size],
-                })));
+                return Some(self.ui_call("UI.setSize", 4));
             }
+            "cc_setmodelorigin" => return Some(self.ui_call("UI.setModelOrigin", 2)),
+            "cc_setmodelangle" => return Some(self.ui_call("UI.setModelAngle", 6)),
+            "cc_setmodelzoom" => return Some(self.ui_call("UI.setModelZoom", 1)),
+            "cc_setmodelorthog" => return Some(self.ui_call("UI.setModelOrthog", 1)),
+            "cc_setmodeltint" => return Some(self.ui_call("UI.setModelTint", 4)),
+            "cc_setmodellighting" => return Some(self.ui_call("UI.setModelLighting", 10)),
+            "cc_resetmodellighting" => return Some(self.ui_call("UI.resetModelLighting", 0)),
+            "cc_settextfont" => return Some(self.ui_call("UI.setTextFont", 1)),
+            "cc_settextalign" => return Some(self.ui_call("UI.setTextAlign", 3)),
+            "cc_settextshadow" => return Some(self.ui_call("UI.setTextShadow", 1)),
+            "cc_settextantimacro" => return Some(self.ui_call("UI.setTextAntiMacro", 1)),
+            "cc_setoutline" => return Some(self.ui_call("UI.setOutline", 1)),
+            "cc_setgraphicshadow" => return Some(self.ui_call("UI.setGraphicShadow", 1)),
+            "cc_setclickmask" => return Some(self.ui_call("UI.setClickMask", 1)),
+            "cc_setheld" => return Some(self.ui_call("UI.setHeld", 1)),
+            "cc_setfontmono" => return Some(self.ui_call("UI.setFontMono", 1)),
+            "cc_setparam" => return Some(self.ui_call("UI.setParam", 2)),
+            "cc_setparam_int" => return Some(self.ui_call("UI.setParamInt", 2)),
+            "cc_setparam_string" => return Some(self.ui_call("UI.setParamString", 2)),
             _ => {
                 match categorize(cmd) {
                     OpcodeCategory::CC | OpcodeCategory::IF => {
@@ -846,20 +1433,140 @@ impl<'a, S: std::hash::BuildHasher> ExprRecovery<'a, S> {
         })
     }
 
-    /// Converts a component ID to a TypeScript expression.
-    /// If the component has a known name, emits `ComponentId.name`;
-    /// otherwise emits the raw number.
-    fn component_ref(&self, id: u32) -> Expression {
-        if let Some(name) = self.component_names.get(&id) {
-            Expression::PropertyAccess(super::ast::PropertyAccess {
-                object: Box::new(Expression::Identifier(Identifier {
-                    name: "ComponentId".to_string(),
-                })),
-                property: super::sanitize_ts_ident(name),
-            })
-        } else {
-            Expression::NumberLiteral(NumberLiteral { value: id as i32 })
+    fn pop_args(&mut self, count: usize) -> Vec<Expression> {
+        let mut args = Vec::with_capacity(count);
+        for _ in 0..count {
+            args.push(self.pop_or_unknown());
         }
+        args.reverse();
+        args
+    }
+
+    fn ui_call(&mut self, name: &str, arg_count: usize) -> RecoveredStmt {
+        RecoveredStmt::Expression(Expression::Call(CallExpr {
+            callee: Box::new(Expression::Identifier(Identifier {
+                name: name.to_string(),
+            })),
+            arguments: self.pop_args(arg_count),
+        }))
+    }
+
+    fn ui_call_expr(&self, method: &str, arguments: Vec<Expression>) -> Expression {
+        Expression::Call(CallExpr {
+            callee: Box::new(Expression::Identifier(Identifier {
+                name: format!("UI.{method}"),
+            })),
+            arguments,
+        })
+    }
+
+    fn command_call(&self, cmd: &str, arguments: Vec<Expression>) -> Expression {
+        Expression::Call(CallExpr {
+            callee: Box::new(Expression::Identifier(Identifier {
+                name: sanitize_command(cmd),
+            })),
+            arguments,
+        })
+    }
+
+    fn push_named_command_results(&mut self, cmd: &str, properties: &[&str]) {
+        let call = self.command_call(cmd, vec![]);
+        for property in properties {
+            self.stack
+                .push(Expression::PropertyAccess(super::ast::PropertyAccess {
+                    object: Box::new(call.clone()),
+                    property: (*property).to_string(),
+                }));
+        }
+    }
+
+    fn push_named_call_results(
+        &mut self,
+        cmd: &str,
+        arguments: Vec<Expression>,
+        properties: &[&str],
+    ) {
+        let call = self.command_call(cmd, arguments);
+        for property in properties {
+            self.stack
+                .push(Expression::PropertyAccess(super::ast::PropertyAccess {
+                    object: Box::new(call.clone()),
+                    property: (*property).to_string(),
+                }));
+        }
+    }
+
+    fn push_indexed_command_results(&mut self, cmd: &str, count: usize) {
+        let call = self.command_call(cmd, vec![]);
+        for index in 0..count {
+            self.stack
+                .push(Expression::ArrayAccess(super::ast::ArrayAccess {
+                    array: Box::new(call.clone()),
+                    index: Box::new(Expression::NumberLiteral(NumberLiteral {
+                        value: index as i32,
+                    })),
+                }));
+        }
+    }
+
+    fn push_indexed_call_results(&mut self, cmd: &str, arguments: Vec<Expression>, count: usize) {
+        let call = self.command_call(cmd, arguments);
+        for index in 0..count {
+            self.stack
+                .push(Expression::ArrayAccess(super::ast::ArrayAccess {
+                    array: Box::new(call.clone()),
+                    index: Box::new(Expression::NumberLiteral(NumberLiteral {
+                        value: index as i32,
+                    })),
+                }));
+        }
+    }
+
+    fn recover_callback_literal(
+        &mut self,
+        cmd: &str,
+        descriptor: &Expression,
+    ) -> Option<Expression> {
+        let Expression::StringLiteral(descriptor) = descriptor else {
+            return None;
+        };
+
+        let raw_descriptor = descriptor.value.clone();
+        let mut signature = raw_descriptor.as_str();
+        let watchers = if let Some(stripped) = signature.strip_suffix('Y') {
+            signature = stripped;
+            let count = literal_usize(&self.pop_or_unknown())
+                .filter(|count| *count <= self.stack.len())
+                .filter(|count| *count <= MAX_CALLBACK_WATCHERS)?;
+            let mut watchers = Vec::with_capacity(count);
+            for _ in 0..count {
+                watchers.push(self.pop_or_unknown());
+            }
+            watchers.reverse();
+            watchers
+                .into_iter()
+                .map(|watcher| hook_watcher_name(cmd, &watcher, self.var_names))
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+
+        let mut arguments = Vec::with_capacity(signature.chars().count());
+        for _ in signature.chars() {
+            arguments.push(self.pop_or_unknown());
+        }
+        arguments.reverse();
+
+        let script = self.pop_or_unknown();
+        let script_id = literal_i32(&script);
+
+        Some(Expression::CallbackLiteral(CallbackLiteral {
+            script: callback_script_name(&script, self.script_catalog),
+            script_id,
+            raw_descriptor,
+            arguments,
+            watchers,
+        }))
     }
 }
 
@@ -915,6 +1622,107 @@ fn operand_expr(op: &OperandNode) -> Expression {
     }
 }
 
+fn parse_callback_literal(value: &str) -> Option<CallbackLiteral> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if let Some((script, watchers)) = trimmed.split_once('{') {
+        let watchers = watchers.strip_suffix('}')?;
+        let watchers = watchers
+            .split(',')
+            .map(str::trim)
+            .filter(|watcher| !watcher.is_empty())
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        return Some(CallbackLiteral {
+            script: script.trim().to_string(),
+            script_id: None,
+            raw_descriptor: String::new(),
+            arguments: Vec::new(),
+            watchers,
+        });
+    }
+
+    if (trimmed.starts_with("script") || trimmed.contains('_'))
+        && trimmed
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+    {
+        return Some(CallbackLiteral {
+            script: trimmed.to_string(),
+            script_id: None,
+            raw_descriptor: String::new(),
+            arguments: Vec::new(),
+            watchers: Vec::new(),
+        });
+    }
+
+    None
+}
+
+fn is_interface_hook_opcode(cmd: &str) -> bool {
+    (cmd.starts_with("if_") || cmd.starts_with("cc_")) && cmd.contains("_seton")
+}
+
+fn literal_usize(expr: &Expression) -> Option<usize> {
+    usize::try_from(literal_i32(expr)?).ok()
+}
+
+fn literal_i32(expr: &Expression) -> Option<i32> {
+    match expr {
+        Expression::NumberLiteral(number) => Some(number.value),
+        Expression::PropertyAccess(property) => {
+            property.property.strip_prefix("KEY_")?.parse().ok()
+        }
+        _ => None,
+    }
+}
+
+fn callback_script_name(expr: &Expression, script_catalog: &super::ScriptCatalog) -> String {
+    if let Some(raw_id) = literal_i32(expr) {
+        return script_catalog
+            .resolve_call_target(raw_id)
+            .map(|target| target.export_name.clone())
+            .unwrap_or_else(|| format!("script{raw_id}"));
+    }
+
+    match expr {
+        Expression::Identifier(identifier) => identifier.name.clone(),
+        Expression::StringLiteral(string) => string.value.clone(),
+        _ => expr_str(expr),
+    }
+}
+
+fn hook_watcher_name(
+    cmd: &str,
+    expr: &Expression,
+    var_names: &std::collections::HashMap<(VarDomain, u16), String>,
+) -> String {
+    let Some(raw_id) = literal_i32(expr) else {
+        return expr_str(expr);
+    };
+    let Ok(id) = u16::try_from(raw_id) else {
+        return expr_str(expr);
+    };
+
+    match cmd {
+        "if_setonvartransmit" | "cc_setonvartransmit" => {
+            let fallback = format!("varplayerint_{id}");
+            match var_names.get(&(VarDomain::Player, id)) {
+                Some(name) if name != &format!("varplayer_{id}") => name.clone(),
+                _ => fallback,
+            }
+        }
+        "if_setoninvtransmit" | "cc_setoninvtransmit" => format!("inv_{id}"),
+        "if_setonstattransmit" | "cc_setonstattransmit" => format!("stat_{id}"),
+        "if_setonvarctransmit" | "cc_setonvarctransmit" => format!("varc_{id}"),
+        "if_setonvarcstrtransmit" | "cc_setonvarcstrtransmit" => format!("varcstr_{id}"),
+        _ => expr_str(expr),
+    }
+}
+
 fn sanitize_command(cmd: &str) -> String {
     super::sanitize_ts_ident(&cmd.replace('_', ""))
 }
@@ -938,8 +1746,1130 @@ fn sanitize_camel(s: &str) -> String {
 fn expr_str(expr: &Expression) -> String {
     match expr {
         Expression::NumberLiteral(n) => n.value.to_string(),
+        Expression::BigIntLiteral(n) => format!("{}n", n.value),
         Expression::Identifier(id) => id.name.clone(),
         Expression::StringLiteral(s) => format!("\"{}\"", s.value),
-        _ => "expr".to_string(),
+        Expression::BooleanLiteral(b) => b.value.to_string(),
+        Expression::ArrayAccess(array) => {
+            format!("{}[{}]", expr_str(&array.array), expr_str(&array.index))
+        }
+        Expression::PropertyAccess(property) => {
+            format!("{}.{}", expr_str(&property.object), property.property)
+        }
+        Expression::Call(call) => {
+            let arguments = call
+                .arguments
+                .iter()
+                .map(expr_str)
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{}({arguments})", expr_str(&call.callee))
+        }
+        Expression::CallbackLiteral(callback) => {
+            format!(
+                "callback(\"{}\", [{}])",
+                callback.script,
+                callback.watchers.join(", ")
+            )
+        }
+        Expression::BinaryOperation(binary) => {
+            format!(
+                "({} {} {})",
+                expr_str(&binary.left),
+                binary.op.as_str(),
+                expr_str(&binary.right)
+            )
+        }
+        Expression::UnaryOperation(unary) => {
+            format!("({}{})", unary.op.as_str(), expr_str(&unary.operand))
+        }
+        Expression::PushOperation(push) => format!("push({})", expr_str(&push.value)),
+        Expression::PopOperation(_) => "pop()".to_string(),
+        Expression::GotoExpr(goto) => format!("goto({})", goto.target),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ExprRecovery, RecoveredStmt};
+    use crate::transpile::ScriptCatalog;
+    use crate::transpile::ast::{Expression, InstructionNode, OperandNode};
+    use std::collections::HashMap;
+
+    #[test]
+    fn invalid_join_string_count_fails_soft() {
+        let instructions = vec![
+            InstructionNode {
+                index: 0,
+                opcode: 0,
+                command: "push_constant_string".to_string(),
+                operand: OperandNode::String("hello".to_string()),
+            },
+            InstructionNode {
+                index: 1,
+                opcode: 0,
+                command: "join_string".to_string(),
+                operand: OperandNode::Count(1543595008),
+            },
+            InstructionNode {
+                index: 2,
+                opcode: 0,
+                command: "return".to_string(),
+                operand: OperandNode::Int(0),
+            },
+        ];
+
+        let recovered = ExprRecovery::new(
+            &instructions,
+            &HashMap::new(),
+            &HashMap::<u32, String>::new(),
+            &HashMap::<i32, String>::new(),
+            &ScriptCatalog::default(),
+            &HashMap::new(),
+        )
+        .recover();
+
+        assert!(matches!(
+            &recovered[1],
+            Some(RecoveredStmt::Comment(text)) if text.contains("invalid join_string count")
+        ));
+        assert!(matches!(
+            &recovered[2],
+            Some(RecoveredStmt::Return(Some(_)))
+        ));
+    }
+
+    #[test]
+    fn cc_delete_uses_active_component_without_stack_argument() {
+        let instructions = vec![InstructionNode {
+            index: 0,
+            opcode: 0,
+            command: "cc_delete".to_string(),
+            operand: OperandNode::Byte(0),
+        }];
+
+        let recovered = ExprRecovery::new(
+            &instructions,
+            &HashMap::new(),
+            &HashMap::<u32, String>::new(),
+            &HashMap::<i32, String>::new(),
+            &ScriptCatalog::default(),
+            &HashMap::new(),
+        )
+        .recover();
+
+        assert!(matches!(
+            &recovered[0],
+            Some(RecoveredStmt::Expression(Expression::Call(call)))
+                if call.arguments.is_empty()
+        ));
+    }
+
+    #[test]
+    fn cc_find_pushes_booleanish_result_expression() {
+        let instructions = vec![
+            InstructionNode {
+                index: 0,
+                opcode: 0,
+                command: "push_constant_int".to_string(),
+                operand: OperandNode::Int(100),
+            },
+            InstructionNode {
+                index: 1,
+                opcode: 0,
+                command: "push_constant_int".to_string(),
+                operand: OperandNode::Int(7),
+            },
+            InstructionNode {
+                index: 2,
+                opcode: 0,
+                command: "cc_find".to_string(),
+                operand: OperandNode::Byte(0),
+            },
+            InstructionNode {
+                index: 3,
+                opcode: 0,
+                command: "return".to_string(),
+                operand: OperandNode::Int(0),
+            },
+        ];
+
+        let recovered = ExprRecovery::new(
+            &instructions,
+            &HashMap::new(),
+            &HashMap::<u32, String>::new(),
+            &HashMap::<i32, String>::new(),
+            &ScriptCatalog::default(),
+            &HashMap::new(),
+        )
+        .recover();
+
+        assert!(matches!(
+            &recovered[3],
+            Some(RecoveredStmt::Return(Some(Expression::Call(call))))
+                if call.arguments.len() == 2
+        ));
+    }
+
+    #[test]
+    fn cc_settext_uses_active_component_without_component_argument() {
+        let instructions = vec![
+            InstructionNode {
+                index: 0,
+                opcode: 0,
+                command: "push_constant_string".to_string(),
+                operand: OperandNode::String("hello".to_string()),
+            },
+            InstructionNode {
+                index: 1,
+                opcode: 0,
+                command: "cc_settext".to_string(),
+                operand: OperandNode::Byte(0),
+            },
+        ];
+
+        let recovered = ExprRecovery::new(
+            &instructions,
+            &HashMap::new(),
+            &HashMap::<u32, String>::new(),
+            &HashMap::<i32, String>::new(),
+            &ScriptCatalog::default(),
+            &HashMap::new(),
+        )
+        .recover();
+
+        assert!(matches!(
+            &recovered[1],
+            Some(RecoveredStmt::Expression(Expression::Call(call)))
+                if call.arguments.len() == 1
+        ));
+    }
+
+    #[test]
+    fn cc_setposition_keeps_all_four_runtime_arguments() {
+        let instructions = vec![
+            InstructionNode {
+                index: 0,
+                opcode: 0,
+                command: "push_constant_int".to_string(),
+                operand: OperandNode::Int(10),
+            },
+            InstructionNode {
+                index: 1,
+                opcode: 0,
+                command: "push_constant_int".to_string(),
+                operand: OperandNode::Int(20),
+            },
+            InstructionNode {
+                index: 2,
+                opcode: 0,
+                command: "push_constant_int".to_string(),
+                operand: OperandNode::Int(1),
+            },
+            InstructionNode {
+                index: 3,
+                opcode: 0,
+                command: "push_constant_int".to_string(),
+                operand: OperandNode::Int(2),
+            },
+            InstructionNode {
+                index: 4,
+                opcode: 0,
+                command: "cc_setposition".to_string(),
+                operand: OperandNode::Byte(0),
+            },
+        ];
+
+        let recovered = ExprRecovery::new(
+            &instructions,
+            &HashMap::new(),
+            &HashMap::<u32, String>::new(),
+            &HashMap::<i32, String>::new(),
+            &ScriptCatalog::default(),
+            &HashMap::new(),
+        )
+        .recover();
+
+        assert!(matches!(
+            &recovered[4],
+            Some(RecoveredStmt::Expression(Expression::Call(call)))
+                if call.arguments.len() == 4
+        ));
+    }
+
+    #[test]
+    fn oc_param_pushes_generic_call_expression() {
+        let instructions = vec![
+            InstructionNode {
+                index: 0,
+                opcode: 0,
+                command: "push_constant_int".to_string(),
+                operand: OperandNode::Int(100),
+            },
+            InstructionNode {
+                index: 1,
+                opcode: 0,
+                command: "push_constant_int".to_string(),
+                operand: OperandNode::Int(7),
+            },
+            InstructionNode {
+                index: 2,
+                opcode: 0,
+                command: "oc_param".to_string(),
+                operand: OperandNode::Byte(0),
+            },
+            InstructionNode {
+                index: 3,
+                opcode: 0,
+                command: "return".to_string(),
+                operand: OperandNode::Byte(0),
+            },
+        ];
+
+        let recovered = ExprRecovery::new(
+            &instructions,
+            &HashMap::new(),
+            &HashMap::<u32, String>::new(),
+            &HashMap::<i32, String>::new(),
+            &ScriptCatalog::default(),
+            &HashMap::new(),
+        )
+        .recover();
+
+        assert!(matches!(
+            &recovered[3],
+            Some(RecoveredStmt::Return(Some(Expression::Call(call))))
+                if call.arguments.len() == 2
+        ));
+    }
+
+    #[test]
+    fn player_group_same_world_var_pushes_generic_call_expression() {
+        let instructions = vec![
+            InstructionNode {
+                index: 0,
+                opcode: 0,
+                command: "push_constant_int".to_string(),
+                operand: OperandNode::Int(1),
+            },
+            InstructionNode {
+                index: 1,
+                opcode: 0,
+                command: "push_constant_int".to_string(),
+                operand: OperandNode::Int(1),
+            },
+            InstructionNode {
+                index: 2,
+                opcode: 0,
+                command: "push_constant_int".to_string(),
+                operand: OperandNode::Int(7),
+            },
+            InstructionNode {
+                index: 3,
+                opcode: 0,
+                command: "player_group_member_get_same_world_var".to_string(),
+                operand: OperandNode::Byte(0),
+            },
+            InstructionNode {
+                index: 4,
+                opcode: 0,
+                command: "return".to_string(),
+                operand: OperandNode::Byte(0),
+            },
+        ];
+
+        let recovered = ExprRecovery::new(
+            &instructions,
+            &HashMap::new(),
+            &HashMap::<u32, String>::new(),
+            &HashMap::<i32, String>::new(),
+            &ScriptCatalog::default(),
+            &HashMap::new(),
+        )
+        .recover();
+
+        assert!(matches!(
+            &recovered[4],
+            Some(RecoveredStmt::Return(Some(Expression::Call(call))))
+                if call.arguments.len() == 3
+        ));
+    }
+
+    #[test]
+    fn notifications_sendlocal_pops_four_args_and_pushes_result_expression() {
+        let instructions = vec![
+            InstructionNode {
+                index: 0,
+                opcode: 0,
+                command: "push_constant_string".to_string(),
+                operand: OperandNode::String("title".to_string()),
+            },
+            InstructionNode {
+                index: 1,
+                opcode: 0,
+                command: "push_constant_string".to_string(),
+                operand: OperandNode::String("body".to_string()),
+            },
+            InstructionNode {
+                index: 2,
+                opcode: 0,
+                command: "push_constant_int".to_string(),
+                operand: OperandNode::Int(1),
+            },
+            InstructionNode {
+                index: 3,
+                opcode: 0,
+                command: "push_constant_int".to_string(),
+                operand: OperandNode::Int(2),
+            },
+            InstructionNode {
+                index: 4,
+                opcode: 0,
+                command: "notifications_sendlocal".to_string(),
+                operand: OperandNode::Byte(0),
+            },
+            InstructionNode {
+                index: 5,
+                opcode: 0,
+                command: "return".to_string(),
+                operand: OperandNode::Byte(0),
+            },
+        ];
+
+        let recovered = ExprRecovery::new(
+            &instructions,
+            &HashMap::new(),
+            &HashMap::<u32, String>::new(),
+            &HashMap::<i32, String>::new(),
+            &ScriptCatalog::default(),
+            &HashMap::new(),
+        )
+        .recover();
+
+        assert!(matches!(
+            &recovered[5],
+            Some(RecoveredStmt::Return(Some(Expression::Call(call))))
+                if call.arguments.len() == 4
+        ));
+    }
+
+    #[test]
+    fn db_helpers_use_runtime_stack_args_instead_of_operand_lookup() {
+        let instructions = vec![
+            InstructionNode {
+                index: 0,
+                opcode: 0,
+                command: "push_constant_int".to_string(),
+                operand: OperandNode::Int(42),
+            },
+            InstructionNode {
+                index: 1,
+                opcode: 0,
+                command: "db_listall".to_string(),
+                operand: OperandNode::Byte(0),
+            },
+            InstructionNode {
+                index: 2,
+                opcode: 0,
+                command: "push_constant_int".to_string(),
+                operand: OperandNode::Int(7),
+            },
+            InstructionNode {
+                index: 3,
+                opcode: 0,
+                command: "db_getrowtable".to_string(),
+                operand: OperandNode::Byte(0),
+            },
+            InstructionNode {
+                index: 4,
+                opcode: 0,
+                command: "return".to_string(),
+                operand: OperandNode::Byte(0),
+            },
+        ];
+
+        let recovered = ExprRecovery::new(
+            &instructions,
+            &HashMap::new(),
+            &HashMap::<u32, String>::new(),
+            &HashMap::<i32, String>::new(),
+            &ScriptCatalog::default(),
+            &HashMap::new(),
+        )
+        .recover();
+
+        assert!(matches!(
+            &recovered[4],
+            Some(RecoveredStmt::Return(Some(Expression::Call(call))))
+                if matches!(&*call.callee, Expression::Identifier(id) if id.name == "dbgetrowtable")
+                    && call.arguments.len() == 1
+        ));
+        assert!(matches!(&recovered[1], None));
+    }
+
+    #[test]
+    fn minimenu_entry_helper_pushes_named_properties_in_vm_order() {
+        let instructions = vec![
+            InstructionNode {
+                index: 0,
+                opcode: 0,
+                command: "get_active_minimenu_entry".to_string(),
+                operand: OperandNode::Byte(0),
+            },
+            InstructionNode {
+                index: 1,
+                opcode: 0,
+                command: "pop_string_local".to_string(),
+                operand: OperandNode::Local(0),
+            },
+            InstructionNode {
+                index: 2,
+                opcode: 0,
+                command: "pop_string_local".to_string(),
+                operand: OperandNode::Local(1),
+            },
+            InstructionNode {
+                index: 3,
+                opcode: 0,
+                command: "pop_string_local".to_string(),
+                operand: OperandNode::Local(2),
+            },
+            InstructionNode {
+                index: 4,
+                opcode: 0,
+                command: "pop_int_local".to_string(),
+                operand: OperandNode::Local(0),
+            },
+        ];
+
+        let recovered = ExprRecovery::new(
+            &instructions,
+            &HashMap::new(),
+            &HashMap::<u32, String>::new(),
+            &HashMap::<i32, String>::new(),
+            &ScriptCatalog::default(),
+            &HashMap::new(),
+        )
+        .recover();
+
+        for (slot, property) in [
+            (&recovered[1], "questIconSuffix"),
+            (&recovered[2], "opBase"),
+            (&recovered[3], "op"),
+            (&recovered[4], "entityType"),
+        ] {
+            assert!(matches!(
+                slot,
+                Some(RecoveredStmt::Assignment { value: Expression::PropertyAccess(access), .. })
+                    if access.property == property
+                        && matches!(&*access.object, Expression::Call(call)
+                            if matches!(&*call.callee, Expression::Identifier(id) if id.name == "getactiveminimenuentry"))
+            ));
+        }
+    }
+
+    #[test]
+    fn minimenu_target_helper_preserves_multivalue_stack_order() {
+        let instructions = vec![
+            InstructionNode {
+                index: 0,
+                opcode: 0,
+                command: "get_minimenu_target".to_string(),
+                operand: OperandNode::Byte(0),
+            },
+            InstructionNode {
+                index: 1,
+                opcode: 0,
+                command: "pop_string_local".to_string(),
+                operand: OperandNode::Local(0),
+            },
+            InstructionNode {
+                index: 2,
+                opcode: 0,
+                command: "pop_string_local".to_string(),
+                operand: OperandNode::Local(1),
+            },
+            InstructionNode {
+                index: 3,
+                opcode: 0,
+                command: "pop_int_local".to_string(),
+                operand: OperandNode::Local(0),
+            },
+        ];
+
+        let recovered = ExprRecovery::new(
+            &instructions,
+            &HashMap::new(),
+            &HashMap::<u32, String>::new(),
+            &HashMap::<i32, String>::new(),
+            &ScriptCatalog::default(),
+            &HashMap::new(),
+        )
+        .recover();
+
+        for (slot, index) in [(&recovered[1], 2), (&recovered[2], 1), (&recovered[3], 0)] {
+            assert!(matches!(
+                slot,
+                Some(RecoveredStmt::Assignment { value: Expression::ArrayAccess(access), .. })
+                    if matches!(&*access.array, Expression::Call(call)
+                        if matches!(&*call.callee, Expression::Identifier(id) if id.name == "getminimenutarget"))
+                        && matches!(&*access.index, Expression::NumberLiteral(crate::transpile::ast::NumberLiteral { value }) if *value == index)
+            ));
+        }
+    }
+
+    #[test]
+    fn noarg_minimenu_commands_emit_call_statements() {
+        let instructions = vec![
+            InstructionNode {
+                index: 0,
+                opcode: 0,
+                command: "defaultminimenu".to_string(),
+                operand: OperandNode::Byte(0),
+            },
+            InstructionNode {
+                index: 1,
+                opcode: 0,
+                command: "minimenu_close".to_string(),
+                operand: OperandNode::Byte(0),
+            },
+        ];
+
+        let recovered = ExprRecovery::new(
+            &instructions,
+            &HashMap::new(),
+            &HashMap::<u32, String>::new(),
+            &HashMap::<i32, String>::new(),
+            &ScriptCatalog::default(),
+            &HashMap::new(),
+        )
+        .recover();
+
+        for (slot, callee) in [
+            (&recovered[0], "defaultminimenu"),
+            (&recovered[1], "minimenuclose"),
+        ] {
+            assert!(matches!(
+                slot,
+                Some(RecoveredStmt::Expression(Expression::Call(call)))
+                    if matches!(&*call.callee, Expression::Identifier(id) if id.name == callee)
+                        && call.arguments.is_empty()
+            ));
+        }
+    }
+
+    #[test]
+    fn window_getinsets_preserves_multivalue_stack_order() {
+        let instructions = vec![
+            InstructionNode {
+                index: 0,
+                opcode: 0,
+                command: "window_getinsets".to_string(),
+                operand: OperandNode::Byte(0),
+            },
+            InstructionNode {
+                index: 1,
+                opcode: 0,
+                command: "pop_int_local".to_string(),
+                operand: OperandNode::Local(0),
+            },
+            InstructionNode {
+                index: 2,
+                opcode: 0,
+                command: "pop_int_local".to_string(),
+                operand: OperandNode::Local(1),
+            },
+            InstructionNode {
+                index: 3,
+                opcode: 0,
+                command: "pop_int_local".to_string(),
+                operand: OperandNode::Local(2),
+            },
+            InstructionNode {
+                index: 4,
+                opcode: 0,
+                command: "pop_int_local".to_string(),
+                operand: OperandNode::Local(3),
+            },
+        ];
+
+        let recovered = ExprRecovery::new(
+            &instructions,
+            &HashMap::new(),
+            &HashMap::<u32, String>::new(),
+            &HashMap::<i32, String>::new(),
+            &ScriptCatalog::default(),
+            &HashMap::new(),
+        )
+        .recover();
+
+        for (slot, index) in [
+            (&recovered[1], 3),
+            (&recovered[2], 2),
+            (&recovered[3], 1),
+            (&recovered[4], 0),
+        ] {
+            assert!(matches!(
+                slot,
+                Some(RecoveredStmt::Assignment { value: Expression::ArrayAccess(access), .. })
+                    if matches!(&*access.array, Expression::Call(call)
+                        if matches!(&*call.callee, Expression::Identifier(id) if id.name == "windowgetinsets"))
+                        && matches!(&*access.index, Expression::NumberLiteral(crate::transpile::ast::NumberLiteral { value }) if *value == index)
+            ));
+        }
+    }
+
+    #[test]
+    fn interface_misc_getters_push_result_expressions() {
+        let instructions = vec![
+            InstructionNode {
+                index: 0,
+                opcode: 0,
+                command: "push_constant_int".to_string(),
+                operand: OperandNode::Int(42),
+            },
+            InstructionNode {
+                index: 1,
+                opcode: 0,
+                command: "if_hassub".to_string(),
+                operand: OperandNode::Byte(0),
+            },
+            InstructionNode {
+                index: 2,
+                opcode: 0,
+                command: "push_constant_int".to_string(),
+                operand: OperandNode::Int(42),
+            },
+            InstructionNode {
+                index: 3,
+                opcode: 0,
+                command: "push_constant_int".to_string(),
+                operand: OperandNode::Int(7),
+            },
+            InstructionNode {
+                index: 4,
+                opcode: 0,
+                command: "if_hassubmodal".to_string(),
+                operand: OperandNode::Byte(0),
+            },
+            InstructionNode {
+                index: 5,
+                opcode: 0,
+                command: "if_get_gamescreen".to_string(),
+                operand: OperandNode::Byte(0),
+            },
+            InstructionNode {
+                index: 6,
+                opcode: 0,
+                command: "return".to_string(),
+                operand: OperandNode::Byte(0),
+            },
+        ];
+
+        let recovered = ExprRecovery::new(
+            &instructions,
+            &HashMap::new(),
+            &HashMap::<u32, String>::new(),
+            &HashMap::<i32, String>::new(),
+            &ScriptCatalog::default(),
+            &HashMap::new(),
+        )
+        .recover();
+
+        assert!(matches!(
+            &recovered[6],
+            Some(RecoveredStmt::Return(Some(Expression::Call(call))))
+                if matches!(&*call.callee, Expression::Identifier(id) if id.name == "UI.GetGamescreen")
+        ));
+        assert!(matches!(&recovered[4], None));
+        assert!(matches!(&recovered[1], None));
+    }
+
+    #[test]
+    fn interface_misc_noarg_commands_emit_call_statements() {
+        let instructions = vec![
+            InstructionNode {
+                index: 0,
+                opcode: 0,
+                command: "if_close".to_string(),
+                operand: OperandNode::Byte(0),
+            },
+            InstructionNode {
+                index: 1,
+                opcode: 0,
+                command: "force_interface_drag".to_string(),
+                operand: OperandNode::Byte(0),
+            },
+            InstructionNode {
+                index: 2,
+                opcode: 0,
+                command: "cancel_interface_drag".to_string(),
+                operand: OperandNode::Byte(0),
+            },
+            InstructionNode {
+                index: 3,
+                opcode: 0,
+                command: "targetmode_cancel".to_string(),
+                operand: OperandNode::Byte(0),
+            },
+        ];
+
+        let recovered = ExprRecovery::new(
+            &instructions,
+            &HashMap::new(),
+            &HashMap::<u32, String>::new(),
+            &HashMap::<i32, String>::new(),
+            &ScriptCatalog::default(),
+            &HashMap::new(),
+        )
+        .recover();
+
+        for (slot, callee) in [
+            (&recovered[0], "UI.Close"),
+            (&recovered[1], "forceinterfacedrag"),
+            (&recovered[2], "cancelinterfacedrag"),
+            (&recovered[3], "targetmodecancel"),
+        ] {
+            assert!(matches!(
+                slot,
+                Some(RecoveredStmt::Expression(Expression::Call(call)))
+                    if matches!(&*call.callee, Expression::Identifier(id) if id.name == callee)
+                        && call.arguments.is_empty()
+            ));
+        }
+    }
+
+    #[test]
+    fn display_helpers_preserve_named_and_indexed_stack_results() {
+        let instructions = vec![
+            InstructionNode {
+                index: 0,
+                opcode: 0,
+                command: "pushCanvasSize".to_string(),
+                operand: OperandNode::Byte(0),
+            },
+            InstructionNode {
+                index: 1,
+                opcode: 0,
+                command: "pop_int_local".to_string(),
+                operand: OperandNode::Local(0),
+            },
+            InstructionNode {
+                index: 2,
+                opcode: 0,
+                command: "pop_int_local".to_string(),
+                operand: OperandNode::Local(1),
+            },
+            InstructionNode {
+                index: 3,
+                opcode: 0,
+                command: "push_constant_int".to_string(),
+                operand: OperandNode::Int(2),
+            },
+            InstructionNode {
+                index: 4,
+                opcode: 0,
+                command: "fullscreen_getmode".to_string(),
+                operand: OperandNode::Byte(0),
+            },
+            InstructionNode {
+                index: 5,
+                opcode: 0,
+                command: "pop_int_local".to_string(),
+                operand: OperandNode::Local(2),
+            },
+            InstructionNode {
+                index: 6,
+                opcode: 0,
+                command: "pop_int_local".to_string(),
+                operand: OperandNode::Local(3),
+            },
+            InstructionNode {
+                index: 7,
+                opcode: 0,
+                command: "push_constant_int".to_string(),
+                operand: OperandNode::Int(9),
+            },
+            InstructionNode {
+                index: 8,
+                opcode: 0,
+                command: "pushFontMetrics".to_string(),
+                operand: OperandNode::Byte(0),
+            },
+            InstructionNode {
+                index: 9,
+                opcode: 0,
+                command: "pop_int_local".to_string(),
+                operand: OperandNode::Local(4),
+            },
+            InstructionNode {
+                index: 10,
+                opcode: 0,
+                command: "pop_int_local".to_string(),
+                operand: OperandNode::Local(5),
+            },
+            InstructionNode {
+                index: 11,
+                opcode: 0,
+                command: "pop_int_local".to_string(),
+                operand: OperandNode::Local(6),
+            },
+            InstructionNode {
+                index: 12,
+                opcode: 0,
+                command: "pop_int_local".to_string(),
+                operand: OperandNode::Local(7),
+            },
+            InstructionNode {
+                index: 13,
+                opcode: 0,
+                command: "pop_int_local".to_string(),
+                operand: OperandNode::Local(8),
+            },
+        ];
+
+        let recovered = ExprRecovery::new(
+            &instructions,
+            &HashMap::new(),
+            &HashMap::<u32, String>::new(),
+            &HashMap::<i32, String>::new(),
+            &ScriptCatalog::default(),
+            &HashMap::new(),
+        )
+        .recover();
+
+        for (slot, callee, property) in [
+            (&recovered[1], "pushCanvasSize", "height"),
+            (&recovered[2], "pushCanvasSize", "width"),
+            (&recovered[5], "fullscreengetmode", "height"),
+            (&recovered[6], "fullscreengetmode", "width"),
+        ] {
+            assert!(matches!(
+                slot,
+                Some(RecoveredStmt::Assignment { value: Expression::PropertyAccess(access), .. })
+                    if access.property == property
+                        && matches!(&*access.object, Expression::Call(call)
+                            if matches!(&*call.callee, Expression::Identifier(id) if id.name == callee))
+            ));
+        }
+
+        for (slot, index) in [
+            (&recovered[9], 4),
+            (&recovered[10], 3),
+            (&recovered[11], 2),
+            (&recovered[12], 1),
+            (&recovered[13], 0),
+        ] {
+            assert!(matches!(
+                slot,
+                Some(RecoveredStmt::Assignment { value: Expression::ArrayAccess(access), .. })
+                    if matches!(&*access.array, Expression::Call(call)
+                        if matches!(&*call.callee, Expression::Identifier(id) if id.name == "pushFontMetrics"))
+                        && matches!(&*access.index, Expression::NumberLiteral(crate::transpile::ast::NumberLiteral { value }) if *value == index)
+            ));
+        }
+    }
+
+    #[test]
+    fn worldlist_helpers_preserve_named_stack_results() {
+        let instructions = vec![
+            InstructionNode {
+                index: 0,
+                opcode: 0,
+                command: "worldlist_start".to_string(),
+                operand: OperandNode::Byte(0),
+            },
+            InstructionNode {
+                index: 1,
+                opcode: 0,
+                command: "pop_string_local".to_string(),
+                operand: OperandNode::Local(0),
+            },
+            InstructionNode {
+                index: 2,
+                opcode: 0,
+                command: "pop_int_local".to_string(),
+                operand: OperandNode::Local(0),
+            },
+            InstructionNode {
+                index: 3,
+                opcode: 0,
+                command: "pop_int_local".to_string(),
+                operand: OperandNode::Local(1),
+            },
+            InstructionNode {
+                index: 4,
+                opcode: 0,
+                command: "pop_string_local".to_string(),
+                operand: OperandNode::Local(1),
+            },
+            InstructionNode {
+                index: 5,
+                opcode: 0,
+                command: "pop_int_local".to_string(),
+                operand: OperandNode::Local(2),
+            },
+            InstructionNode {
+                index: 6,
+                opcode: 0,
+                command: "pop_string_local".to_string(),
+                operand: OperandNode::Local(2),
+            },
+            InstructionNode {
+                index: 7,
+                opcode: 0,
+                command: "pop_int_local".to_string(),
+                operand: OperandNode::Local(3),
+            },
+            InstructionNode {
+                index: 8,
+                opcode: 0,
+                command: "pop_int_local".to_string(),
+                operand: OperandNode::Local(4),
+            },
+            InstructionNode {
+                index: 9,
+                opcode: 0,
+                command: "push_constant_int".to_string(),
+                operand: OperandNode::Int(302),
+            },
+            InstructionNode {
+                index: 10,
+                opcode: 0,
+                command: "worldlist_specific".to_string(),
+                operand: OperandNode::Byte(0),
+            },
+            InstructionNode {
+                index: 11,
+                opcode: 0,
+                command: "pop_string_local".to_string(),
+                operand: OperandNode::Local(3),
+            },
+            InstructionNode {
+                index: 12,
+                opcode: 0,
+                command: "pop_int_local".to_string(),
+                operand: OperandNode::Local(5),
+            },
+            InstructionNode {
+                index: 13,
+                opcode: 0,
+                command: "pop_int_local".to_string(),
+                operand: OperandNode::Local(6),
+            },
+            InstructionNode {
+                index: 14,
+                opcode: 0,
+                command: "pop_string_local".to_string(),
+                operand: OperandNode::Local(4),
+            },
+            InstructionNode {
+                index: 15,
+                opcode: 0,
+                command: "pop_int_local".to_string(),
+                operand: OperandNode::Local(7),
+            },
+            InstructionNode {
+                index: 16,
+                opcode: 0,
+                command: "pop_string_local".to_string(),
+                operand: OperandNode::Local(5),
+            },
+            InstructionNode {
+                index: 17,
+                opcode: 0,
+                command: "pop_int_local".to_string(),
+                operand: OperandNode::Local(8),
+            },
+        ];
+
+        let recovered = ExprRecovery::new(
+            &instructions,
+            &HashMap::new(),
+            &HashMap::<u32, String>::new(),
+            &HashMap::<i32, String>::new(),
+            &ScriptCatalog::default(),
+            &HashMap::new(),
+        )
+        .recover();
+
+        for (slot, callee, property) in [
+            (&recovered[1], "worldliststart", "host"),
+            (&recovered[2], "worldliststart", "ping"),
+            (&recovered[3], "worldliststart", "players"),
+            (&recovered[4], "worldliststart", "countryName"),
+            (&recovered[5], "worldliststart", "countryId"),
+            (&recovered[6], "worldliststart", "activity"),
+            (&recovered[7], "worldliststart", "flags"),
+            (&recovered[8], "worldliststart", "id"),
+        ] {
+            assert!(matches!(
+                slot,
+                Some(RecoveredStmt::Assignment { value: Expression::PropertyAccess(access), .. })
+                    if access.property == property
+                        && matches!(&*access.object, Expression::Call(call)
+                            if matches!(&*call.callee, Expression::Identifier(id) if id.name == callee)
+                                && call.arguments.is_empty())
+            ));
+        }
+
+        for (slot, property) in [
+            (&recovered[11], "host"),
+            (&recovered[12], "ping"),
+            (&recovered[13], "players"),
+            (&recovered[14], "countryName"),
+            (&recovered[15], "countryId"),
+            (&recovered[16], "activity"),
+            (&recovered[17], "flags"),
+        ] {
+            assert!(matches!(
+                slot,
+                Some(RecoveredStmt::Assignment { value: Expression::PropertyAccess(access), .. })
+                    if access.property == property
+                        && matches!(&*access.object, Expression::Call(call)
+                            if matches!(&*call.callee, Expression::Identifier(id) if id.name == "worldlistspecific")
+                                && matches!(call.arguments.as_slice(), [Expression::NumberLiteral(crate::transpile::ast::NumberLiteral { value: 302 })]))
+            ));
+        }
+    }
+
+    #[test]
+    fn if_getnextsubid_pushes_ui_getter_expression() {
+        let instructions = vec![
+            InstructionNode {
+                index: 0,
+                opcode: 0,
+                command: "push_constant_int".to_string(),
+                operand: OperandNode::Int(42),
+            },
+            InstructionNode {
+                index: 1,
+                opcode: 0,
+                command: "if_getnextsubid".to_string(),
+                operand: OperandNode::Byte(0),
+            },
+            InstructionNode {
+                index: 2,
+                opcode: 0,
+                command: "return".to_string(),
+                operand: OperandNode::Byte(0),
+            },
+        ];
+
+        let recovered = ExprRecovery::new(
+            &instructions,
+            &HashMap::new(),
+            &HashMap::<u32, String>::new(),
+            &HashMap::<i32, String>::new(),
+            &ScriptCatalog::default(),
+            &HashMap::new(),
+        )
+        .recover();
+
+        assert!(matches!(
+            &recovered[2],
+            Some(RecoveredStmt::Return(Some(Expression::Call(call))))
+                if matches!(&*call.callee, Expression::Identifier(id) if id.name == "UI.GetNextSubid")
+        ));
     }
 }

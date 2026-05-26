@@ -1,0 +1,5 @@
+385,typed_constant
+421,short_byte
+924,byte_short_byte
+981,short_byte
+1460,byte_short_byte

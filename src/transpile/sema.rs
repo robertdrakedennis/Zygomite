@@ -169,6 +169,7 @@ impl Sema {
                     self.analyze_expression(arg);
                 }
             }
+            Expression::CallbackLiteral(_) => {}
             Expression::BinaryOperation(bin) => {
                 self.analyze_expression(&mut bin.left);
                 self.analyze_expression(&mut bin.right);

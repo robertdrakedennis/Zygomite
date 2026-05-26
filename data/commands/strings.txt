@@ -35,3 +35,4 @@
 [command,lowercase](string $x1)(string)
 [command,urlencode](string $x1)(string)
 [command,unknown_command_37](fontmetrics $x1)(int,int,int,int,int)
+[command,pushFontMetrics](fontmetrics $x1)(int,int,int,int,int) 910

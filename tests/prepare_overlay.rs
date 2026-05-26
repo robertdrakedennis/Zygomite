@@ -8,7 +8,7 @@ fn default_cache_dir() -> PathBuf {
 }
 
 fn default_data_dir() -> PathBuf {
-    PathBuf::from("/Users/robert/projects/alerion/tools/zwyz-rs3-cache/data")
+    PathBuf::from("/Users/robert/projects/alerion/tools/rs3-cache-rs/data")
 }
 
 fn cache_dir() -> PathBuf {

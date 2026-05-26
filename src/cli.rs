@@ -13,13 +13,13 @@ use crate::config::{
 };
 use crate::constants::{
     ARCHIVE_ACHIEVEMENTS, ARCHIVE_ANIMATOR, ARCHIVE_BILLBOARDS, ARCHIVE_BINARY,
-    ARCHIVE_CLIENTSCRIPTS, ARCHIVE_CONFIG, ARCHIVE_CUTSCENE2D, ARCHIVE_DEFAULTS,
-    ARCHIVE_ENUM_CONFIG, ARCHIVE_FONTMETRICS, ARCHIVE_INTERFACES, ARCHIVE_LOC_CONFIG,
-    ARCHIVE_MAPSQUARES, ARCHIVE_MATERIALS, ARCHIVE_MODELS_RT7, ARCHIVE_NPC_CONFIG,
-    ARCHIVE_OBJ_CONFIG, ARCHIVE_PARTICLES, ARCHIVE_QUICKCHAT_CONFIG, ARCHIVE_SEQ_CONFIG,
-    ARCHIVE_SPOT_CONFIG, ARCHIVE_STRUCT_CONFIG, ARCHIVE_STYLESHEETS, ARCHIVE_TEXTURES, ARCHIVE_TTF,
-    ARCHIVE_UI_ANIM, ARCHIVE_VFX, ARCHIVE_WORLDMAP, AUDIO_ARCHIVES, BUILD,
-    CONFIG_GROUP_ACHIEVEMENT_ARCHIVE57, CONFIG_GROUP_AREA, CONFIG_GROUP_BAS,
+    ARCHIVE_CHUNK_INSTANCES, ARCHIVE_CLIENTSCRIPTS, ARCHIVE_CONFIG, ARCHIVE_CUTSCENE2D,
+    ARCHIVE_DEFAULTS, ARCHIVE_ENUM_CONFIG, ARCHIVE_FONTMETRICS, ARCHIVE_INTERFACES,
+    ARCHIVE_LOC_CONFIG, ARCHIVE_MAPSQUARES, ARCHIVE_MATERIALS, ARCHIVE_MODELS_RT7,
+    ARCHIVE_NPC_CONFIG, ARCHIVE_OBJ_CONFIG, ARCHIVE_PARTICLES, ARCHIVE_QUICKCHAT_CONFIG,
+    ARCHIVE_SEQ_CONFIG, ARCHIVE_SPOT_CONFIG, ARCHIVE_STRUCT_CONFIG, ARCHIVE_STYLESHEETS,
+    ARCHIVE_TEXTURES, ARCHIVE_TTF, ARCHIVE_UI_ANIM, ARCHIVE_VFX, ARCHIVE_WORLDMAP, AUDIO_ARCHIVES,
+    BUILD, CONFIG_GROUP_ACHIEVEMENT_ARCHIVE57, CONFIG_GROUP_AREA, CONFIG_GROUP_BAS,
     CONFIG_GROUP_BILLBOARD_ARCHIVE29, CONFIG_GROUP_BUGTEMPLATE, CONFIG_GROUP_CATEGORY,
     CONFIG_GROUP_CONTROLLER, CONFIG_GROUP_CURSOR, CONFIG_GROUP_DBROW, CONFIG_GROUP_DBTABLE,
     CONFIG_GROUP_GAMELOGEVENT, CONFIG_GROUP_HEADBAR, CONFIG_GROUP_HITMARK, CONFIG_GROUP_HUNT,
@@ -43,7 +43,7 @@ use crate::cutscene2d::decode as decode_cutscene2d;
 use crate::dep_tree::{EntityRef, EntityType, ResolverContext, build_tree};
 use crate::fixture::{default_tar_path, ensure_archive_complete, open_cache};
 use crate::interface::render_interface_group;
-use crate::map::{decode_map_square, decode_map_square_best_effort};
+use crate::map::{decode_chunk_instance_stream, decode_map_square, decode_map_square_best_effort};
 use crate::model::Model;
 use crate::script::{
     CompiledScript, Instruction, MIN_SCRIPT_BUILD, OpcodeBook, Operand, decode_script,
@@ -59,6 +59,7 @@ use serde::Serialize;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Write;
 use std::fs;
+use std::io::{BufWriter, Write as IoWrite};
 use std::path::{Path, PathBuf};
 
 #[derive(Parser, Debug)]
@@ -69,7 +70,7 @@ pub struct Cli {
     pub cache_dir: Option<PathBuf>,
     #[arg(long)]
     pub cache_tar: Option<PathBuf>,
-    #[arg(long, default_value = "../rs3-cache/data")]
+    #[arg(long, default_value = "data")]
     pub data_dir: PathBuf,
     #[arg(long, default_value_t = BUILD)]
     pub build: u32,
@@ -190,6 +191,15 @@ pub enum Command {
         /// Transpile every script in the cache (ignores max-scripts cap).
         #[arg(long)]
         all_scripts: bool,
+        /// Guard compiled script byte size during transpile (`0` disables limit).
+        #[arg(long, default_value_t = crate::transpile::DEFAULT_MAX_TRANSPILE_SCRIPT_BYTES)]
+        max_script_bytes: usize,
+        /// Guard decoded instruction count during transpile (`0` disables limit).
+        #[arg(long, default_value_t = crate::transpile::DEFAULT_MAX_TRANSPILE_INSTRUCTIONS)]
+        max_script_instructions: usize,
+        /// Guard generated TypeScript size during transpile (`0` disables limit).
+        #[arg(long, default_value_t = crate::transpile::DEFAULT_MAX_TRANSPILE_GENERATED_BYTES)]
+        max_generated_bytes: usize,
     },
     MigrateCheck {
         #[arg(long)]
@@ -742,6 +752,9 @@ pub fn run(cli: Cli) -> Result<()> {
             filter_script,
             max_scripts,
             all_scripts,
+            max_script_bytes,
+            max_script_instructions,
+            max_generated_bytes,
         } => run_transpile_scripts(
             &cache,
             &tar_path,
@@ -750,6 +763,11 @@ pub fn run(cli: Cli) -> Result<()> {
             filter_script.as_deref(),
             max_scripts,
             all_scripts,
+            crate::transpile::TranspileLimits {
+                max_script_bytes,
+                max_instructions: max_script_instructions,
+                max_generated_bytes,
+            },
             version,
         ),
         Command::MigrateCheck {
@@ -2044,6 +2062,13 @@ fn run_top_level_exports(
         best_effort_maps,
     )
     .context("export mapsquares")?;
+    export_chunk_instances_json(
+        cache,
+        tar_path,
+        &out_dir.join("chunk-instances"),
+        best_effort_maps,
+    )
+    .context("export chunk instances")?;
     export_defaults_text(
         cache,
         tar_path,
@@ -2275,9 +2300,46 @@ fn export_mapsquares_json(
         let decoded = if best_effort {
             decode_map_square_best_effort(&files, build)
         } else {
-            decode_map_square(&files, build)?
+            decode_map_square(&files, build).with_context(|| {
+                format!("decode mapsquare group {group} ({square_x}_{square_z})")
+            })?
         };
         let path = out_dir.join(format!("{square_x}_{square_z}.json"));
+        write_json(&path, &decoded)?;
+        count += 1;
+    }
+
+    Ok(count)
+}
+
+fn export_chunk_instances_json(
+    cache: &FlatCache,
+    tar_path: &Path,
+    out_dir: &Path,
+    best_effort: bool,
+) -> Result<usize> {
+    if ensure_archive_complete(cache.root(), tar_path, ARCHIVE_CHUNK_INSTANCES).is_err() {
+        return Ok(0);
+    }
+    fs::create_dir_all(out_dir)
+        .with_context(|| format!("failed creating {}", out_dir.display()))?;
+
+    let index = cache.archive_index(ARCHIVE_CHUNK_INSTANCES)?;
+    let mut count = 0_usize;
+    for group in &index.group_id {
+        let files = cache.group_files_with_index(&index, ARCHIVE_CHUNK_INSTANCES, *group)?;
+        let Some(data) = files.get(&0) else {
+            continue;
+        };
+        let decoded = match decode_chunk_instance_stream(data) {
+            Ok(decoded) => decoded,
+            Err(err) if best_effort => {
+                eprintln!("chunk instance decode warning group {group}: {err}");
+                continue;
+            }
+            Err(err) => return Err(err).with_context(|| format!("decode chunk instance {group}")),
+        };
+        let path = out_dir.join(format!("{group}.json"));
         write_json(&path, &decoded)?;
         count += 1;
     }
@@ -3418,6 +3480,74 @@ fn load_script_group_names_from_cache(
     load_script_group_names(&index, data_dir)
 }
 
+fn export_script_signatures_from_cache(
+    cache: &FlatCache,
+    tar_path: &Path,
+    out_dir: &Path,
+    opcode_book: &OpcodeBook,
+    build: u32,
+    group_names: &HashMap<u32, String>,
+) -> Result<()> {
+    let mut lines = vec![
+        "// Auto-generated CS2 script signatures".to_string(),
+        "// Source: RS3 cache clientscript archive".to_string(),
+        String::new(),
+    ];
+    let mut entries: Vec<(String, String)> = Vec::new();
+
+    if crate::fixture::ensure_archive_complete(cache.root(), tar_path, ARCHIVE_CLIENTSCRIPTS)
+        .is_err()
+    {
+        return write_lines(&out_dir.join("scripts.d.ts"), lines);
+    }
+
+    let cache2 = FlatCache::open(cache.root())?;
+    let index = cache2.archive_index(ARCHIVE_CLIENTSCRIPTS)?;
+    for group in &index.group_id {
+        let files = cache2.group_files_with_index(&index, ARCHIVE_CLIENTSCRIPTS, *group)?;
+        for (file, data) in files {
+            let script_id_raw = (group << 16) | file;
+            let script_id = crate::transpile::ScriptId(script_id_raw as i32);
+            let Ok(script) = decode_script(&data, opcode_book, build) else {
+                continue;
+            };
+            let display_name = script
+                .name
+                .as_deref()
+                .map(crate::transpile::extract_script_name_suffix)
+                .filter(|name| !name.is_empty())
+                .or_else(|| group_names.get(group).cloned());
+            let function_name =
+                crate::transpile::script_function_name(script_id, display_name.as_deref());
+            let mut arg_types: Vec<&str> = Vec::new();
+            arg_types.extend(std::iter::repeat_n(
+                "number",
+                script.argument_count_int as usize,
+            ));
+            arg_types.extend(std::iter::repeat_n(
+                "string",
+                script.argument_count_object as usize,
+            ));
+            arg_types.extend(std::iter::repeat_n(
+                "bigint",
+                script.argument_count_long as usize,
+            ));
+            let args = (0..arg_types.len())
+                .map(|index| format!("arg{index}: {}", arg_types[index]))
+                .collect::<Vec<_>>()
+                .join(", ");
+            entries.push((
+                function_name.clone(),
+                format!("export function {function_name}({args}): unknown;"),
+            ));
+        }
+    }
+
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+    lines.extend(entries.into_iter().map(|(_, line)| line));
+    write_lines(&out_dir.join("scripts.d.ts"), lines)
+}
+
 fn load_hash_name_map(path: &Path) -> Result<HashMap<i32, String>> {
     let content =
         fs::read_to_string(path).with_context(|| format!("failed reading {}", path.display()))?;
@@ -3478,6 +3608,64 @@ fn write_text(path: &Path, text: &str) -> Result<()> {
             .with_context(|| format!("failed creating {}", parent.display()))?;
     }
     fs::write(path, text).with_context(|| format!("failed writing {}", path.display()))
+}
+
+fn write_lines(path: &Path, lines: Vec<String>) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed creating {}", parent.display()))?;
+    }
+
+    let file =
+        fs::File::create(path).with_context(|| format!("failed writing {}", path.display()))?;
+    let mut writer = BufWriter::new(file);
+    for (index, line) in lines.iter().enumerate() {
+        if index != 0 {
+            writer.write_all(b"\n")?;
+        }
+        writer.write_all(line.as_bytes())?;
+    }
+    writer
+        .flush()
+        .with_context(|| format!("failed writing {}", path.display()))
+}
+
+struct TextFileWriter {
+    path: PathBuf,
+    writer: BufWriter<fs::File>,
+    wrote_line: bool,
+}
+
+impl TextFileWriter {
+    fn create(path: &Path) -> Result<Self> {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("failed creating {}", parent.display()))?;
+        }
+
+        let file =
+            fs::File::create(path).with_context(|| format!("failed writing {}", path.display()))?;
+        Ok(Self {
+            path: path.to_path_buf(),
+            writer: BufWriter::new(file),
+            wrote_line: false,
+        })
+    }
+
+    fn line(&mut self, line: impl AsRef<str>) -> Result<()> {
+        if self.wrote_line {
+            self.writer.write_all(b"\n")?;
+        }
+        self.writer.write_all(line.as_ref().as_bytes())?;
+        self.wrote_line = true;
+        Ok(())
+    }
+
+    fn finish(mut self) -> Result<()> {
+        self.writer
+            .flush()
+            .with_context(|| format!("failed writing {}", self.path.display()))
+    }
 }
 
 fn write_json<T: Serialize>(path: &Path, data: &T) -> Result<()> {
@@ -4029,8 +4217,14 @@ fn run_ts_export(
     out_dir: &Path,
     version: RuntimeVersion,
 ) -> Result<()> {
-    let ctx = ResolverContext::load(cache, tar_path, data_dir, version.build, version.subbuild)?;
-    let opcode_book = OpcodeBook::load(data_dir, version.build, version.subbuild)?;
+    let ctx = ResolverContext::load_ts_export(
+        cache,
+        tar_path,
+        data_dir,
+        version.build,
+        version.subbuild,
+    )?;
+    let opcode_book = ctx.opcode_book.clone();
     let script_group_names = load_script_group_names_from_cache(cache, data_dir)?;
     fs::create_dir_all(out_dir)?;
 
@@ -4048,8 +4242,9 @@ fn run_ts_export(
     export_spot_types(&ctx, out_dir)?;
     export_named_config_ids(&ctx, out_dir)?;
     export_db_types(&ctx, out_dir)?;
-    export_script_signatures(
-        &ctx,
+    export_script_signatures_from_cache(
+        cache,
+        tar_path,
         out_dir,
         &opcode_book,
         version.build,
@@ -4073,22 +4268,51 @@ fn run_transpile_scripts(
     filter_script: Option<&str>,
     max_scripts: usize,
     all_scripts: bool,
+    limits: crate::transpile::TranspileLimits,
     version: RuntimeVersion,
 ) -> Result<()> {
-    let ctx = ResolverContext::load(cache, tar_path, data_dir, version.build, version.subbuild)?;
+    if let Some(filter) = filter_script
+        && !all_scripts
+    {
+        return run_filtered_transpile_scripts(
+            cache,
+            tar_path,
+            data_dir,
+            out_dir,
+            filter,
+            max_scripts,
+            limits,
+            version,
+        );
+    }
 
-    let opcode_book = OpcodeBook::load(data_dir, version.build, version.subbuild)?;
+    let types_exist = out_dir.join("index.ts").exists();
+    let mut ctx = if types_exist {
+        ResolverContext::load_transpile(cache, tar_path, data_dir, version.build, version.subbuild)?
+    } else {
+        ResolverContext::load_lazy(cache, tar_path, data_dir, version.build, version.subbuild)?
+    };
+    let opcode_book = ctx.opcode_book.clone();
     let script_group_names = load_script_group_names_from_cache(cache, data_dir)?;
+    let mut script_catalog_builder = crate::transpile::ScriptCatalogBuilder::new(
+        &script_group_names,
+        &opcode_book,
+        version.build,
+    )
+    .without_return_types();
+    for (&packed_id_raw, data) in &ctx.scripts {
+        script_catalog_builder.add_script(packed_id_raw, data);
+    }
+    let script_catalog = script_catalog_builder.build();
 
-    let transpiler = Transpiler::new()
+    let mut transpiler = Transpiler::new()
         .with_enums(&ctx.enums)
         .with_enums_map(&ctx.enums)
         .with_vars(&ctx.varps_by_domain)
         .with_varbits(&ctx.varbits)
         .with_params(&ctx.params)
-        .with_script_names(&ctx.scripts, &opcode_book, version.build)
-        .with_script_group_names(&ctx.scripts, &script_group_names)
-        .with_script_signatures(&ctx.scripts, &opcode_book, version.build)
+        .with_limits(limits)
+        .with_script_catalog(script_catalog.clone())
         .with_components(&ctx.parsed_components);
 
     fs::create_dir_all(out_dir)?;
@@ -4109,24 +4333,29 @@ fn run_transpile_scripts(
         export_spot_types(&ctx, out_dir)?;
         export_named_config_ids(&ctx, out_dir)?;
         export_db_types(&ctx, out_dir)?;
-        export_script_signatures(
-            &ctx,
-            out_dir,
-            &opcode_book,
-            version.build,
-            &script_group_names,
-        )?;
+        export_script_signatures(out_dir, &script_catalog)?;
         export_index(out_dir)?;
     }
 
-    let script_limit = if all_scripts { usize::MAX } else { max_scripts };
+    trim_transpile_runtime_context(&mut ctx);
 
+    let script_limit = if all_scripts { usize::MAX } else { max_scripts };
+    let trace_transpile = std::env::var_os("RS3_TRANSPILE_TRACE").is_some();
+
+    let mut signature_cache = HashMap::new();
     let mut script_count = 0;
     let mut errors = 0;
     let mut barrel_exports: Vec<String> = Vec::new();
+    let mut script_diagnostics = Vec::new();
 
     for (&script_id_raw, data) in &ctx.scripts {
         let script_id = crate::transpile::ScriptId(script_id_raw as i32);
+        if trace_transpile {
+            let script_name = transpiler
+                .script_name_for(script_id)
+                .unwrap_or_else(|| format!("script{script_id}"));
+            eprintln!("trace: transpile script_{script_id_raw} {script_name}");
+        }
 
         if let Some(filter) = filter_script {
             let name = transpiler.script_name_for(script_id);
@@ -4135,20 +4364,79 @@ fn run_transpile_scripts(
             }
         }
 
-        match transpiler.transpile_from_bytes(data, &opcode_book, version.build, script_id) {
+        let script = match decode_script(data, &opcode_book, version.build) {
+            Ok(script) => script,
+            Err(err) => {
+                eprintln!("failed to decode script_{script_id}: {err}");
+                errors += 1;
+                continue;
+            }
+        };
+        for referenced_script in collect_referenced_scripts(&script) {
+            let Some(metadata) = script_catalog.resolve_call_target(referenced_script.0) else {
+                continue;
+            };
+            let Some(target_data) = ctx.scripts.get(&(metadata.packed_id.0 as u32)) else {
+                continue;
+            };
+            ensure_transpile_script_signature_from_bytes(
+                &mut signature_cache,
+                &mut transpiler,
+                &script_catalog,
+                metadata.packed_id,
+                target_data,
+                &opcode_book,
+                version.build,
+            );
+        }
+        ensure_transpile_script_signature(
+            &mut signature_cache,
+            &mut transpiler,
+            &script_catalog,
+            script_id,
+            &script,
+            version.build,
+        );
+
+        match transpiler.transpile(&script, script_id) {
             Ok(ts) => {
+                let crate::transpile::TranspiledScript {
+                    source,
+                    diagnostics,
+                    ..
+                } = ts;
                 let script_name = transpiler
                     .script_name_for(script_id)
-                    .unwrap_or_else(|| format!("script_{script_id}"));
-                let function_name =
-                    crate::transpile::script_function_name(script_id, Some(&script_name));
+                    .unwrap_or_else(|| format!("script{script_id}"));
+                let function_name = script_name.clone();
                 let filename = format!("{}.ts", sanitize_file_component(&script_name));
                 let out_path = out_dir.join(&filename);
-                fs::write(&out_path, &ts.source)?;
+                fs::write(&out_path, &source)?;
                 barrel_exports.push(format!(
                     "export {{ {function_name} }} from './{filename_no_ext}';",
                     filename_no_ext = filename.trim_end_matches(".ts")
                 ));
+                let mut diagnostics = diagnostics;
+                if let Some(metadata) = script_catalog.get(script_id) {
+                    let base_name = script_base_export_name(metadata);
+                    if metadata.export_name != base_name {
+                        diagnostics.warning(format!(
+                            "ambiguous export name '{}' resolved to '{}'",
+                            base_name, metadata.export_name
+                        ));
+                    }
+                }
+                if !diagnostics.is_empty()
+                    && let Some(metadata) = script_catalog.get(script_id)
+                {
+                    script_diagnostics.push(ScriptDiagnosticsEntry {
+                        packed_id: metadata.packed_id.0,
+                        group_id: metadata.group_id.0,
+                        export_name: metadata.export_name.clone(),
+                        module_name: metadata.module_name.clone(),
+                        diagnostics: diagnostics.diagnostics,
+                    });
+                }
                 script_count += 1;
                 if script_count >= script_limit {
                     break;
@@ -4173,11 +4461,499 @@ fn run_transpile_scripts(
         write_text(&out_dir.join("scripts.ts"), &lines.join("\n"))?;
     }
 
+    write_transpile_diagnostics_report(out_dir, version.build, Vec::new(), script_diagnostics)?;
+
     eprintln!(
         "transpiled {script_count} scripts ({errors} errors) to {}",
         out_dir.display()
     );
     Ok(())
+}
+
+struct LoadedScript {
+    packed_id: u32,
+    script: CompiledScript,
+    data: Vec<u8>,
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "filtered transpile path needs CLI/runtime inputs and cache helpers"
+)]
+fn run_filtered_transpile_scripts(
+    cache: &FlatCache,
+    tar_path: &Path,
+    data_dir: &Path,
+    out_dir: &Path,
+    filter_script: &str,
+    max_scripts: usize,
+    limits: crate::transpile::TranspileLimits,
+    version: RuntimeVersion,
+) -> Result<()> {
+    let types_exist = out_dir.join("index.ts").exists();
+    let ctx = if types_exist {
+        ResolverContext::load_transpile(cache, tar_path, data_dir, version.build, version.subbuild)?
+    } else {
+        ResolverContext::load_ts_export(cache, tar_path, data_dir, version.build, version.subbuild)?
+    };
+    let opcode_book = ctx.opcode_book.clone();
+    let script_group_names = load_script_group_names_from_cache(cache, data_dir)?;
+    let script_archive = FlatCache::open(cache.root())?;
+    let script_index = script_archive.archive_index(ARCHIVE_CLIENTSCRIPTS)?;
+    let selected_scripts = load_matching_scripts_from_cache(
+        &script_archive,
+        &script_index,
+        &opcode_book,
+        version.build,
+        &script_group_names,
+        filter_script,
+        max_scripts,
+    )?;
+
+    fs::create_dir_all(out_dir)?;
+    if !types_exist {
+        export_var_types(&ctx, out_dir)?;
+        export_varbit_types(&ctx, out_dir)?;
+        export_enum_types(&ctx, out_dir)?;
+        export_param_types(&ctx, out_dir)?;
+        export_interface_ids(&ctx, out_dir)?;
+        export_inv_types(&ctx, out_dir)?;
+        export_obj_types(&ctx, out_dir)?;
+        export_npc_types(&ctx, out_dir)?;
+        export_loc_types(&ctx, out_dir)?;
+        export_seq_types(&ctx, out_dir)?;
+        export_spot_types(&ctx, out_dir)?;
+        export_named_config_ids(&ctx, out_dir)?;
+        export_db_types(&ctx, out_dir)?;
+        export_script_signatures_from_cache(
+            cache,
+            tar_path,
+            out_dir,
+            &opcode_book,
+            version.build,
+            &script_group_names,
+        )?;
+        export_index(out_dir)?;
+    }
+
+    let mut script_data = BTreeMap::new();
+    let mut script_catalog_builder = crate::transpile::ScriptCatalogBuilder::new(
+        &script_group_names,
+        &opcode_book,
+        version.build,
+    )
+    .without_return_types();
+    for loaded in &selected_scripts {
+        script_data.insert(loaded.packed_id, loaded.data.clone());
+        script_catalog_builder.add_script(loaded.packed_id, &loaded.data);
+    }
+    for loaded in &selected_scripts {
+        for referenced_script in collect_referenced_scripts(&loaded.script) {
+            let raw_id = referenced_script.0;
+            let Some((packed_id, data)) =
+                load_script_call_target_from_cache(&script_archive, &script_index, raw_id)?
+            else {
+                continue;
+            };
+            if script_data.contains_key(&packed_id) {
+                continue;
+            }
+            script_catalog_builder.add_script(packed_id, &data);
+            script_data.insert(packed_id, data);
+        }
+    }
+    let script_catalog = script_catalog_builder.build();
+
+    let mut transpiler = Transpiler::new()
+        .with_enums(&ctx.enums)
+        .with_enums_map(&ctx.enums)
+        .with_vars(&ctx.varps_by_domain)
+        .with_varbits(&ctx.varbits)
+        .with_params(&ctx.params)
+        .with_limits(limits)
+        .with_script_catalog(script_catalog.clone())
+        .with_components(&ctx.parsed_components);
+
+    let mut signature_cache = HashMap::new();
+    let mut script_count = 0;
+    let mut errors = 0;
+    let mut barrel_exports: Vec<String> = Vec::new();
+    let mut script_diagnostics = Vec::new();
+
+    for loaded in &selected_scripts {
+        let script_id = crate::transpile::ScriptId(loaded.packed_id as i32);
+        for referenced_script in collect_referenced_scripts(&loaded.script) {
+            let Some(metadata) = script_catalog.resolve_call_target(referenced_script.0) else {
+                continue;
+            };
+            let Some(target_data) = script_data.get(&(metadata.packed_id.0 as u32)) else {
+                continue;
+            };
+            ensure_transpile_script_signature_from_bytes(
+                &mut signature_cache,
+                &mut transpiler,
+                &script_catalog,
+                metadata.packed_id,
+                target_data,
+                &opcode_book,
+                version.build,
+            );
+        }
+        ensure_transpile_script_signature(
+            &mut signature_cache,
+            &mut transpiler,
+            &script_catalog,
+            script_id,
+            &loaded.script,
+            version.build,
+        );
+
+        match transpiler.transpile(&loaded.script, script_id) {
+            Ok(ts) => {
+                let crate::transpile::TranspiledScript {
+                    source,
+                    diagnostics,
+                    ..
+                } = ts;
+                let script_name = transpiler
+                    .script_name_for(script_id)
+                    .unwrap_or_else(|| format!("script{script_id}"));
+                let function_name = script_name.clone();
+                let filename = format!("{}.ts", sanitize_file_component(&script_name));
+                let out_path = out_dir.join(&filename);
+                fs::write(&out_path, &source)?;
+                barrel_exports.push(format!(
+                    "export {{ {function_name} }} from './{filename_no_ext}';",
+                    filename_no_ext = filename.trim_end_matches(".ts")
+                ));
+                let mut diagnostics = diagnostics;
+                if let Some(metadata) = script_catalog.get(script_id) {
+                    let base_name = script_base_export_name(metadata);
+                    if metadata.export_name != base_name {
+                        diagnostics.warning(format!(
+                            "ambiguous export name '{}' resolved to '{}'",
+                            base_name, metadata.export_name
+                        ));
+                    }
+                }
+                if !diagnostics.is_empty()
+                    && let Some(metadata) = script_catalog.get(script_id)
+                {
+                    script_diagnostics.push(ScriptDiagnosticsEntry {
+                        packed_id: metadata.packed_id.0,
+                        group_id: metadata.group_id.0,
+                        export_name: metadata.export_name.clone(),
+                        module_name: metadata.module_name.clone(),
+                        diagnostics: diagnostics.diagnostics,
+                    });
+                }
+                script_count += 1;
+            }
+            Err(err) => {
+                eprintln!("failed to transpile script_{script_id}: {err}");
+                errors += 1;
+            }
+        }
+    }
+
+    if !barrel_exports.is_empty() {
+        barrel_exports.sort();
+        let mut lines = vec![
+            "// Auto-generated scripts barrel".to_string(),
+            "// Source: RS3 cache transpile-scripts".to_string(),
+            String::new(),
+        ];
+        lines.extend(barrel_exports);
+        write_text(&out_dir.join("scripts.ts"), &lines.join("\n"))?;
+    }
+
+    write_transpile_diagnostics_report(out_dir, version.build, Vec::new(), script_diagnostics)?;
+
+    eprintln!(
+        "transpiled {script_count} scripts ({errors} errors) to {}",
+        out_dir.display()
+    );
+    Ok(())
+}
+
+fn load_matching_scripts_from_cache<S: std::hash::BuildHasher + Clone>(
+    cache: &FlatCache,
+    index: &crate::js5::ArchiveIndex,
+    opcode_book: &OpcodeBook,
+    build: u32,
+    group_names: &HashMap<u32, String, S>,
+    filter_script: &str,
+    max_scripts: usize,
+) -> Result<Vec<LoadedScript>> {
+    let mut selected = Vec::new();
+    let mut seen_groups = HashSet::new();
+    let mut preferred_groups: Vec<u32> = group_names
+        .iter()
+        .filter(|(_, name)| name.contains(filter_script))
+        .map(|(&group, _)| group)
+        .collect();
+    preferred_groups.sort_unstable();
+    preferred_groups.dedup();
+
+    load_matching_scripts_from_groups(
+        cache,
+        index,
+        opcode_book,
+        build,
+        group_names,
+        filter_script,
+        max_scripts,
+        &preferred_groups,
+        &mut seen_groups,
+        &mut selected,
+    )?;
+    if selected.len() < max_scripts {
+        load_matching_scripts_from_groups(
+            cache,
+            index,
+            opcode_book,
+            build,
+            group_names,
+            filter_script,
+            max_scripts,
+            &index.group_id,
+            &mut seen_groups,
+            &mut selected,
+        )?;
+    }
+    Ok(selected)
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "group scan needs filter and output accumulators"
+)]
+fn load_matching_scripts_from_groups<S: std::hash::BuildHasher + Clone>(
+    cache: &FlatCache,
+    index: &crate::js5::ArchiveIndex,
+    opcode_book: &OpcodeBook,
+    build: u32,
+    group_names: &HashMap<u32, String, S>,
+    filter_script: &str,
+    max_scripts: usize,
+    groups: &[u32],
+    seen_groups: &mut HashSet<u32>,
+    selected: &mut Vec<LoadedScript>,
+) -> Result<()> {
+    for &group in groups {
+        if selected.len() >= max_scripts || !seen_groups.insert(group) {
+            continue;
+        }
+        let files = cache.group_files_with_index(index, ARCHIVE_CLIENTSCRIPTS, group)?;
+        for (file, data) in files {
+            let packed_id = (group << 16) | file;
+            let Ok(script) = decode_script(&data, opcode_book, build) else {
+                continue;
+            };
+            let script_id = crate::transpile::ScriptId(packed_id as i32);
+            let display_name = script
+                .name
+                .as_deref()
+                .map(crate::transpile::extract_script_name_suffix)
+                .filter(|name| !name.is_empty())
+                .or_else(|| group_names.get(&group).cloned());
+            let function_name =
+                crate::transpile::script_function_name(script_id, display_name.as_deref());
+            if function_name.contains(filter_script)
+                || display_name
+                    .as_deref()
+                    .is_some_and(|name| name.contains(filter_script))
+            {
+                selected.push(LoadedScript {
+                    packed_id,
+                    script,
+                    data,
+                });
+                if selected.len() >= max_scripts {
+                    return Ok(());
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn load_script_call_target_from_cache(
+    cache: &FlatCache,
+    index: &crate::js5::ArchiveIndex,
+    raw_id: i32,
+) -> Result<Option<(u32, Vec<u8>)>> {
+    let Ok(raw_id_u32) = u32::try_from(raw_id) else {
+        return Ok(None);
+    };
+
+    if index.group_id.contains(&raw_id_u32) {
+        let files = cache.group_files_with_index(index, ARCHIVE_CLIENTSCRIPTS, raw_id_u32)?;
+        if let Some((file, data)) = files.into_iter().min_by_key(|(file, _)| *file) {
+            return Ok(Some(((raw_id_u32 << 16) | file, data)));
+        }
+    }
+
+    let group = raw_id_u32 >> 16;
+    let file = raw_id_u32 & 0xffff;
+    if !index.group_id.contains(&group) {
+        return Ok(None);
+    }
+    let files = cache.group_files_with_index(index, ARCHIVE_CLIENTSCRIPTS, group)?;
+    Ok(files.get(&file).cloned().map(|data| (raw_id_u32, data)))
+}
+
+fn collect_referenced_scripts(script: &CompiledScript) -> Vec<crate::transpile::ScriptId> {
+    script
+        .code
+        .iter()
+        .filter_map(|instruction| match instruction.operand {
+            Operand::Script(id) => Some(crate::transpile::ScriptId(id)),
+            _ => None,
+        })
+        .collect()
+}
+
+fn ensure_transpile_script_signature(
+    signature_cache: &mut HashMap<crate::transpile::ScriptId, crate::transpile::ScriptSignature>,
+    transpiler: &mut Transpiler,
+    script_catalog: &crate::transpile::ScriptCatalog,
+    script_id: crate::transpile::ScriptId,
+    script: &CompiledScript,
+    build: u32,
+) {
+    if signature_cache.contains_key(&script_id) {
+        return;
+    }
+    if std::env::var_os("RS3_TRANSPILE_TRACE").is_some() {
+        let script_name = script_catalog.export_name(script_id).unwrap_or("script");
+        eprintln!(
+            "trace: signature script_{script_id} {script_name} instructions={} args={}/{}/{}",
+            script.code.len(),
+            script.argument_count_int,
+            script.argument_count_object,
+            script.argument_count_long,
+        );
+        if std::env::var_os("RS3_TRANSPILE_TRACE_OPS").is_some() {
+            for (index, instruction) in script.code.iter().enumerate() {
+                eprintln!(
+                    "trace: op[{index}] {} {:?}",
+                    instruction.command, instruction.operand
+                );
+            }
+        }
+    }
+
+    let signature =
+        infer_transpile_script_signature(signature_cache, script_catalog, script_id, script, build);
+    signature_cache.insert(script_id, signature.clone());
+    transpiler.set_script_signature(script_id, signature);
+}
+
+fn ensure_transpile_script_signature_from_bytes(
+    signature_cache: &mut HashMap<crate::transpile::ScriptId, crate::transpile::ScriptSignature>,
+    transpiler: &mut Transpiler,
+    script_catalog: &crate::transpile::ScriptCatalog,
+    script_id: crate::transpile::ScriptId,
+    data: &[u8],
+    opcode_book: &OpcodeBook,
+    version: u32,
+) {
+    if signature_cache.contains_key(&script_id) {
+        return;
+    }
+
+    let Ok(script) = decode_script(data, opcode_book, version) else {
+        return;
+    };
+    ensure_transpile_script_signature(
+        signature_cache,
+        transpiler,
+        script_catalog,
+        script_id,
+        &script,
+        version,
+    );
+}
+
+fn infer_transpile_script_signature(
+    signature_cache: &HashMap<crate::transpile::ScriptId, crate::transpile::ScriptSignature>,
+    script_catalog: &crate::transpile::ScriptCatalog,
+    script_id: crate::transpile::ScriptId,
+    script: &CompiledScript,
+    build: u32,
+) -> crate::transpile::ScriptSignature {
+    let empty_components: HashMap<u32, String> = HashMap::new();
+    let empty_enums: HashMap<i32, String> = HashMap::new();
+    crate::transpile::ScriptSignature {
+        arg_count_int: script.argument_count_int,
+        arg_count_obj: script.argument_count_object,
+        arg_count_long: script.argument_count_long,
+        return_type: crate::transpile::infer_return_type_for_script(
+            script,
+            script_id,
+            build,
+            &empty_components,
+            &empty_enums,
+            script_catalog,
+            signature_cache,
+        ),
+    }
+}
+
+fn trim_transpile_runtime_context(ctx: &mut ResolverContext) {
+    ctx.interfaces.clear();
+    ctx.decoded_scripts.clear();
+    ctx.structs.clear();
+    ctx.npcs.clear();
+    ctx.objs.clear();
+    ctx.locs.clear();
+    ctx.seqs.clear();
+    ctx.spots.clear();
+    ctx.invs.clear();
+    ctx.dbtables.clear();
+    ctx.dbrows.clear();
+}
+
+#[derive(Serialize)]
+struct TranspileDiagnosticsReport {
+    build: u32,
+    catalog: Vec<crate::transpile::Diagnostic>,
+    scripts: Vec<ScriptDiagnosticsEntry>,
+}
+
+#[derive(Serialize)]
+struct ScriptDiagnosticsEntry {
+    packed_id: i32,
+    group_id: i32,
+    export_name: String,
+    module_name: String,
+    diagnostics: Vec<crate::transpile::Diagnostic>,
+}
+
+fn write_transpile_diagnostics_report(
+    out_dir: &Path,
+    build: u32,
+    catalog: Vec<crate::transpile::Diagnostic>,
+    mut scripts: Vec<ScriptDiagnosticsEntry>,
+) -> Result<()> {
+    scripts.sort_by(|a, b| a.packed_id.cmp(&b.packed_id));
+    let report = TranspileDiagnosticsReport {
+        build,
+        catalog,
+        scripts,
+    };
+    let json = serde_json::to_string_pretty(&report)?;
+    write_text(&out_dir.join("transpile-diagnostics.json"), &json)
+}
+
+fn script_base_export_name(metadata: &crate::transpile::ScriptMetadata) -> String {
+    let base_name = crate::transpile::sanitize_export_name(&metadata.short_name);
+    if base_name.is_empty() || base_name == "script" {
+        format!("script{}", metadata.group_id.0)
+    } else {
+        base_name
+    }
 }
 
 fn export_var_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
@@ -4258,7 +5034,7 @@ fn export_var_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
     lines.push(String::new());
     lines.push(format!("export const VAR_COUNT = {};", entries.len()));
 
-    write_text(&out_dir.join("vars.ts"), &lines.join("\n"))
+    write_lines(&out_dir.join("vars.ts"), lines)
 }
 
 struct VarTypeEntry {
@@ -4290,11 +5066,8 @@ fn export_varbit_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
         String::new(),
     ];
 
-    let mut entries: Vec<_> = ctx.varbits.values().cloned().collect();
-    entries.sort_by_key(|e| e.id);
-
     lines.push("export const VARBITS: ReadonlyMap<number, VarBitEntry> = new Map([".to_string());
-    for entry in &entries {
+    for entry in ctx.varbits.values() {
         let domain_str = match entry.domain {
             Some(d) => format!("'{}'", d.as_label()),
             None => "null".to_string(),
@@ -4325,25 +5098,24 @@ fn export_varbit_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
     }
     lines.push("]);".to_string());
     lines.push(String::new());
-    lines.push(format!("export const VARBIT_COUNT = {};", entries.len()));
+    lines.push(format!(
+        "export const VARBIT_COUNT = {};",
+        ctx.varbits.len()
+    ));
 
-    write_text(&out_dir.join("varbits.ts"), &lines.join("\n"))
+    write_lines(&out_dir.join("varbits.ts"), lines)
 }
 
 fn export_enum_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
-    let mut entries: Vec<_> = ctx.enums.values().cloned().collect();
-    entries.sort_by_key(|e| e.id);
-
-    let mut lines = vec![
-        "// Auto-generated Enum definitions".to_string(),
-        "// Source: RS3 cache enum config".to_string(),
-        String::new(),
-    ];
+    let mut writer = TextFileWriter::create(&out_dir.join("enums.ts"))?;
+    writer.line("// Auto-generated Enum definitions")?;
+    writer.line("// Source: RS3 cache enum config")?;
+    writer.line("")?;
 
     // ── Per-enum const objects with named constants ──
     let mut reverse_lookup: Vec<(i32, String)> = Vec::new();
 
-    for entry in &entries {
+    for entry in ctx.enums.values() {
         if entry.values.is_empty() {
             continue;
         }
@@ -4372,45 +5144,45 @@ fn export_enum_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
             reverse_lookup.push((pair.key, format!("{obj_name}.{unique_prop}")));
         }
 
-        lines.push(format!("export const {obj_name} = {{"));
-        lines.extend(props);
-        lines.push("} as const;".to_string());
-        lines.push(String::new());
+        writer.line(format!("export const {obj_name} = {{"))?;
+        for prop in props {
+            writer.line(prop)?;
+        }
+        writer.line("} as const;")?;
+        writer.line("")?;
     }
 
     // ── Reverse lookup: enum value → qualified name ──
     reverse_lookup.sort_by_key(|(k, _)| *k);
     reverse_lookup.dedup_by_key(|(k, _)| *k);
     if !reverse_lookup.is_empty() {
-        lines.push("// Reverse lookup: maps enum key values to qualified names.".to_string());
-        lines.push(
-            "export const ENUM_VALUE_TO_NAME: ReadonlyMap<number, string> = new Map([".to_string(),
-        );
+        writer.line("// Reverse lookup: maps enum key values to qualified names.")?;
+        writer.line("export const ENUM_VALUE_TO_NAME: ReadonlyMap<number, string> = new Map([")?;
         for (key, name) in &reverse_lookup {
-            lines.push(format!("    [{key}, '{name}'],"));
+            writer.line(format!("    [{key}, '{name}'],"))?;
         }
-        lines.push("]);".to_string());
-        lines.push(String::new());
+        writer.line("]);")?;
+        writer.line("")?;
     }
 
     // ── Existing types and runtime map ──
-    lines.push("export interface EnumPair {".to_string());
-    lines.push("    key: number;".to_string());
-    lines.push("    value: number | string;".to_string());
-    lines.push("    dense: boolean;".to_string());
-    lines.push("}".to_string());
-    lines.push(String::new());
-    lines.push("export interface EnumEntry {".to_string());
-    lines.push("    id: number;".to_string());
-    lines.push("    inputType: string;".to_string());
-    lines.push("    outputType: string;".to_string());
-    lines.push("    default: number | string | null;".to_string());
-    lines.push("    values: EnumPair[];".to_string());
-    lines.push("}".to_string());
-    lines.push(String::new());
+    writer.line("export interface EnumPair {")?;
+    writer.line("    key: number;")?;
+    writer.line("    value: number | string;")?;
+    writer.line("    dense: boolean;")?;
+    writer.line("}")?;
+    writer.line("")?;
+    writer.line("export interface EnumEntry {")?;
+    writer.line("    id: number;")?;
+    writer.line("    inputType: string;")?;
+    writer.line("    outputType: string;")?;
+    writer.line("    default: number | string | null;")?;
+    writer.line("    values: EnumPair[];")?;
+    writer.line("}")?;
+    writer.line("")?;
 
-    lines.push("export const ENUMS: ReadonlyMap<number, EnumEntry> = new Map([".to_string());
-    for entry in &entries {
+    writer.line("export const ENUMS: ReadonlyMap<number, EnumEntry> = new Map([")?;
+    for entry in ctx.enums.values() {
         let input_type = match entry.input_type_char {
             Some(b'i') => "'int'",
             Some(b's') => "'string'",
@@ -4443,16 +5215,15 @@ fn export_enum_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
             })
             .collect::<Vec<_>>()
             .join(", ");
-        lines.push(format!(
+        writer.line(format!(
             "    [{}, {{ id: {}, inputType: {}, outputType: {}, default: {}, values: [{}] }}],",
             entry.id, entry.id, input_type, output_type, default, values_json
-        ));
+        ))?;
     }
-    lines.push("]);".to_string());
-    lines.push(String::new());
-    lines.push(format!("export const ENUM_COUNT = {};", entries.len()));
-
-    write_text(&out_dir.join("enums.ts"), &lines.join("\n"))
+    writer.line("]);")?;
+    writer.line("")?;
+    writer.line(format!("export const ENUM_COUNT = {};", ctx.enums.len()))?;
+    writer.finish()
 }
 
 /// Convert a lowercase or mixed-case string value (e.g. "`skill_type`",
@@ -4496,11 +5267,8 @@ fn export_struct_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
         String::new(),
     ];
 
-    let mut entries: Vec<_> = ctx.structs.values().cloned().collect();
-    entries.sort_by_key(|e| e.id);
-
     lines.push("export const STRUCTS: ReadonlyMap<number, StructEntry> = new Map([".to_string());
-    for entry in &entries {
+    for entry in ctx.structs.values() {
         let params_json = entry
             .params
             .iter()
@@ -4520,9 +5288,12 @@ fn export_struct_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
     }
     lines.push("]);".to_string());
     lines.push(String::new());
-    lines.push(format!("export const STRUCT_COUNT = {};", entries.len()));
+    lines.push(format!(
+        "export const STRUCT_COUNT = {};",
+        ctx.structs.len()
+    ));
 
-    write_text(&out_dir.join("structs.ts"), &lines.join("\n"))
+    write_lines(&out_dir.join("structs.ts"), lines)
 }
 
 fn format_scalar_value(value: &crate::config::ScalarValue) -> String {
@@ -4534,9 +5305,6 @@ fn format_scalar_value(value: &crate::config::ScalarValue) -> String {
 }
 
 fn export_param_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
-    let mut entries: Vec<_> = ctx.params.values().cloned().collect();
-    entries.sort_by_key(|e| e.id);
-
     let mut lines = vec![
         "// Auto-generated Param definitions".to_string(),
         "// Source: RS3 cache param config".to_string(),
@@ -4555,7 +5323,7 @@ fn export_param_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
     ];
 
     lines.push("export const PARAMS: ReadonlyMap<number, ParamEntry> = new Map([".to_string());
-    for entry in &entries {
+    for entry in ctx.params.values() {
         let type_char = entry
             .type_char
             .map(|c| format!("'{}'", c as char))
@@ -4579,15 +5347,12 @@ fn export_param_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
     }
     lines.push("]);".to_string());
     lines.push(String::new());
-    lines.push(format!("export const PARAM_COUNT = {};", entries.len()));
+    lines.push(format!("export const PARAM_COUNT = {};", ctx.params.len()));
 
-    write_text(&out_dir.join("params.ts"), &lines.join("\n"))
+    write_lines(&out_dir.join("params.ts"), lines)
 }
 
 fn export_inv_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
-    let mut entries: Vec<_> = ctx.invs.values().collect();
-    entries.sort_by_key(|e| e.id);
-
     let mut lines = vec![
         "// Auto-generated Inventory definitions".to_string(),
         "// Source: RS3 cache inv config".to_string(),
@@ -4606,9 +5371,9 @@ fn export_inv_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
     lines.push("}".to_string());
     lines.push(String::new());
 
-    if !entries.is_empty() {
+    if !ctx.invs.is_empty() {
         lines.push("export const INVS: ReadonlyMap<number, InvEntry> = new Map([".to_string());
-        for entry in &entries {
+        for entry in ctx.invs.values() {
             let size = entry
                 .size
                 .map(|s| s.to_string())
@@ -4627,30 +5392,26 @@ fn export_inv_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
         lines.push("]);".to_string());
         lines.push(String::new());
     }
-    lines.push(format!("export const INV_COUNT = {};", entries.len()));
+    lines.push(format!("export const INV_COUNT = {};", ctx.invs.len()));
 
-    write_text(&out_dir.join("invs.ts"), &lines.join("\n"))
+    write_lines(&out_dir.join("invs.ts"), lines)
 }
 
 fn export_obj_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
-    let mut entries: Vec<_> = ctx.objs.values().collect();
-    entries.sort_by_key(|e| e.id);
+    let mut writer = TextFileWriter::create(&out_dir.join("objs.ts"))?;
+    writer.line("// Auto-generated Item (Obj) definitions")?;
+    writer.line("// Source: RS3 cache obj config")?;
+    writer.line("")?;
+    writer.line("export interface ObjEntry {")?;
+    writer.line("    id: number;")?;
+    writer.line("    name: string | null;")?;
+    writer.line("    ops: string[];")?;
+    writer.line("}")?;
+    writer.line("")?;
 
-    let mut lines = vec![
-        "// Auto-generated Item (Obj) definitions".to_string(),
-        "// Source: RS3 cache obj config".to_string(),
-        String::new(),
-        "export interface ObjEntry {".to_string(),
-        "    id: number;".to_string(),
-        "    name: string | null;".to_string(),
-        "    ops: string[];".to_string(),
-        "}".to_string(),
-        String::new(),
-    ];
-
-    if !entries.is_empty() {
-        lines.push("export const OBJS: ReadonlyMap<number, ObjEntry> = new Map([".to_string());
-        for entry in &entries {
+    if !ctx.objs.is_empty() {
+        writer.line("export const OBJS: ReadonlyMap<number, ObjEntry> = new Map([")?;
+        for entry in ctx.objs.values() {
             let name = extract_oplist_name(&entry.ops);
             let ops_json: String = entry
                 .ops
@@ -4658,38 +5419,33 @@ fn export_obj_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
                 .map(|o| format!("'{}'", escape_ts_string(o)))
                 .collect::<Vec<_>>()
                 .join(", ");
-            lines.push(format!(
+            writer.line(format!(
                 "    [{id}, {{ id: {id}, name: {name}, ops: [{ops_json}] }}],",
                 id = entry.id
-            ));
+            ))?;
         }
-        lines.push("]);".to_string());
-        lines.push(String::new());
+        writer.line("]);")?;
+        writer.line("")?;
     }
-    lines.push(format!("export const OBJ_COUNT = {};", entries.len()));
-
-    write_text(&out_dir.join("objs.ts"), &lines.join("\n"))
+    writer.line(format!("export const OBJ_COUNT = {};", ctx.objs.len()))?;
+    writer.finish()
 }
 
 fn export_npc_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
-    let mut entries: Vec<_> = ctx.npcs.values().collect();
-    entries.sort_by_key(|e| e.id);
+    let mut writer = TextFileWriter::create(&out_dir.join("npcs.ts"))?;
+    writer.line("// Auto-generated NPC definitions")?;
+    writer.line("// Source: RS3 cache npc config")?;
+    writer.line("")?;
+    writer.line("export interface NpcEntry {")?;
+    writer.line("    id: number;")?;
+    writer.line("    name: string | null;")?;
+    writer.line("    ops: string[];")?;
+    writer.line("}")?;
+    writer.line("")?;
 
-    let mut lines = vec![
-        "// Auto-generated NPC definitions".to_string(),
-        "// Source: RS3 cache npc config".to_string(),
-        String::new(),
-        "export interface NpcEntry {".to_string(),
-        "    id: number;".to_string(),
-        "    name: string | null;".to_string(),
-        "    ops: string[];".to_string(),
-        "}".to_string(),
-        String::new(),
-    ];
-
-    if !entries.is_empty() {
-        lines.push("export const NPCS: ReadonlyMap<number, NpcEntry> = new Map([".to_string());
-        for entry in &entries {
+    if !ctx.npcs.is_empty() {
+        writer.line("export const NPCS: ReadonlyMap<number, NpcEntry> = new Map([")?;
+        for entry in ctx.npcs.values() {
             let name = extract_oplist_name(&entry.ops);
             let ops_json: String = entry
                 .ops
@@ -4697,38 +5453,33 @@ fn export_npc_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
                 .map(|o| format!("'{}'", escape_ts_string(o)))
                 .collect::<Vec<_>>()
                 .join(", ");
-            lines.push(format!(
+            writer.line(format!(
                 "    [{id}, {{ id: {id}, name: {name}, ops: [{ops_json}] }}],",
                 id = entry.id
-            ));
+            ))?;
         }
-        lines.push("]);".to_string());
-        lines.push(String::new());
+        writer.line("]);")?;
+        writer.line("")?;
     }
-    lines.push(format!("export const NPC_COUNT = {};", entries.len()));
-
-    write_text(&out_dir.join("npcs.ts"), &lines.join("\n"))
+    writer.line(format!("export const NPC_COUNT = {};", ctx.npcs.len()))?;
+    writer.finish()
 }
 
 fn export_loc_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
-    let mut entries: Vec<_> = ctx.locs.values().collect();
-    entries.sort_by_key(|e| e.id);
+    let mut writer = TextFileWriter::create(&out_dir.join("locs.ts"))?;
+    writer.line("// Auto-generated Loc (Object) definitions")?;
+    writer.line("// Source: RS3 cache loc config")?;
+    writer.line("")?;
+    writer.line("export interface LocEntry {")?;
+    writer.line("    id: number;")?;
+    writer.line("    name: string | null;")?;
+    writer.line("    ops: string[];")?;
+    writer.line("}")?;
+    writer.line("")?;
 
-    let mut lines = vec![
-        "// Auto-generated Loc (Object) definitions".to_string(),
-        "// Source: RS3 cache loc config".to_string(),
-        String::new(),
-        "export interface LocEntry {".to_string(),
-        "    id: number;".to_string(),
-        "    name: string | null;".to_string(),
-        "    ops: string[];".to_string(),
-        "}".to_string(),
-        String::new(),
-    ];
-
-    if !entries.is_empty() {
-        lines.push("export const LOCS: ReadonlyMap<number, LocEntry> = new Map([".to_string());
-        for entry in &entries {
+    if !ctx.locs.is_empty() {
+        writer.line("export const LOCS: ReadonlyMap<number, LocEntry> = new Map([")?;
+        for entry in ctx.locs.values() {
             let name = extract_oplist_name(&entry.ops);
             let ops_json: String = entry
                 .ops
@@ -4736,49 +5487,44 @@ fn export_loc_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
                 .map(|o| format!("'{}'", escape_ts_string(o)))
                 .collect::<Vec<_>>()
                 .join(", ");
-            lines.push(format!(
+            writer.line(format!(
                 "    [{id}, {{ id: {id}, name: {name}, ops: [{ops_json}] }}],",
                 id = entry.id
-            ));
+            ))?;
         }
-        lines.push("]);".to_string());
-        lines.push(String::new());
+        writer.line("]);")?;
+        writer.line("")?;
     }
-    lines.push(format!("export const LOC_COUNT = {};", entries.len()));
-
-    write_text(&out_dir.join("locs.ts"), &lines.join("\n"))
+    writer.line(format!("export const LOC_COUNT = {};", ctx.locs.len()))?;
+    writer.finish()
 }
 
 fn export_seq_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
-    let mut entries: Vec<_> = ctx.seqs.values().collect();
-    entries.sort_by_key(|e| e.id);
+    let mut writer = TextFileWriter::create(&out_dir.join("seqs.ts"))?;
+    writer.line("// Auto-generated Sequence (Animation) definitions")?;
+    writer.line("// Source: RS3 cache seq config")?;
+    writer.line("")?;
+    writer.line("export interface SeqFrame {")?;
+    writer.line("    animId: number;")?;
+    writer.line("    frameId: number;")?;
+    writer.line("    delay: number;")?;
+    writer.line("}")?;
+    writer.line("")?;
+    writer.line("export interface SeqEntry {")?;
+    writer.line("    id: number;")?;
+    writer.line("    frames: SeqFrame[];")?;
+    writer.line("    stretches: boolean;")?;
+    writer.line("    priority: number | null;")?;
+    writer.line("    leftHand: number | null;")?;
+    writer.line("    rightHand: number | null;")?;
+    writer.line("    loopCount: number | null;")?;
+    writer.line("    params: StructParamEntry[];")?;
+    writer.line("}")?;
+    writer.line("")?;
 
-    let mut lines = vec![
-        "// Auto-generated Sequence (Animation) definitions".to_string(),
-        "// Source: RS3 cache seq config".to_string(),
-        String::new(),
-        "export interface SeqFrame {".to_string(),
-        "    animId: number;".to_string(),
-        "    frameId: number;".to_string(),
-        "    delay: number;".to_string(),
-        "}".to_string(),
-        String::new(),
-        "export interface SeqEntry {".to_string(),
-        "    id: number;".to_string(),
-        "    frames: SeqFrame[];".to_string(),
-        "    stretches: boolean;".to_string(),
-        "    priority: number | null;".to_string(),
-        "    leftHand: number | null;".to_string(),
-        "    rightHand: number | null;".to_string(),
-        "    loopCount: number | null;".to_string(),
-        "    params: StructParamEntry[];".to_string(),
-        "}".to_string(),
-        String::new(),
-    ];
-
-    if !entries.is_empty() {
-        lines.push("export const SEQS: ReadonlyMap<number, SeqEntry> = new Map([".to_string());
-        for entry in &entries {
+    if !ctx.seqs.is_empty() {
+        writer.line("export const SEQS: ReadonlyMap<number, SeqEntry> = new Map([")?;
+        for entry in ctx.seqs.values() {
             let frames_json: String = entry
                 .frames
                 .iter()
@@ -4802,7 +5548,7 @@ fn export_seq_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
                 })
                 .collect::<Vec<_>>()
                 .join(", ");
-            lines.push(format!(
+            writer.line(format!(
                 "    [{id}, {{ id: {id}, frames: [{frames_json}], stretches: {stretches}, priority: {priority}, leftHand: {lefthand}, rightHand: {righthand}, loopCount: {loopcount}, params: [{params_json}] }}],",
                 id = entry.id,
                 stretches = entry.stretches,
@@ -4810,14 +5556,13 @@ fn export_seq_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
                 lefthand = entry.lefthand_raw.map(|l| l.to_string()).unwrap_or_else(|| "null".to_string()),
                 righthand = entry.righthand_raw.map(|r| r.to_string()).unwrap_or_else(|| "null".to_string()),
                 loopcount = entry.loopcount.map(|l| l.to_string()).unwrap_or_else(|| "null".to_string()),
-            ));
+            ))?;
         }
-        lines.push("]);".to_string());
-        lines.push(String::new());
+        writer.line("]);")?;
+        writer.line("")?;
     }
-    lines.push(format!("export const SEQ_COUNT = {};", entries.len()));
-
-    write_text(&out_dir.join("seqs.ts"), &lines.join("\n"))
+    writer.line(format!("export const SEQ_COUNT = {};", ctx.seqs.len()))?;
+    writer.finish()
 }
 
 fn export_spot_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
@@ -4854,7 +5599,7 @@ fn export_spot_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
     }
     lines.push(format!("export const SPOT_COUNT = {};", entries.len()));
 
-    write_text(&out_dir.join("spots.ts"), &lines.join("\n"))
+    write_lines(&out_dir.join("spots.ts"), lines)
 }
 
 /// Extract a name from op list entries like "name=Attack" or "name=Man".
@@ -4924,23 +5669,13 @@ fn export_named_oplist_ids(
         named.len()
     ));
 
-    write_text(
-        &out_dir.join(format!("named_{source_file}.ts")),
-        &lines.join("\n"),
-    )
+    write_lines(&out_dir.join(format!("named_{source_file}.ts")), lines)
 }
 
 fn export_script_signatures(
-    ctx: &ResolverContext,
     out_dir: &Path,
-    opcode_book: &OpcodeBook,
-    build: u32,
-    group_names: &HashMap<u32, String>,
+    script_catalog: &crate::transpile::ScriptCatalog,
 ) -> Result<()> {
-    let empty_components = HashMap::new();
-    let empty_enums = HashMap::new();
-    let empty_sigs = HashMap::new();
-
     let mut lines = vec![
         "// Auto-generated CS2 script signatures".to_string(),
         "// Source: RS3 cache clientscript archive".to_string(),
@@ -4948,40 +5683,20 @@ fn export_script_signatures(
     ];
 
     let mut entries: Vec<(String, String)> = Vec::new();
-    for (&script_id_raw, data) in &ctx.scripts {
-        let script_id = crate::transpile::ScriptId(script_id_raw as i32);
-        let Ok(script) = decode_script(data, opcode_book, build) else {
-            continue;
-        };
-        let group = script_id_raw >> 16;
-        let display_name = script
-            .name
-            .as_deref()
-            .map(crate::transpile::extract_script_name_suffix)
-            .filter(|name| !name.is_empty())
-            .or_else(|| group_names.get(&group).cloned());
-        let function_name =
-            crate::transpile::script_function_name(script_id, display_name.as_deref());
-        let return_type = crate::transpile::infer_return_type_for_script(
-            &script,
-            script_id,
-            &empty_components,
-            &empty_enums,
-            &empty_sigs,
-        );
-
+    for script in script_catalog.iter() {
+        let function_name = script.export_name.clone();
         let mut arg_types: Vec<&str> = Vec::new();
         arg_types.extend(std::iter::repeat_n(
             "number",
-            script.argument_count_int as usize,
+            script.signature.arg_count_int as usize,
         ));
         arg_types.extend(std::iter::repeat_n(
             "string",
-            script.argument_count_object as usize,
+            script.signature.arg_count_obj as usize,
         ));
         arg_types.extend(std::iter::repeat_n(
             "bigint",
-            script.argument_count_long as usize,
+            script.signature.arg_count_long as usize,
         ));
         let args = (0..arg_types.len())
             .map(|i| format!("arg{i}: {}", arg_types[i]))
@@ -4990,141 +5705,122 @@ fn export_script_signatures(
 
         entries.push((
             function_name.clone(),
-            format!("export function {function_name}({args}): {return_type};"),
+            format!(
+                "export function {function_name}({args}): {};",
+                script.signature.return_type
+            ),
         ));
     }
 
     entries.sort_by(|a, b| a.0.cmp(&b.0));
     lines.extend(entries.into_iter().map(|(_, line)| line));
 
-    write_text(&out_dir.join("scripts.d.ts"), &lines.join("\n"))
+    write_lines(&out_dir.join("scripts.d.ts"), lines)
 }
 
 fn export_db_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
-    let mut lines = vec![
-        "// Auto-generated Database definitions".to_string(),
-        "// Source: RS3 cache DB tables and rows (archive 2, groups 40/41)".to_string(),
-        String::new(),
-        "export interface DbTableColumn {".to_string(),
-        "    column: number;".to_string(),
-        "    tupleTypes: number[];".to_string(),
-        "    defaults: (number | string)[][];".to_string(),
-        "}".to_string(),
-        String::new(),
-        "export interface DbTableEntry {".to_string(),
-        "    id: number;".to_string(),
-        "    columns: DbTableColumn[];".to_string(),
-        "}".to_string(),
-        String::new(),
-        "export interface DbRowColumn {".to_string(),
-        "    column: number;".to_string(),
-        "    tupleTypes: number[];".to_string(),
-        "    rows: (number | string)[][];".to_string(),
-        "}".to_string(),
-        String::new(),
-        "export interface DbRowEntry {".to_string(),
-        "    id: number;".to_string(),
-        "    table: number | null;".to_string(),
-        "    columns: DbRowColumn[];".to_string(),
-        "}".to_string(),
-        String::new(),
-    ];
+    let mut writer = TextFileWriter::create(&out_dir.join("dbtables.ts"))?;
+    writer.line("// Auto-generated Database definitions")?;
+    writer.line("// Source: RS3 cache DB tables and rows (archive 2, groups 40/41)")?;
+    writer.line("")?;
+    writer.line("export interface DbTableColumn {")?;
+    writer.line("    column: number;")?;
+    writer.line("    tupleTypes: number[];")?;
+    writer.line("    defaults: (number | string)[][];")?;
+    writer.line("}")?;
+    writer.line("")?;
+    writer.line("export interface DbTableEntry {")?;
+    writer.line("    id: number;")?;
+    writer.line("    columns: DbTableColumn[];")?;
+    writer.line("}")?;
+    writer.line("")?;
+    writer.line("export interface DbRowColumn {")?;
+    writer.line("    column: number;")?;
+    writer.line("    tupleTypes: number[];")?;
+    writer.line("    rows: (number | string)[][];")?;
+    writer.line("}")?;
+    writer.line("")?;
+    writer.line("export interface DbRowEntry {")?;
+    writer.line("    id: number;")?;
+    writer.line("    table: number | null;")?;
+    writer.line("    columns: DbRowColumn[];")?;
+    writer.line("}")?;
+    writer.line("")?;
 
-    // DB Tables (schemas)
     if !ctx.dbtables.is_empty() {
-        let mut entries: Vec<_> = ctx.dbtables.values().collect();
-        entries.sort_by_key(|e| e.id);
-        lines.push(
-            "export const DB_TABLES: ReadonlyMap<number, DbTableEntry> = new Map([".to_string(),
-        );
-        for entry in &entries {
-            let cols_json: String = entry
-                .columns
-                .iter()
-                .map(|c| {
-                    let types = c
-                        .tuple_types
-                        .iter()
-                        .map(u16::to_string)
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    let defaults: String = c
-                        .defaults
-                        .iter()
-                        .map(|row| {
-                            let vals = row
-                                .iter()
-                                .map(|v| match v {
-                                    crate::config::ScalarValue::Int(i) => i.to_string(),
-                                    crate::config::ScalarValue::Long(l) => l.to_string(),
-                                    crate::config::ScalarValue::Str(s) => {
-                                        format!("'{}'", escape_ts_string(s))
-                                    }
-                                })
-                                .collect::<Vec<_>>()
-                                .join(", ");
-                            format!("[{vals}]")
-                        })
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    format!(
-                        "{{ column: {}, tupleTypes: [{}], defaults: [{}] }}",
-                        c.column, types, defaults
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join(", ");
-            lines.push(format!(
-                "    [{id}, {{ id: {id}, columns: [{cols_json}] }}],",
-                id = entry.id
-            ));
+        writer.line("export const DB_TABLES: ReadonlyMap<number, DbTableEntry> = new Map([")?;
+        for entry in ctx.dbtables.values() {
+            writer.line(format!("    [{id}, {{ id: {id}, columns: [", id = entry.id))?;
+            for column in &entry.columns {
+                let types = column
+                    .tuple_types
+                    .iter()
+                    .map(u16::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let defaults = column
+                    .defaults
+                    .iter()
+                    .map(|row| {
+                        let values = row
+                            .iter()
+                            .map(format_scalar_value)
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        format!("[{values}]")
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                writer.line(format!(
+                    "        {{ column: {}, tupleTypes: [{}], defaults: [{}] }},",
+                    column.column, types, defaults
+                ))?;
+            }
+            writer.line("    ] }],")?;
         }
-        lines.push("]);".to_string());
-        lines.push(String::new());
+        writer.line("]);")?;
+        writer.line("")?;
     }
-    lines.push(format!(
+    writer.line(format!(
         "export const DB_TABLE_COUNT = {};",
         ctx.dbtables.len()
-    ));
+    ))?;
+    writer.line("")?;
+    writer.line("// Reverse-engineered table column meanings:")?;
+    writer.line("// Table 163 (5,237 rows, 32 cols) — Items")?;
+    writer.line("//   col  0: itemId (int)")?;
+    writer.line("//   col  1: parentId (int) — parent item or category")?;
+    writer.line("//   col  2: name (string)")?;
+    writer.line("//   col  3: description (string)")?;
+    writer.line("//   col  4: paramId (int) — linked param config entry")?;
+    writer.line("//   col  5: typeId (int) — item type/category")?;
+    writer.line("//   col  6: value (int, default 99) — shop price")?;
+    writer.line("//   col  7: flags (int, default 268435454)")?;
+    writer.line("//   col  8: stackable (int, default 1)")?;
+    writer.line("//   col 11: membersOnly (boolean, default false)")?;
+    writer.line("//   col 13: categoryId (int)")?;
+    writer.line("//   col 23: modelId (int)")?;
+    writer.line("//   col 24: modelId2 (int)")?;
+    writer.line("//   col 26: color (int) — RGBA tint")?;
+    writer.line("//   col 30: equipmentOverrides (int[6]) — only for special items")?;
+    writer.line("//         index 0-5: stab/slash/crush/magic/range/strength bonus")?;
+    writer.line("//   col 31: soundId (int)")?;
+    writer.line("//")?;
+    writer.line("// Table 29 (105 rows, 46 cols) — NPC stats")?;
+    writer.line("//   cols 1-3: model IDs")?;
+    writer.line("//   col  5: name (string)")?;
+    writer.line("//   col  7: size (int)")?;
+    writer.line("//   col  9: combatLevel (int)")?;
+    writer.line("//   col 10: hitpoints (int)")?;
+    writer.line("//   col 14: attack (int)")?;
+    writer.line("//   col 17: defence (int)")?;
+    writer.line("//   col 18: accuracy (int)")?;
+    writer.line("//")?;
+    writer.line("// Note: Most equipment/weapon stats are computed client-side")?;
+    writer.line("// from item tier + category, not stored per-item in this table.")?;
+    writer.line("// Only override stats (halos, special items) use col 30.")?;
+    writer.line("")?;
 
-    // ── Reverse-engineered table schemas ──
-    lines.push(String::new());
-    lines.push("// Reverse-engineered table column meanings:".to_string());
-    lines.push("// Table 163 (5,237 rows, 32 cols) — Items".to_string());
-    lines.push("//   col  0: itemId (int)".to_string());
-    lines.push("//   col  1: parentId (int) — parent item or category".to_string());
-    lines.push("//   col  2: name (string)".to_string());
-    lines.push("//   col  3: description (string)".to_string());
-    lines.push("//   col  4: paramId (int) — linked param config entry".to_string());
-    lines.push("//   col  5: typeId (int) — item type/category".to_string());
-    lines.push("//   col  6: value (int, default 99) — shop price".to_string());
-    lines.push("//   col  7: flags (int, default 268435454)".to_string());
-    lines.push("//   col  8: stackable (int, default 1)".to_string());
-    lines.push("//   col 11: membersOnly (boolean, default false)".to_string());
-    lines.push("//   col 13: categoryId (int)".to_string());
-    lines.push("//   col 23: modelId (int)".to_string());
-    lines.push("//   col 24: modelId2 (int)".to_string());
-    lines.push("//   col 26: color (int) — RGBA tint".to_string());
-    lines.push("//   col 30: equipmentOverrides (int[6]) — only for special items".to_string());
-    lines.push("//         index 0-5: stab/slash/crush/magic/range/strength bonus".to_string());
-    lines.push("//   col 31: soundId (int)".to_string());
-    lines.push("//".to_string());
-    lines.push("// Table 29 (105 rows, 46 cols) — NPC stats".to_string());
-    lines.push("//   cols 1-3: model IDs".to_string());
-    lines.push("//   col  5: name (string)".to_string());
-    lines.push("//   col  7: size (int)".to_string());
-    lines.push("//   col  9: combatLevel (int)".to_string());
-    lines.push("//   col 10: hitpoints (int)".to_string());
-    lines.push("//   col 14: attack (int)".to_string());
-    lines.push("//   col 17: defence (int)".to_string());
-    lines.push("//   col 18: accuracy (int)".to_string());
-    lines.push("//".to_string());
-    lines.push("// Note: Most equipment/weapon stats are computed client-side".to_string());
-    lines.push("// from item tier + category, not stored per-item in this table.".to_string());
-    lines.push("// Only override stats (halos, special items) use col 30.".to_string());
-    lines.push(String::new());
-
-    // DB Rows (data) — grouped by table ID for navigability
     if !ctx.dbrows.is_empty() {
         let mut by_table: BTreeMap<u32, Vec<&crate::config::DbRowEntry>> = BTreeMap::new();
         for row in ctx.dbrows.values() {
@@ -5132,99 +5828,79 @@ fn export_db_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
                 by_table.entry(table).or_default().push(row);
             }
         }
-        lines.push(String::new());
-        lines.push("// DB rows grouped by table ID. Key = tableId, value = rows.".to_string());
-        lines.push(
-            "export const DB_ROWS: ReadonlyMap<number, DbRowEntry[]> = new Map([".to_string(),
-        );
+        writer.line("// DB rows grouped by table ID. Key = tableId, value = rows.")?;
+        writer.line("export const DB_ROWS: ReadonlyMap<number, DbRowEntry[]> = new Map([")?;
         for (table_id, rows) in &by_table {
-            let rows_json: String = rows
-                .iter()
-                .map(|r| {
-                    let cols_json: String = r
-                        .columns
+            writer.line(format!("    [{table_id}, ["))?;
+            for row in rows {
+                writer.line(format!(
+                    "        {{ id: {}, table: {}, columns: [",
+                    row.id, table_id
+                ))?;
+                for column in &row.columns {
+                    let types = column
+                        .tuple_types
                         .iter()
-                        .map(|c| {
-                            let types = c
-                                .tuple_types
+                        .map(u16::to_string)
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let row_data = column
+                        .rows
+                        .iter()
+                        .map(|tuple| {
+                            let values = tuple
                                 .iter()
-                                .map(u16::to_string)
+                                .map(format_scalar_value)
                                 .collect::<Vec<_>>()
                                 .join(", ");
-                            let row_data: String = c
-                                .rows
-                                .iter()
-                                .map(|row| {
-                                    let vals = row
-                                        .iter()
-                                        .map(|v| match v {
-                                            crate::config::ScalarValue::Int(i) => i.to_string(),
-                                            crate::config::ScalarValue::Long(l) => l.to_string(),
-                                            crate::config::ScalarValue::Str(s) => {
-                                                format!("'{}'", escape_ts_string(s))
-                                            }
-                                        })
-                                        .collect::<Vec<_>>()
-                                        .join(", ");
-                                    format!("[{vals}]")
-                                })
-                                .collect::<Vec<_>>()
-                                .join(", ");
-                            format!(
-                                "{{ column: {}, tupleTypes: [{}], rows: [{}] }}",
-                                c.column, types, row_data
-                            )
+                            format!("[{values}]")
                         })
                         .collect::<Vec<_>>()
                         .join(", ");
-                    format!(
-                        "{{ id: {}, table: {}, columns: [{}] }}",
-                        r.id, table_id, cols_json
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join(", ");
-            lines.push(format!("    [{table_id}, [{rows_json}]],"));
+                    writer.line(format!(
+                        "            {{ column: {}, tupleTypes: [{}], rows: [{}] }},",
+                        column.column, types, row_data
+                    ))?;
+                }
+                writer.line("        ] },")?;
+            }
+            writer.line("    ]],")?;
         }
-        lines.push("]);".to_string());
-        lines.push(String::new());
+        writer.line("]);")?;
+        writer.line("")?;
     }
-    lines.push(format!("export const DB_ROW_COUNT = {};", ctx.dbrows.len()));
-
-    // ── Typed wrappers for key tables ──
-    lines.push(String::new());
-
-    // ItemEntry (table 163 — 5,237 items)
-    lines.push("export interface ItemEntry {".to_string());
-    lines.push("    id: number;".to_string());
-    lines.push("    name: string | null;".to_string());
-    lines.push("    description: string | null;".to_string());
-    lines.push("    /** Shop / GE price. */".to_string());
-    lines.push("    value: number;".to_string());
-    lines.push("    /** Non-zero means stackable. */".to_string());
-    lines.push("    stackable: boolean;".to_string());
-    lines.push("    membersOnly: boolean;".to_string());
-    lines.push("    categoryId: number | null;".to_string());
-    lines.push("    parentId: number | null;".to_string());
-    lines.push("    modelId: number | null;".to_string());
-    lines.push("    /** RGBA tint (e.g. 16832257). */".to_string());
-    lines.push("    color: number | null;".to_string());
-    lines.push("    paramId: number | null;".to_string());
-    lines.push("    soundId: number | null;".to_string());
-    lines.push("    /** Key→value pairs for linked param configs. */".to_string());
-    lines.push("    params: Array<{ key: number; value: number | string }>;".to_string());
-    lines.push("    /** Equipment stat overrides (only 2 items). */".to_string());
-    lines.push("    equipmentOverrides: number[] | null;".to_string());
-    lines.push("}".to_string());
-    lines.push(String::new());
+    writer.line(format!("export const DB_ROW_COUNT = {};", ctx.dbrows.len()))?;
+    writer.line("")?;
+    writer.line("export interface ItemEntry {")?;
+    writer.line("    id: number;")?;
+    writer.line("    name: string | null;")?;
+    writer.line("    description: string | null;")?;
+    writer.line("    /** Shop / GE price. */")?;
+    writer.line("    value: number;")?;
+    writer.line("    /** Non-zero means stackable. */")?;
+    writer.line("    stackable: boolean;")?;
+    writer.line("    membersOnly: boolean;")?;
+    writer.line("    categoryId: number | null;")?;
+    writer.line("    parentId: number | null;")?;
+    writer.line("    modelId: number | null;")?;
+    writer.line("    /** RGBA tint (e.g. 16832257). */")?;
+    writer.line("    color: number | null;")?;
+    writer.line("    paramId: number | null;")?;
+    writer.line("    soundId: number | null;")?;
+    writer.line("    /** Key→value pairs for linked param configs. */")?;
+    writer.line("    params: Array<{ key: number; value: number | string }>;")?;
+    writer.line("    /** Equipment stat overrides (only 2 items). */")?;
+    writer.line("    equipmentOverrides: number[] | null;")?;
+    writer.line("}")?;
+    writer.line("")?;
 
     let items: Vec<_> = ctx
         .dbrows
         .values()
-        .filter(|r| r.table == Some(163))
+        .filter(|row| row.table == Some(163))
         .collect();
     if !items.is_empty() {
-        lines.push("export const ITEMS: ReadonlyMap<number, ItemEntry> = new Map([".to_string());
+        writer.line("export const ITEMS: ReadonlyMap<number, ItemEntry> = new Map([")?;
         for row in &items {
             let id = row_column_int(row, 0).unwrap_or(0);
             let name = row_column_str(row, 2);
@@ -5240,53 +5916,53 @@ fn export_db_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
             let sound = row_column_int_or_null(row, 31);
             let eq_overrides = row_column_int_array(row, 30);
             let name_str = name
-                .map(|n| format!("'{n}'"))
+                .map(|value| format!("'{value}'"))
                 .unwrap_or_else(|| "null".to_string());
             let desc_str = desc
-                .map(|d| format!("'{d}'"))
+                .map(|value| format!("'{value}'"))
                 .unwrap_or_else(|| "null".to_string());
             let eq_str = eq_overrides
-                .map(|a| {
+                .map(|values| {
                     format!(
                         "[{}]",
-                        a.iter().map(i32::to_string).collect::<Vec<_>>().join(", ")
+                        values
+                            .iter()
+                            .map(i32::to_string)
+                            .collect::<Vec<_>>()
+                            .join(", ")
                     )
                 })
                 .unwrap_or_else(|| "null".to_string());
-            lines.push(format!(
-                "    [{id}, {{ id: {id}, name: {name_str}, description: {desc_str}, value: {value}, stackable: {stackable}, membersOnly: {members}, categoryId: {category}, parentId: {parent}, modelId: {model}, color: {color}, paramId: {param}, soundId: {sound}, params: [], equipmentOverrides: {eq_str} }}],",
-            ));
+            writer.line(format!(
+                "    [{id}, {{ id: {id}, name: {name_str}, description: {desc_str}, value: {value}, stackable: {stackable}, membersOnly: {members}, categoryId: {category}, parentId: {parent}, modelId: {model}, color: {color}, paramId: {param}, soundId: {sound}, params: [], equipmentOverrides: {eq_str} }}],"
+            ))?;
         }
-        lines.push("]);".to_string());
-        lines.push(String::new());
+        writer.line("]);")?;
+        writer.line("")?;
     }
-    lines.push(format!("export const ITEM_COUNT = {};", items.len()));
-
-    // NpcStatEntry (table 29 — 105 NPCs)
-    lines.push(String::new());
-    lines.push("export interface NpcStatEntry {".to_string());
-    lines.push("    id: number;".to_string());
-    lines.push("    name: string | null;".to_string());
-    lines.push("    combatLevel: number;".to_string());
-    lines.push("    hitpoints: number;".to_string());
-    lines.push("    attack: number;".to_string());
-    lines.push("    defence: number;".to_string());
-    lines.push("    accuracy: number;".to_string());
-    lines.push("    size: number;".to_string());
-    lines.push("    respawnMs: number | null;".to_string());
-    lines.push("    modelIds: number[];".to_string());
-    lines.push("}".to_string());
-    lines.push(String::new());
+    writer.line(format!("export const ITEM_COUNT = {};", items.len()))?;
+    writer.line("")?;
+    writer.line("export interface NpcStatEntry {")?;
+    writer.line("    id: number;")?;
+    writer.line("    name: string | null;")?;
+    writer.line("    combatLevel: number;")?;
+    writer.line("    hitpoints: number;")?;
+    writer.line("    attack: number;")?;
+    writer.line("    defence: number;")?;
+    writer.line("    accuracy: number;")?;
+    writer.line("    size: number;")?;
+    writer.line("    respawnMs: number | null;")?;
+    writer.line("    modelIds: number[];")?;
+    writer.line("}")?;
+    writer.line("")?;
 
     let npc_stats: Vec<_> = ctx
         .dbrows
         .values()
-        .filter(|r| r.table == Some(29))
+        .filter(|row| row.table == Some(29))
         .collect();
     if !npc_stats.is_empty() {
-        lines.push(
-            "export const NPC_STATS: ReadonlyMap<number, NpcStatEntry> = new Map([".to_string(),
-        );
+        writer.line("export const NPC_STATS: ReadonlyMap<number, NpcStatEntry> = new Map([")?;
         for row in &npc_stats {
             let id = row_column_int(row, 0).unwrap_or(0);
             let name = row_column_str(row, 5);
@@ -5297,183 +5973,174 @@ fn export_db_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
             let acc = row_column_int(row, 18).unwrap_or(0);
             let size = row_column_int(row, 7).unwrap_or(1);
             let respawn = row_column_int_or_null(row, 13);
-            let models: Vec<i32> = [1, 2, 3]
+            let models = [1, 2, 3]
                 .iter()
-                .filter_map(|&c| row_column_int(row, c))
-                .collect();
+                .filter_map(|&column| row_column_int(row, column))
+                .map(|value| value.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
             let name_str = name
-                .map(|n| format!("'{n}'"))
+                .map(|value| format!("'{value}'"))
                 .unwrap_or_else(|| "null".to_string());
-            let model_str = format!(
-                "[{}]",
-                models
-                    .iter()
-                    .map(i32::to_string)
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            );
-            lines.push(format!(
-                "    [{id}, {{ id: {id}, name: {name_str}, combatLevel: {combat}, hitpoints: {hp}, attack: {atk}, defence: {def}, accuracy: {acc}, size: {size}, respawnMs: {respawn}, modelIds: {model_str} }}],",
-            ));
+            writer.line(format!(
+                "    [{id}, {{ id: {id}, name: {name_str}, combatLevel: {combat}, hitpoints: {hp}, attack: {atk}, defence: {def}, accuracy: {acc}, size: {size}, respawnMs: {respawn}, modelIds: [{models}] }}],"
+            ))?;
         }
-        lines.push("]);".to_string());
-        lines.push(String::new());
+        writer.line("]);")?;
+        writer.line("")?;
     }
-    lines.push(format!(
+    writer.line(format!(
         "export const NPC_STAT_COUNT = {};",
         npc_stats.len()
-    ));
+    ))?;
+    writer.line("")?;
+    writer.line("export interface ClueLocationEntry {")?;
+    writer.line("    id: number;")?;
+    writer.line("    /** Difficulty tier (1-5). */")?;
+    writer.line("    tier: number;")?;
+    writer.line("    description: string | null;")?;
+    writer.line("}")?;
+    writer.line("")?;
 
-    // ClueLocationEntry (table 7 — 62 clue scroll locations)
-    lines.push(String::new());
-    lines.push("export interface ClueLocationEntry {".to_string());
-    lines.push("    id: number;".to_string());
-    lines.push("    /** Difficulty tier (1-5). */".to_string());
-    lines.push("    tier: number;".to_string());
-    lines.push("    description: string | null;".to_string());
-    lines.push("}".to_string());
-    lines.push(String::new());
-
-    let clue_rows: Vec<_> = ctx.dbrows.values().filter(|r| r.table == Some(7)).collect();
+    let clue_rows: Vec<_> = ctx
+        .dbrows
+        .values()
+        .filter(|row| row.table == Some(7))
+        .collect();
     if !clue_rows.is_empty() {
-        lines.push(
-            "export const CLUE_LOCATIONS: ReadonlyMap<number, ClueLocationEntry> = new Map(["
-                .to_string(),
-        );
+        writer.line(
+            "export const CLUE_LOCATIONS: ReadonlyMap<number, ClueLocationEntry> = new Map([",
+        )?;
         for row in &clue_rows {
             let id = row_column_int(row, 0).unwrap_or(0);
             let tier = row_column_int(row, 1).unwrap_or(1);
             let desc = row_column_str(row, 2);
             let desc_str = desc
-                .map(|d| format!("'{d}'"))
+                .map(|value| format!("'{value}'"))
                 .unwrap_or_else(|| "null".to_string());
-            lines.push(format!(
-                "    [{id}, {{ id: {id}, tier: {tier}, description: {desc_str} }}],",
-            ));
+            writer.line(format!(
+                "    [{id}, {{ id: {id}, tier: {tier}, description: {desc_str} }}],"
+            ))?;
         }
-        lines.push("]);".to_string());
-        lines.push(String::new());
+        writer.line("]);")?;
+        writer.line("")?;
     }
-    lines.push(format!(
+    writer.line(format!(
         "export const CLUE_LOCATION_COUNT = {};",
         clue_rows.len()
-    ));
+    ))?;
+    writer.line("")?;
+    writer.line("export interface ItemCategoryEntry {")?;
+    writer.line("    id: number;")?;
+    writer.line("    name: string | null;")?;
+    writer.line("    modelId: number | null;")?;
+    writer.line("    iconId: number | null;")?;
+    writer.line("}")?;
+    writer.line("")?;
 
-    // ItemCategoryEntry (table 4 — 83 item categories)
-    lines.push(String::new());
-    lines.push("export interface ItemCategoryEntry {".to_string());
-    lines.push("    id: number;".to_string());
-    lines.push("    name: string | null;".to_string());
-    lines.push("    modelId: number | null;".to_string());
-    lines.push("    iconId: number | null;".to_string());
-    lines.push("}".to_string());
-    lines.push(String::new());
-
-    let categories: Vec<_> = ctx.dbrows.values().filter(|r| r.table == Some(4)).collect();
+    let categories: Vec<_> = ctx
+        .dbrows
+        .values()
+        .filter(|row| row.table == Some(4))
+        .collect();
     if !categories.is_empty() {
-        lines.push(
-            "export const ITEM_CATEGORIES: ReadonlyMap<number, ItemCategoryEntry> = new Map(["
-                .to_string(),
-        );
+        writer.line(
+            "export const ITEM_CATEGORIES: ReadonlyMap<number, ItemCategoryEntry> = new Map([",
+        )?;
         for row in &categories {
             let id = row_column_int(row, 0).unwrap_or(0);
             let name = row_column_str(row, 1);
             let model = row_column_int_or_null(row, 4);
             let icon = row_column_int_or_null(row, 5);
             let name_str = name
-                .map(|n| format!("'{n}'"))
+                .map(|value| format!("'{value}'"))
                 .unwrap_or_else(|| "null".to_string());
-            lines.push(format!(
-                "    [{id}, {{ id: {id}, name: {name_str}, modelId: {model}, iconId: {icon} }}],",
-            ));
+            writer.line(format!(
+                "    [{id}, {{ id: {id}, name: {name_str}, modelId: {model}, iconId: {icon} }}],"
+            ))?;
         }
-        lines.push("]);".to_string());
-        lines.push(String::new());
+        writer.line("]);")?;
+        writer.line("")?;
     }
-    lines.push(format!(
+    writer.line(format!(
         "export const ITEM_CATEGORY_COUNT = {};",
         categories.len()
-    ));
+    ))?;
+    writer.line("")?;
+    writer.line("export interface ItemSetEntry {")?;
+    writer.line("    id: number;")?;
+    writer.line("    name: string | null;")?;
+    writer.line("    description: string | null;")?;
+    writer.line("    representativeItemId: number | null;")?;
+    writer.line("}")?;
+    writer.line("")?;
 
-    // ItemSetEntry (table 5 — 160 outfits/sets)
-    lines.push(String::new());
-    lines.push("export interface ItemSetEntry {".to_string());
-    lines.push("    id: number;".to_string());
-    lines.push("    name: string | null;".to_string());
-    lines.push("    description: string | null;".to_string());
-    lines.push("    representativeItemId: number | null;".to_string());
-    lines.push("}".to_string());
-    lines.push(String::new());
-
-    let sets: Vec<_> = ctx.dbrows.values().filter(|r| r.table == Some(5)).collect();
+    let sets: Vec<_> = ctx
+        .dbrows
+        .values()
+        .filter(|row| row.table == Some(5))
+        .collect();
     if !sets.is_empty() {
-        lines.push(
-            "export const ITEM_SETS: ReadonlyMap<number, ItemSetEntry> = new Map([".to_string(),
-        );
+        writer.line("export const ITEM_SETS: ReadonlyMap<number, ItemSetEntry> = new Map([")?;
         for row in &sets {
             let id = row_column_int(row, 0).unwrap_or(0);
             let name = row_column_str(row, 1);
             let desc = row_column_str(row, 2);
             let rep_item = row_column_int_or_null(row, 5);
             let name_str = name
-                .map(|n| format!("'{n}'"))
+                .map(|value| format!("'{value}'"))
                 .unwrap_or_else(|| "null".to_string());
             let desc_str = desc
-                .map(|d| format!("'{d}'"))
+                .map(|value| format!("'{value}'"))
                 .unwrap_or_else(|| "null".to_string());
-            lines.push(format!(
-                "    [{id}, {{ id: {id}, name: {name_str}, description: {desc_str}, representativeItemId: {rep_item} }}],",
-            ));
+            writer.line(format!(
+                "    [{id}, {{ id: {id}, name: {name_str}, description: {desc_str}, representativeItemId: {rep_item} }}],"
+            ))?;
         }
-        lines.push("]);".to_string());
-        lines.push(String::new());
+        writer.line("]);")?;
+        writer.line("")?;
     }
-    lines.push(format!("export const ITEM_SET_COUNT = {};", sets.len()));
-
-    // ── Column index constants for named access ──
-    lines.push(String::new());
-    lines.push("// Named column indices for table 163 (items).".to_string());
-    lines.push("// Example: row.columns[ItemColumn.NAME]".to_string());
-    lines.push("export const ItemColumn = {".to_string());
-    lines.push("    ID: 0,".to_string());
-    lines.push("    PARENT_ID: 1,".to_string());
-    lines.push("    NAME: 2,".to_string());
-    lines.push("    DESCRIPTION: 3,".to_string());
-    lines.push("    PARAM_ID: 4,".to_string());
-    lines.push("    TYPE_ID: 5,".to_string());
-    lines.push("    VALUE: 6,".to_string());
-    lines.push("    FLAGS: 7,".to_string());
-    lines.push("    STACKABLE: 8,".to_string());
-    lines.push("    MEMBERS_ONLY: 11,".to_string());
-    lines.push("    CATEGORY_ID: 13,".to_string());
-    lines.push("    MODEL_ID: 23,".to_string());
-    lines.push("    MODEL_ID2: 24,".to_string());
-    lines.push("    COLOR: 26,".to_string());
-    lines.push("    EQUIPMENT_OVERRIDES: 30,".to_string());
-    lines.push("    SOUND_ID: 31,".to_string());
-    lines.push("} as const;".to_string());
-    lines
-        .push("export type ItemColumn = (typeof ItemColumn)[keyof typeof ItemColumn];".to_string());
-    lines.push(String::new());
-
-    lines.push("// Named column indices for table 29 (NPC stats).".to_string());
-    lines.push("export const NpcColumn = {".to_string());
-    lines.push("    ID: 0,".to_string());
-    lines.push("    MODEL_ID1: 1,".to_string());
-    lines.push("    MODEL_ID2: 2,".to_string());
-    lines.push("    MODEL_ID3: 3,".to_string());
-    lines.push("    NAME: 5,".to_string());
-    lines.push("    SIZE: 7,".to_string());
-    lines.push("    COMBAT_LEVEL: 9,".to_string());
-    lines.push("    HITPOINTS: 10,".to_string());
-    lines.push("    RESPAWN_MS: 13,".to_string());
-    lines.push("    ATTACK: 14,".to_string());
-    lines.push("    DEFENCE: 17,".to_string());
-    lines.push("    ACCURACY: 18,".to_string());
-    lines.push("} as const;".to_string());
-    lines.push("export type NpcColumn = (typeof NpcColumn)[keyof typeof NpcColumn];".to_string());
-
-    write_text(&out_dir.join("dbtables.ts"), &lines.join("\n"))
+    writer.line(format!("export const ITEM_SET_COUNT = {};", sets.len()))?;
+    writer.line("")?;
+    writer.line("// Named column indices for table 163 (items).")?;
+    writer.line("// Example: row.columns[ItemColumn.NAME]")?;
+    writer.line("export const ItemColumn = {")?;
+    writer.line("    ID: 0,")?;
+    writer.line("    PARENT_ID: 1,")?;
+    writer.line("    NAME: 2,")?;
+    writer.line("    DESCRIPTION: 3,")?;
+    writer.line("    PARAM_ID: 4,")?;
+    writer.line("    TYPE_ID: 5,")?;
+    writer.line("    VALUE: 6,")?;
+    writer.line("    FLAGS: 7,")?;
+    writer.line("    STACKABLE: 8,")?;
+    writer.line("    MEMBERS_ONLY: 11,")?;
+    writer.line("    CATEGORY_ID: 13,")?;
+    writer.line("    MODEL_ID: 23,")?;
+    writer.line("    MODEL_ID2: 24,")?;
+    writer.line("    COLOR: 26,")?;
+    writer.line("    EQUIPMENT_OVERRIDES: 30,")?;
+    writer.line("    SOUND_ID: 31,")?;
+    writer.line("} as const;")?;
+    writer.line("export type ItemColumn = (typeof ItemColumn)[keyof typeof ItemColumn];")?;
+    writer.line("")?;
+    writer.line("// Named column indices for table 29 (NPC stats).")?;
+    writer.line("export const NpcColumn = {")?;
+    writer.line("    ID: 0,")?;
+    writer.line("    MODEL_ID1: 1,")?;
+    writer.line("    MODEL_ID2: 2,")?;
+    writer.line("    MODEL_ID3: 3,")?;
+    writer.line("    NAME: 5,")?;
+    writer.line("    SIZE: 7,")?;
+    writer.line("    COMBAT_LEVEL: 9,")?;
+    writer.line("    HITPOINTS: 10,")?;
+    writer.line("    RESPAWN_MS: 13,")?;
+    writer.line("    ATTACK: 14,")?;
+    writer.line("    DEFENCE: 17,")?;
+    writer.line("    ACCURACY: 18,")?;
+    writer.line("} as const;")?;
+    writer.line("export type NpcColumn = (typeof NpcColumn)[keyof typeof NpcColumn];")?;
+    writer.finish()
 }
 
 /// Extract the first int value from a specific column in a DB row.
@@ -5551,28 +6218,22 @@ fn export_interface_ids(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
     }
     all_components.sort_by_key(|entry| entry.uid);
 
-    let mut lines = vec![
-        "// Auto-generated Interface Component definitions".to_string(),
-        "// Source: RS3 cache interfaces archive (parsed component deps)".to_string(),
-        String::new(),
-    ];
+    let mut writer = TextFileWriter::create(&out_dir.join("interfaces.ts"))?;
+    writer.line("// Auto-generated Interface Component definitions")?;
+    writer.line("// Source: RS3 cache interfaces archive (parsed component deps)")?;
+    writer.line("")?;
 
     // ── Interface ID constants ──
-    let mut interface_ids: Vec<u32> = ctx.parsed_components.keys().copied().collect();
-    interface_ids.sort_unstable();
-    interface_ids.dedup();
-    if !interface_ids.is_empty() {
-        lines.push("// Root interface group IDs.".to_string());
-        lines.push("export const InterfaceId = {".to_string());
-        for interface_id in &interface_ids {
-            lines.push(format!("    interface_{interface_id}: {interface_id},"));
+    if !ctx.parsed_components.is_empty() {
+        writer.line("// Root interface group IDs.")?;
+        writer.line("export const InterfaceId = {")?;
+        for &interface_id in ctx.parsed_components.keys() {
+            writer.line(format!("    interface_{interface_id}: {interface_id},"))?;
         }
-        lines.push("} as const;".to_string());
-        lines.push(String::new());
-        lines.push(
-            "export type InterfaceId = (typeof InterfaceId)[keyof typeof InterfaceId];".to_string(),
-        );
-        lines.push(String::new());
+        writer.line("} as const;")?;
+        writer.line("")?;
+        writer.line("export type InterfaceId = (typeof InterfaceId)[keyof typeof InterfaceId];")?;
+        writer.line("")?;
     }
 
     // ── Named component ID constants (full UID keys) ──
@@ -5603,44 +6264,40 @@ fn export_interface_ids(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
     named_entries.sort_by_key(|e| e.1);
 
     if !named_entries.is_empty() {
-        lines.push("// Named component UIDs used by CS2 cc_* / if_* opcodes.".to_string());
-        lines.push("export const ComponentId = {".to_string());
+        writer.line("// Named component UIDs used by CS2 cc_* / if_* opcodes.")?;
+        writer.line("export const ComponentId = {")?;
         for (prop, uid, interface_id, component_id, comp_type) in &named_entries {
-            lines.push(format!(
+            writer.line(format!(
                 "    /** {comp_type} interface={interface_id} com={component_id} uid={uid} */"
-            ));
-            lines.push(format!("    {prop}: {uid},"));
+            ))?;
+            writer.line(format!("    {prop}: {uid},"))?;
         }
-        lines.push("} as const;".to_string());
-        lines.push(String::new());
-        lines.push(
-            "export type ComponentId = (typeof ComponentId)[keyof typeof ComponentId];".to_string(),
-        );
-        lines.push(String::new());
+        writer.line("} as const;")?;
+        writer.line("")?;
+        writer.line("export type ComponentId = (typeof ComponentId)[keyof typeof ComponentId];")?;
+        writer.line("")?;
     }
 
     // ── ComponentInfo interface and data ──
-    lines.push("export interface ComponentInfo {".to_string());
-    lines.push("    id: number;".to_string());
-    lines.push("    interfaceId: number;".to_string());
-    lines.push("    componentId: number;".to_string());
-    lines.push("    type: string;".to_string());
-    lines.push("    name: string | null;".to_string());
-    lines.push("    children: number[];".to_string());
-    lines.push("    scripts: number[];".to_string());
-    lines.push("    varps: Array<{domain: string; id: number}>;".to_string());
-    lines.push("    varbits: number[];".to_string());
-    lines.push("    enums: number[];".to_string());
-    lines.push("    params: number[];".to_string());
-    lines.push("    invs: number[];".to_string());
-    lines.push("    models: number[];".to_string());
-    lines.push("    seqs: number[];".to_string());
-    lines.push("}".to_string());
-    lines.push(String::new());
+    writer.line("export interface ComponentInfo {")?;
+    writer.line("    id: number;")?;
+    writer.line("    interfaceId: number;")?;
+    writer.line("    componentId: number;")?;
+    writer.line("    type: string;")?;
+    writer.line("    name: string | null;")?;
+    writer.line("    children: number[];")?;
+    writer.line("    scripts: number[];")?;
+    writer.line("    varps: Array<{domain: string; id: number}>;")?;
+    writer.line("    varbits: number[];")?;
+    writer.line("    enums: number[];")?;
+    writer.line("    params: number[];")?;
+    writer.line("    invs: number[];")?;
+    writer.line("    models: number[];")?;
+    writer.line("    seqs: number[];")?;
+    writer.line("}")?;
+    writer.line("")?;
 
-    lines.push(
-        "export const ALL_COMPONENTS: ReadonlyMap<number, ComponentInfo> = new Map([".to_string(),
-    );
+    writer.line("export const ALL_COMPONENTS: ReadonlyMap<number, ComponentInfo> = new Map([")?;
     for entry in &all_components {
         let deps = entry.deps;
         let varp_items: Vec<String> = deps
@@ -5681,7 +6338,7 @@ fn export_interface_ids(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
             Some(n) => format!("'{}'", escape_ts_string(n)),
             None => "null".to_string(),
         };
-        lines.push(format!(
+        writer.line(format!(
             "    [{uid}, {{ id:{uid}, interfaceId:{interface_id}, componentId:{component_id}, type:'{type}', name:{name}, children:[{children}], scripts:[{scripts}], varps:[{varps}], varbits:[{varbits}], enums:[{enums}], params:[{params}], invs:[{invs}], models:[{models}], seqs:[{seqs}] }}],",
             uid = entry.uid,
             interface_id = entry.interface_id,
@@ -5697,16 +6354,15 @@ fn export_interface_ids(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
             invs = invs_json,
             models = models_json,
             seqs = seqs_json,
-        ));
+        ))?;
     }
-    lines.push("]);".to_string());
-    lines.push(String::new());
-    lines.push(format!(
+    writer.line("]);")?;
+    writer.line("")?;
+    writer.line(format!(
         "export const COMPONENT_COUNT = {};",
         all_components.len()
-    ));
-
-    write_text(&out_dir.join("interfaces.ts"), &lines.join("\n"))
+    ))?;
+    writer.finish()
 }
 
 fn set_to_json(set: &std::collections::HashSet<u32>) -> String {
