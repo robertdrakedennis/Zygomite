@@ -126,6 +126,10 @@ impl OpcodeBook {
             .with_context(|| format!("missing opcode mapping for name '{name}'"))
     }
 
+    pub fn commands(&self) -> impl Iterator<Item = &str> {
+        self.by_name.keys().map(String::as_str)
+    }
+
     pub fn has_large_operand(&self, opcode: u16) -> bool {
         self.large_by_id
             .get(usize::from(opcode))

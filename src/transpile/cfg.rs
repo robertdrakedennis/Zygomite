@@ -1,5 +1,6 @@
-use super::ast::Expression;
+use super::ast::{BinaryOperation, Expression, UnaryOp, UnaryOperation};
 use super::expr_recovery::{ExprRecovery, RecoveredStmt};
+use super::structured::{AssignmentTarget, StructuredStmt, SwitchCaseStmt};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone)]
@@ -13,7 +14,7 @@ pub struct Block {
     pub is_loop_header: bool,
     pub loop_target: Option<usize>,
     pub is_conditional_branch: bool,
-    pub branch_condition: Option<String>,
+    pub branch_condition: Option<Expression>,
 }
 
 impl Block {
@@ -273,27 +274,7 @@ impl<'a> CfgBuilder<'a> {
                 // Find the last Branch/BranchBinary in the statements
                 // (not just the last statement, which might be a Goto)
                 for stmt in block.statements.iter().rev() {
-                    let cond = match stmt {
-                        RecoveredStmt::Branch {
-                            condition,
-                            negated: false,
-                            ..
-                        } => Some(expr_to_string(condition)),
-                        RecoveredStmt::Branch {
-                            condition,
-                            negated: true,
-                            ..
-                        } => Some(format!("!({})", expr_to_string(condition))),
-                        RecoveredStmt::BranchBinary {
-                            op, left, right, ..
-                        } => Some(format!(
-                            "({} {} {})",
-                            expr_to_string(left),
-                            op.as_str(),
-                            expr_to_string(right)
-                        )),
-                        _ => None,
-                    };
+                    let cond = branch_condition_expr(stmt);
                     if let Some(cond) = cond {
                         block.branch_condition = Some(cond);
                         break;
@@ -302,6 +283,76 @@ impl<'a> CfgBuilder<'a> {
             }
         }
     }
+}
+
+fn branch_condition_expr(stmt: &RecoveredStmt) -> Option<Expression> {
+    match stmt {
+        RecoveredStmt::Branch {
+            condition,
+            negated: false,
+            ..
+        } => Some(condition.clone()),
+        RecoveredStmt::Branch {
+            condition,
+            negated: true,
+            ..
+        } => Some(Expression::UnaryOperation(UnaryOperation {
+            op: UnaryOp::Not,
+            operand: Box::new(condition.clone()),
+        })),
+        RecoveredStmt::BranchBinary {
+            op, left, right, ..
+        } => Some(Expression::BinaryOperation(BinaryOperation {
+            op: *op,
+            left: Box::new(left.clone()),
+            right: Box::new(right.clone()),
+        })),
+        _ => None,
+    }
+}
+
+fn assignment_target_from_recovered(target: &str) -> AssignmentTarget {
+    if let Some((array, index)) = target.split_once('[')
+        && let Some(index) = index.strip_suffix(']')
+    {
+        if let Some(index_expr) = simple_target_index_expr(index) {
+            return AssignmentTarget::ArrayAccess {
+                array: array.to_string(),
+                index: index_expr,
+            };
+        }
+        return AssignmentTarget::Opaque(target.to_string());
+    }
+    if is_identifier_like(target) {
+        AssignmentTarget::Identifier(target.to_string())
+    } else {
+        AssignmentTarget::Opaque(target.to_string())
+    }
+}
+
+fn is_identifier_like(value: &str) -> bool {
+    let mut chars = value.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !(first == '_' || first.is_ascii_alphabetic()) {
+        return false;
+    }
+    chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+}
+
+fn simple_target_index_expr(value: &str) -> Option<Expression> {
+    if let Ok(number) = value.parse::<i32>() {
+        return Some(Expression::NumberLiteral(super::ast::NumberLiteral {
+            value: number,
+        }));
+    }
+    if is_identifier_like(value) {
+        return Some(Expression::Identifier(super::ast::Identifier {
+            name: value.to_string(),
+        }));
+    }
+    None
 }
 
 fn is_cond_flag_instr(cmd: &str) -> bool {
@@ -341,84 +392,6 @@ pub fn build_cfg<S: std::hash::BuildHasher>(
         script_signatures,
     )
     .build()
-}
-
-pub fn expr_to_string(expr: &Expression) -> String {
-    match expr {
-        Expression::NumberLiteral(n) => n.value.to_string(),
-        Expression::BigIntLiteral(b) => format!("{}n", b.value),
-        Expression::Identifier(id) => id.name.clone(),
-        Expression::StringLiteral(s) => format!("\"{}\"", s.value),
-        Expression::BooleanLiteral(b) => b.value.to_string(),
-        Expression::Call(c) => {
-            let callee = expr_to_string(&c.callee);
-            let args: Vec<String> = c.arguments.iter().map(expr_to_string).collect();
-            format!("{callee}({})", args.join(", "))
-        }
-        Expression::CallbackLiteral(callback) => {
-            let watchers = callback.watchers.join(", ");
-            format!("callback(\"{}\", [{}])", callback.script, watchers)
-        }
-        Expression::BinaryOperation(bin) => {
-            let left = expr_to_string(&bin.left);
-            let right = expr_to_string(&bin.right);
-            format!("({left} {op} {right})", op = bin.op.as_str())
-        }
-        Expression::UnaryOperation(un) => {
-            let operand = expr_to_string(&un.operand);
-            format!("({}{operand})", un.op.as_str())
-        }
-        Expression::ArrayAccess(aa) => {
-            let arr = expr_to_string(&aa.array);
-            let idx = expr_to_string(&aa.index);
-            format!("{arr}[{idx}]")
-        }
-        Expression::PropertyAccess(pa) => {
-            let obj = expr_to_string(&pa.object);
-            format!("{obj}.{}", pa.property)
-        }
-        Expression::PushOperation(_) => "push(...)".to_string(),
-        Expression::PopOperation(_) => "pop()".to_string(),
-        Expression::GotoExpr(_) => "goto(...)".to_string(),
-    }
-}
-
-#[derive(Debug)]
-pub enum StructuredStmt {
-    While {
-        body: Vec<Self>,
-    },
-    If {
-        condition: String,
-        then_body: Vec<Self>,
-        else_body: Option<Vec<Self>>,
-    },
-    Switch {
-        expr: String,
-        cases: Vec<SwitchCaseStmt>,
-    },
-    Assignment {
-        target: String,
-        value: String,
-    },
-    Expr {
-        expr: String,
-    },
-    Goto {
-        target: usize,
-    },
-    Return {
-        value: Option<String>,
-    },
-    Comment(String),
-    Break,
-    Continue,
-}
-
-#[derive(Debug)]
-pub struct SwitchCaseStmt {
-    pub value: i32,
-    pub body: Vec<StructuredStmt>,
 }
 
 pub struct StructuredEmitter {
@@ -477,16 +450,14 @@ impl StructuredEmitter {
         self.emit_block_statements(&block);
 
         if block.is_conditional_branch && block.successors.len() >= 2 {
-            let condition = block.branch_condition.clone().unwrap_or_default();
-            if condition.is_empty() {
-                // Fallback to unconditional navigation
+            let Some(condition) = block.branch_condition.clone() else {
                 if let Some(&next) = block.successors.first()
                     && next > bi
                 {
                     self.emit_block(next);
                 }
                 return;
-            }
+            };
 
             let true_target = block.successors[0];
             let false_target = if block.successors.len() > 1 {
@@ -576,10 +547,7 @@ impl StructuredEmitter {
         // Emit block statements (skip the loop-back goto at the end)
         let block_is_cond = block.is_conditional_branch
             && block.successors.len() >= 2
-            && block
-                .branch_condition
-                .as_ref()
-                .is_some_and(|c| !c.is_empty());
+            && block.branch_condition.is_some();
 
         for stmt in &block.statements {
             if is_loop_back_stmt(stmt, loop_target) {
@@ -611,7 +579,9 @@ impl StructuredEmitter {
 
         // Handle successors (if/else detection)
         if block_is_cond {
-            let condition = block.branch_condition.clone().unwrap_or_default();
+            let Some(condition) = block.branch_condition.clone() else {
+                return;
+            };
             let true_target = block.successors[0];
             let false_target = block.successors[1];
 
@@ -662,12 +632,10 @@ impl StructuredEmitter {
 
     fn stmt_to_structured(&self, stmt: &RecoveredStmt) -> StructuredStmt {
         match stmt {
-            RecoveredStmt::Expression(expr) => StructuredStmt::Expr {
-                expr: Self::expr_to_string(expr),
-            },
+            RecoveredStmt::Expression(expr) => StructuredStmt::Expr { expr: expr.clone() },
             RecoveredStmt::Assignment { target, value, .. } => StructuredStmt::Assignment {
-                target: target.clone(),
-                value: Self::expr_to_string(value),
+                target: assignment_target_from_recovered(target),
+                value: value.clone(),
             },
             RecoveredStmt::Goto(target) => StructuredStmt::Goto { target: *target },
             RecoveredStmt::Branch {
@@ -675,13 +643,17 @@ impl StructuredEmitter {
                 target,
                 negated,
             } => {
-                let prefix = if *negated { "if (!(" } else { "if (" };
-                let suffix = format!(")) goto {target};");
+                let condition = if *negated {
+                    Expression::UnaryOperation(UnaryOperation {
+                        op: UnaryOp::Not,
+                        operand: Box::new(condition.clone()),
+                    })
+                } else {
+                    condition.clone()
+                };
                 StructuredStmt::Comment(format!(
-                    "{}{}{}",
-                    prefix,
-                    expr_to_string(condition),
-                    suffix
+                    "if ({}) goto {target};",
+                    super::structured::format_expression(&condition)
                 ))
             }
             RecoveredStmt::BranchBinary {
@@ -690,19 +662,20 @@ impl StructuredEmitter {
                 right,
                 target,
             } => {
-                let cond = format!(
-                    "({} {} {})",
-                    expr_to_string(left),
-                    op.as_str(),
-                    expr_to_string(right)
-                );
-                StructuredStmt::Comment(format!("if ({cond}) goto {target};"))
+                let condition = Expression::BinaryOperation(BinaryOperation {
+                    op: *op,
+                    left: Box::new(left.clone()),
+                    right: Box::new(right.clone()),
+                });
+                StructuredStmt::Comment(format!(
+                    "if ({}) goto {target};",
+                    super::structured::format_expression(&condition)
+                ))
             }
             RecoveredStmt::Switch {
                 discriminant,
                 cases,
             } => {
-                let expr = Self::expr_to_string(discriminant);
                 let cases = cases
                     .iter()
                     .map(|(v, _)| SwitchCaseStmt {
@@ -710,17 +683,14 @@ impl StructuredEmitter {
                         body: Vec::new(),
                     })
                     .collect();
-                StructuredStmt::Switch { expr, cases }
+                StructuredStmt::Switch {
+                    expr: discriminant.clone(),
+                    cases,
+                }
             }
-            RecoveredStmt::Return(val) => StructuredStmt::Return {
-                value: val.as_ref().map(Self::expr_to_string),
-            },
+            RecoveredStmt::Return(val) => StructuredStmt::Return { value: val.clone() },
             RecoveredStmt::Comment(text) => StructuredStmt::Comment(text.clone()),
         }
-    }
-
-    fn expr_to_string(expr: &Expression) -> String {
-        expr_to_string(expr)
     }
 
     fn collect_loop_blocks(&self, header: usize, loop_target: usize) -> Vec<usize> {

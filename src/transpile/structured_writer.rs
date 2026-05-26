@@ -1,11 +1,10 @@
-use super::ast::{Declaration, TypeAnnotation};
-use super::cfg::{StructuredStmt, build_cfg, detect_return_type, emit_structured};
+use super::ast::{Declaration, ImportStatement, TypeAnnotation};
+use super::cfg::{build_cfg, detect_return_type, emit_structured};
+use super::structured::StructuredScript;
 use super::{ScriptCatalog, ScriptId, ScriptSignature, resolve_script_signature};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::fmt::Write as _;
 
 pub struct StructuredWriter<'a> {
-    indent: usize,
     var_names: &'a HashMap<(crate::vars::VarDomain, u16), String>,
     component_names: &'a HashMap<u32, String>,
     enum_value_names: &'a HashMap<i32, String>,
@@ -22,7 +21,6 @@ impl<'a> StructuredWriter<'a> {
         script_signatures: &'a HashMap<ScriptId, ScriptSignature>,
     ) -> Self {
         Self {
-            indent: 0,
             var_names,
             component_names,
             enum_value_names,
@@ -31,56 +29,7 @@ impl<'a> StructuredWriter<'a> {
         }
     }
 
-    pub fn write_declaration(&mut self, decl: &Declaration) -> String {
-        let mut out = String::new();
-
-        // ── Header comment ──
-        let _ = writeln!(&mut out, "// Auto-generated CS2 to TypeScript");
-        if let Some(ref name) = decl.name {
-            let _ = writeln!(&mut out, "// Script name: {name}");
-        }
-        if let Some(metadata) = self.script_catalog.get(decl.script_id) {
-            let _ = writeln!(
-                &mut out,
-                "// Meta: packed={} group={} file={} kind={} short_name={}",
-                metadata.packed_id,
-                metadata.group_id,
-                metadata.file_id,
-                metadata.kind.as_label(),
-                metadata.short_name
-            );
-        }
-        let _ = writeln!(
-            &mut out,
-            "// script_{}: locals(int={}, obj={}, long={}) args(int={}, obj={}, long={})",
-            decl.script_id,
-            decl.locals
-                .iter()
-                .filter(|l| matches!(l.type_annotation, TypeAnnotation::Number))
-                .count(),
-            decl.locals
-                .iter()
-                .filter(|l| matches!(l.type_annotation, TypeAnnotation::String))
-                .count(),
-            decl.locals
-                .iter()
-                .filter(|l| matches!(l.type_annotation, TypeAnnotation::BigInt))
-                .count(),
-            decl.arguments
-                .iter()
-                .filter(|l| matches!(l.type_annotation, TypeAnnotation::Number))
-                .count(),
-            decl.arguments
-                .iter()
-                .filter(|l| matches!(l.type_annotation, TypeAnnotation::String))
-                .count(),
-            decl.arguments
-                .iter()
-                .filter(|l| matches!(l.type_annotation, TypeAnnotation::BigInt))
-                .count(),
-        );
-
-        // ── Build function body ──
+    pub fn build_script(&self, decl: &Declaration) -> StructuredScript {
         let blocks = build_cfg(
             &decl.instructions,
             self.var_names,
@@ -90,65 +39,38 @@ impl<'a> StructuredWriter<'a> {
             self.script_signatures,
         );
         let structured = emit_structured(blocks);
-
-        let mut body = String::new();
-        self.indent = 1;
-        // Local variable declarations
-        for local in &decl.locals {
-            let _ = writeln!(
-                &mut body,
-                "    let {name}: {type_};",
-                name = local.name,
-                type_ = local.type_annotation.as_str()
-            );
-        }
-        if !decl.locals.is_empty() {
-            body.push('\n');
-        }
-
-        let array_ids = collect_array_ids(&decl.instructions);
-        if !array_ids.is_empty() {
-            for array_id in &array_ids {
-                let _ = writeln!(&mut body, "    let array_{array_id}: number[] = [];");
-            }
-            body.push('\n');
-        }
-
-        self.write_structured(&structured, &mut body);
-
-        self.write_imports(decl, &mut out);
-        out.push('\n');
-
-        // ── Function signature with detected return type ──
         let return_type =
             resolve_script_signature(self.script_catalog, self.script_signatures, decl.script_id)
                 .and_then(|signature| {
                     (signature.return_type != "unknown").then_some(signature.return_type.as_str())
                 })
-                .unwrap_or_else(|| detect_return_type(&structured));
+                .unwrap_or_else(|| detect_return_type(&structured))
+                .to_string();
         let function_name = self
             .script_catalog
             .export_name(decl.script_id)
             .map(str::to_owned)
             .unwrap_or_else(|| format!("script{}", decl.script_id));
-        let _ = writeln!(
-            &mut out,
-            "export function {function_name}({args}): {return_type} {{",
-            args = decl
-                .arguments
-                .iter()
-                .map(|a| format!("{}: {}", a.name, a.type_annotation.as_str()))
-                .collect::<Vec<_>>()
-                .join(", ")
-        );
 
-        out.push_str(&body);
-        out.push_str("}\n");
-
-        out
+        StructuredScript {
+            script_id: decl.script_id,
+            raw_name: decl.name.clone(),
+            header_comments: build_header_comments(decl, self.script_catalog),
+            imports: self.collect_imports(decl),
+            function_name,
+            arguments: decl.arguments.clone(),
+            locals: decl.locals.clone(),
+            arrays: collect_array_ids(&decl.instructions),
+            return_type,
+            body: structured,
+        }
     }
 
-    fn write_imports(&self, decl: &Declaration, out: &mut String) {
+    pub fn write_declaration(&self, decl: &Declaration) -> String {
+        self.build_script(decl).render()
+    }
+
+    fn collect_imports(&self, decl: &Declaration) -> Vec<ImportStatement> {
         let mut index_imports = BTreeSet::new();
         let mut enum_imports = BTreeSet::new();
         let mut module_imports: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
@@ -210,129 +132,76 @@ impl<'a> StructuredWriter<'a> {
             }
         }
 
+        let mut imports = Vec::new();
         if !index_imports.is_empty() {
-            let names = index_imports.into_iter().collect::<Vec<_>>().join(", ");
-            let _ = writeln!(out, "import {{ {names} }} from './index';");
+            imports.push(ImportStatement {
+                module: "./index".to_string(),
+                named_exports: index_imports.into_iter().map(str::to_string).collect(),
+                is_type_only: false,
+            });
         }
         if !enum_imports.is_empty() {
-            let names = enum_imports.into_iter().collect::<Vec<_>>().join(", ");
-            let _ = writeln!(out, "import {{ {names} }} from './enums';");
+            imports.push(ImportStatement {
+                module: "./enums".to_string(),
+                named_exports: enum_imports.into_iter().collect(),
+                is_type_only: false,
+            });
         }
         for (module, names) in module_imports {
-            let names = names.into_iter().collect::<Vec<_>>().join(", ");
-            let _ = writeln!(out, "import {{ {names} }} from '{module}';");
+            imports.push(ImportStatement {
+                module,
+                named_exports: names.into_iter().collect(),
+                is_type_only: false,
+            });
         }
+        imports
     }
+}
 
-    fn write_structured(&mut self, stmts: &[StructuredStmt], out: &mut String) {
-        for stmt in stmts {
-            self.write_stmt(stmt, out);
-        }
+fn build_header_comments(decl: &Declaration, script_catalog: &ScriptCatalog) -> Vec<String> {
+    let mut comments = vec!["Auto-generated CS2 to TypeScript".to_string()];
+    if let Some(name) = &decl.name {
+        comments.push(format!("Script name: {name}"));
     }
-
-    fn write_stmt(&mut self, stmt: &StructuredStmt, out: &mut String) {
-        match stmt {
-            StructuredStmt::While { body } => {
-                self.write_indent(out);
-                out.push_str("while (true) {\n");
-                self.indent += 1;
-                self.write_structured(body, out);
-                self.indent -= 1;
-                self.write_indent(out);
-                out.push_str("}\n");
-            }
-            StructuredStmt::If {
-                condition,
-                then_body,
-                else_body,
-            } => {
-                self.write_indent(out);
-                out.push_str("if (");
-                out.push_str(condition);
-                out.push_str(") {\n");
-                self.indent += 1;
-                self.write_structured(then_body, out);
-                self.indent -= 1;
-                if let Some(else_b) = else_body {
-                    self.write_indent(out);
-                    out.push_str("} else {\n");
-                    self.indent += 1;
-                    self.write_structured(else_b, out);
-                    self.indent -= 1;
-                }
-                self.write_indent(out);
-                out.push_str("}\n");
-            }
-            StructuredStmt::Switch { expr, cases } => {
-                self.write_indent(out);
-                out.push_str("switch (");
-                out.push_str(expr);
-                out.push_str(") {\n");
-                self.indent += 1;
-                for case_ in cases {
-                    self.write_indent(out);
-                    out.push_str("case ");
-                    out.push_str(&case_.value.to_string());
-                    out.push_str(":\n");
-                    self.indent += 1;
-                    self.write_structured(&case_.body, out);
-                    self.write_indent(out);
-                    out.push_str("break;\n");
-                    self.indent -= 1;
-                }
-                self.indent -= 1;
-                self.write_indent(out);
-                out.push_str("}\n");
-            }
-            StructuredStmt::Assignment { target, value } => {
-                self.write_indent(out);
-                out.push_str(target);
-                out.push_str(" = ");
-                out.push_str(value);
-                out.push_str(";\n");
-            }
-            StructuredStmt::Expr { expr } => {
-                self.write_indent(out);
-                out.push_str(expr);
-                out.push_str(";\n");
-            }
-            StructuredStmt::Goto { target } => {
-                self.write_indent(out);
-                out.push_str("goto(");
-                out.push_str(&target.to_string());
-                out.push_str(");\n");
-            }
-            StructuredStmt::Return { value } => {
-                self.write_indent(out);
-                out.push_str("return");
-                if let Some(v) = value {
-                    out.push(' ');
-                    out.push_str(v);
-                }
-                out.push_str(";\n");
-            }
-            StructuredStmt::Break => {
-                self.write_indent(out);
-                out.push_str("break;\n");
-            }
-            StructuredStmt::Continue => {
-                self.write_indent(out);
-                out.push_str("continue;\n");
-            }
-            StructuredStmt::Comment(text) => {
-                self.write_indent(out);
-                out.push_str("// ");
-                out.push_str(text);
-                out.push('\n');
-            }
-        }
+    if let Some(metadata) = script_catalog.get(decl.script_id) {
+        comments.push(format!(
+            "Meta: packed={} group={} file={} kind={} short_name={}",
+            metadata.packed_id,
+            metadata.group_id,
+            metadata.file_id,
+            metadata.kind.as_label(),
+            metadata.short_name
+        ));
     }
-
-    fn write_indent(&self, out: &mut String) {
-        for _ in 0..self.indent {
-            out.push_str("    ");
-        }
-    }
+    comments.push(format!(
+        "script_{}: locals(int={}, obj={}, long={}) args(int={}, obj={}, long={})",
+        decl.script_id,
+        decl.locals
+            .iter()
+            .filter(|l| matches!(l.type_annotation, TypeAnnotation::Number))
+            .count(),
+        decl.locals
+            .iter()
+            .filter(|l| matches!(l.type_annotation, TypeAnnotation::String))
+            .count(),
+        decl.locals
+            .iter()
+            .filter(|l| matches!(l.type_annotation, TypeAnnotation::BigInt))
+            .count(),
+        decl.arguments
+            .iter()
+            .filter(|l| matches!(l.type_annotation, TypeAnnotation::Number))
+            .count(),
+        decl.arguments
+            .iter()
+            .filter(|l| matches!(l.type_annotation, TypeAnnotation::String))
+            .count(),
+        decl.arguments
+            .iter()
+            .filter(|l| matches!(l.type_annotation, TypeAnnotation::BigInt))
+            .count(),
+    ));
+    comments
 }
 
 fn collect_array_ids(instructions: &[super::ast::InstructionNode]) -> Vec<u32> {

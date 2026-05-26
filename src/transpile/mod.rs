@@ -3,27 +3,37 @@ pub mod cfg;
 pub mod codegen;
 pub mod diagnostics;
 pub mod expr_recovery;
+pub mod reversible_format;
 pub mod scope;
 pub mod sema;
+pub mod structured;
 pub mod structured_writer;
+pub mod ts_lower;
+pub mod ts_parse;
 pub mod writer;
 
 pub use ast::*;
-pub use cfg::{
-    Block, StructuredStmt, SwitchCaseStmt, build_cfg, detect_return_type, emit_structured,
-};
+pub use cfg::{Block, build_cfg, detect_return_type, emit_structured};
 pub use codegen::{CodeGen, generate_program};
 pub use diagnostics::{Diagnostic, Diagnostics, Severity, Span};
 pub use expr_recovery::detect_return_type_from_recovered;
+pub use reversible_format::{
+    ParsedReversibleSource, REVERSIBLE_FORMAT_VERSION, ReversibleMetadata,
+    append_reversible_footer, blocking_diagnostics, editable_structured, is_reversible_source,
+    parse_reversible_source, render_reversible_source, structured_digest,
+};
 pub use scope::{LocalType, Scope, Scopes, Symbol, SymbolKind, SymbolTable};
 pub use sema::Sema;
+pub use structured::{AssignmentTarget, StructuredScript, StructuredStmt, SwitchCaseStmt};
 pub use structured_writer::StructuredWriter;
+pub use ts_lower::{ReverseCompileContext, lower_structured_script};
+pub use ts_parse::parse_structured_typescript;
 pub use writer::Writer;
 
 use crate::cache_bail as bail;
 use crate::config::EnumEntry;
 use crate::error::Result;
-use crate::script::{CompiledScript, MIN_SCRIPT_BUILD, OpcodeBook, decode_script};
+use crate::script::{CompiledScript, MIN_SCRIPT_BUILD, OpcodeBook, decode_script, script_to_asm};
 use crate::vars::VarDomain;
 use std::collections::{BTreeMap, HashMap};
 use std::hash::BuildHasher;
@@ -149,6 +159,12 @@ impl ScriptCatalog {
     pub fn resolve_call_target(&self, raw_id: i32) -> Option<&ScriptMetadata> {
         self.resolve_group(ScriptGroupId(raw_id))
             .or_else(|| self.entries.get(&ScriptId(raw_id)))
+    }
+
+    pub fn resolve_export_name(&self, export_name: &str) -> Option<&ScriptMetadata> {
+        self.entries
+            .values()
+            .find(|metadata| metadata.export_name == export_name)
     }
 
     pub fn export_name(&self, script_id: ScriptId) -> Option<&str> {
@@ -460,6 +476,8 @@ pub struct Transpiler {
     script_signatures: HashMap<ScriptId, ScriptSignature>,
     script_catalog: ScriptCatalog,
     limits: TranspileLimits,
+    build: u32,
+    subbuild: u32,
 }
 
 impl Transpiler {
@@ -469,7 +487,15 @@ impl Transpiler {
             script_signatures: HashMap::new(),
             script_catalog: ScriptCatalog::default(),
             limits: TranspileLimits::default(),
+            build: 0,
+            subbuild: 0,
         }
+    }
+
+    pub fn with_version(mut self, build: u32, subbuild: u32) -> Self {
+        self.build = build;
+        self.subbuild = subbuild;
+        self
     }
 
     pub fn with_script_catalog(mut self, script_catalog: ScriptCatalog) -> Self {
@@ -691,22 +717,34 @@ impl Transpiler {
         let codegen = CodeGen::new(&self.symbol_table);
         let decl = codegen.generate(script, script_id);
         let diagnostics = self.collect_transpile_diagnostics(script_id, &decl);
-        let mut writer = StructuredWriter::new(
+        let writer = StructuredWriter::new(
             &self.symbol_table.var_map,
             &self.symbol_table.component_names,
             &self.symbol_table.enum_value_names,
             &self.script_catalog,
             &self.script_signatures,
         );
-        let source = writer.write_declaration(&decl);
-        self.check_generated_source_limit(script_id, source.len())?;
-        let diagnostics = self.finish_transpile_diagnostics(diagnostics, script_id, &source);
+        let structured_script = writer.build_script(&decl);
+        let body_source = structured_script.render();
+        self.check_generated_source_limit(script_id, body_source.len())?;
+        let diagnostics = self.finish_transpile_diagnostics(diagnostics, script_id, &body_source);
+        let metadata = build_reversible_metadata(
+            &structured_script,
+            &diagnostics,
+            self.build,
+            self.subbuild,
+            self.script_catalog.get(script_id),
+        );
+        let mut source = body_source;
+        append_reversible_footer(&mut source, &metadata, &script_to_asm(script))?;
         Ok(TranspiledScript {
             source,
             referenced_vars: collect_var_refs(script),
             referenced_varbits: collect_varbit_refs(script),
             referenced_enums: collect_enum_refs(script),
             referenced_scripts: collect_script_refs(script),
+            editable_structured: metadata.editable_structured,
+            blocking_diagnostics: metadata.blocking_diagnostics.clone(),
             diagnostics,
         })
     }
@@ -850,12 +888,41 @@ impl Default for Transpiler {
     }
 }
 
+fn build_reversible_metadata(
+    script: &StructuredScript,
+    diagnostics: &Diagnostics,
+    build: u32,
+    subbuild: u32,
+    metadata: Option<&ScriptMetadata>,
+) -> ReversibleMetadata {
+    let packed_id = metadata.map_or(script.script_id.0, |entry| entry.packed_id.0);
+    let group_id = metadata.map_or(packed_id >> 16, |entry| entry.group_id.0);
+    let file_id = metadata.map_or((packed_id & 0xffff) as u16, |entry| entry.file_id);
+    let blocking_diagnostics = blocking_diagnostics(diagnostics);
+    ReversibleMetadata {
+        format_version: reversible_format::REVERSIBLE_FORMAT_VERSION,
+        build,
+        subbuild,
+        packed_id,
+        group_id,
+        file_id,
+        script_id: script.script_id.0,
+        export_name: script.function_name.clone(),
+        raw_name: script.raw_name.clone(),
+        editable_structured: editable_structured(diagnostics),
+        structured_digest: structured_digest(script),
+        blocking_diagnostics,
+    }
+}
+
 pub struct TranspiledScript {
     pub source: String,
     pub referenced_vars: Vec<(VarDomain, u16)>,
     pub referenced_varbits: Vec<u16>,
     pub referenced_enums: Vec<u32>,
     pub referenced_scripts: Vec<ScriptId>,
+    pub editable_structured: bool,
+    pub blocking_diagnostics: Vec<String>,
     pub diagnostics: Diagnostics,
 }
 

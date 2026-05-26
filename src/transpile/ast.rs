@@ -197,7 +197,7 @@ pub struct BinaryOperation {
     pub right: Box<Expression>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryOp {
     Add,
     Sub,
@@ -240,7 +240,7 @@ pub struct UnaryOperation {
     pub operand: Box<Expression>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnaryOp {
     Neg,
     Not,
@@ -332,7 +332,7 @@ pub struct VarBitRefNode {
     pub is_transmog: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TypeAnnotation {
     Number,
     BigInt,

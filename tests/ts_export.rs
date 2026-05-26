@@ -315,24 +315,25 @@ fn transpile_stockmarket_onload_947_imports_named_callees() {
         "expected direct import for script8841"
     );
     assert!(
-        script
-            .contains("UI.Setonvartransmit(callback(\"script588\", [varplayerint_135]), 6881479);"),
+        script.contains(
+            "UI.Setonvartransmit(callback(\"script588\", [], [varplayerint_135], \"Y\"), 6881479);"
+        ),
         "expected decoded var transmit hook callback"
     );
     assert!(
-        script.contains(
-            "UI.Setonstocktransmit(callback(\"stockmarket_onstocktransmit\", []), 6881280);"
-        ),
+        script.contains("UI.Setonstocktransmit(callback(\"script586\", [], [], \"\"), 6881280);"),
         "expected decoded stock transmit hook callback"
     );
     assert!(
         script.contains(
-            "UI.Setonvartransmit(callback(\"script11743\", [varplayerint_429, varplayerint_431]), 6881470);"
+            "UI.Setonvartransmit(callback(\"script11743\", [], [varplayerint_429, varplayerint_431], \"Y\"), 6881470);"
         ),
         "expected decoded multi-watch var transmit hook callback"
     );
     assert!(
-        script.contains("UI.Setoninvtransmit(callback(\"script11743\", [inv_540]), 6881470);"),
+        script.contains(
+            "UI.Setoninvtransmit(callback(\"script11743\", [], [inv_540], \"Y\"), 6881470);"
+        ),
         "expected decoded inventory transmit hook callback"
     );
     assert!(

@@ -46,9 +46,14 @@ use crate::interface::render_interface_group;
 use crate::map::{decode_chunk_instance_stream, decode_map_square, decode_map_square_best_effort};
 use crate::model::Model;
 use crate::script::{
-    CompiledScript, Instruction, MIN_SCRIPT_BUILD, OpcodeBook, Operand, decode_script,
+    CompiledScript, Instruction, MIN_SCRIPT_BUILD, OpcodeBook, Operand, VarBitRef, VarRef,
+    decode_script, encode_script, parse_cs2_asm,
 };
-use crate::transpile::Transpiler;
+use crate::transpile::{
+    REVERSIBLE_FORMAT_VERSION, ReverseCompileContext, ScriptCatalog, ScriptCatalogBuilder,
+    Transpiler, is_reversible_source, lower_structured_script, parse_reversible_source,
+    parse_structured_typescript, render_reversible_source, structured_digest,
+};
 use crate::vars::{VarDomain, parse_var, parse_varbit};
 use crate::vfx::decode as decode_vfx;
 use anyhow::{Context, Result, bail};
@@ -242,21 +247,24 @@ pub enum Command {
         #[arg(long)]
         out_file: Option<PathBuf>,
     },
-    /// Assemble a pragma-annotated CS2 TypeScript back to byte-perfect CS2 binary.
+    /// Assemble reversible or pragma-annotated CS2 TypeScript back to CS2 binary.
     #[command(name = "assemble-script")]
     AssembleScript {
-        /// Path to the .ts or .asm file containing @cs2 pragmas
+        /// Path to reversible .ts or pragma ASM file
         #[arg(long)]
         input: PathBuf,
         /// Path to write the compiled .cs2 binary
         #[arg(long)]
         output: PathBuf,
-        /// Cache build version (default: auto-detect)
+        /// Cache build version (default: source metadata or CLI build)
         #[arg(long)]
         build: Option<u32>,
-        /// Cache sub-build version (default: 0)
-        #[arg(long, default_value = "0")]
-        subbuild: u32,
+        /// Cache sub-build version (default: source metadata or CLI subbuild)
+        #[arg(long)]
+        subbuild: Option<u32>,
+        /// Disable embedded ASM fallback and require structured recompilation
+        #[arg(long)]
+        strict_structured: bool,
     },
     /// Dump a lossless raw-flat cache tree for JS5 repacking.
     #[command(name = "dump-raw-flat")]
@@ -828,6 +836,7 @@ pub fn run(cli: Cli) -> Result<()> {
             output,
             build,
             subbuild,
+            strict_structured,
         } => run_assemble_script(
             &cache,
             &tar_path,
@@ -836,6 +845,7 @@ pub fn run(cli: Cli) -> Result<()> {
             &output,
             build,
             subbuild,
+            strict_structured,
             version,
         ),
         Command::DumpRawFlat { out_dir, archives } => {
@@ -3913,30 +3923,276 @@ fn run_assemble_script(
     input: &Path,
     output: &Path,
     build: Option<u32>,
-    subbuild: u32,
+    subbuild: Option<u32>,
+    strict_structured: bool,
     version: RuntimeVersion,
 ) -> Result<()> {
-    let effective_build = build.unwrap_or(version.build);
-    let ctx = ResolverContext::load(cache, tar_path, data_dir, effective_build, subbuild)?;
-    let opcode_book = &ctx.opcode_book;
-
     let source =
         std::fs::read_to_string(input).with_context(|| format!("reading {}", input.display()))?;
-    let script = crate::script::parse_cs2_asm(&source)
-        .with_context(|| format!("parsing ASM pragmas from {}", input.display()))?;
-    let binary = crate::script::encode_script(&script, opcode_book, effective_build)
-        .context("encoding CS2 binary")?;
+    let reversible = if is_reversible_source(&source) {
+        Some(
+            parse_reversible_source(&source)
+                .with_context(|| format!("parsing reversible TS from {}", input.display()))?,
+        )
+    } else {
+        None
+    };
+
+    if let Some(parsed) = &reversible {
+        if parsed.metadata.format_version != REVERSIBLE_FORMAT_VERSION {
+            bail!(
+                "unsupported reversible TS format version {} in {}",
+                parsed.metadata.format_version,
+                input.display()
+            );
+        }
+        if let Some(requested_build) = build
+            && requested_build != parsed.metadata.build
+        {
+            bail!(
+                "assemble build {} mismatches source metadata build {}",
+                requested_build,
+                parsed.metadata.build
+            );
+        }
+        if let Some(requested_subbuild) = subbuild
+            && requested_subbuild != parsed.metadata.subbuild
+        {
+            bail!(
+                "assemble subbuild {} mismatches source metadata subbuild {}",
+                requested_subbuild,
+                parsed.metadata.subbuild
+            );
+        }
+    }
+
+    let effective_build = reversible
+        .as_ref()
+        .map_or(build.unwrap_or(version.build), |parsed| {
+            parsed.metadata.build
+        });
+    let effective_subbuild = reversible.as_ref().map_or_else(
+        || subbuild.unwrap_or(version.subbuild),
+        |parsed| parsed.metadata.subbuild,
+    );
+    let ctx = ResolverContext::load_transpile(
+        cache,
+        tar_path,
+        data_dir,
+        effective_build,
+        effective_subbuild,
+    )?;
+    let opcode_book = &ctx.opcode_book;
+
+    let (script, assemble_mode) = if let Some(parsed) = &reversible {
+        let structured = parse_structured_typescript(&parsed.structured_source)
+            .with_context(|| format!("parsing structured TS from {}", input.display()))?;
+        let current_digest = structured_digest(&structured);
+        if !strict_structured && current_digest == parsed.metadata.structured_digest {
+            (
+                parse_cs2_asm(&parsed.asm_trailer).with_context(|| {
+                    format!("parsing embedded ASM trailer from {}", input.display())
+                })?,
+                "embedded-asm",
+            )
+        } else {
+            if !parsed.metadata.editable_structured {
+                let blockers = if parsed.metadata.blocking_diagnostics.is_empty() {
+                    "unknown blocker".to_string()
+                } else {
+                    parsed.metadata.blocking_diagnostics.join(", ")
+                };
+                bail!(
+                    "structured edits blocked for {}: {}. edit embedded ASM trailer or remove blocker",
+                    parsed.metadata.export_name,
+                    blockers
+                );
+            }
+            let reverse_ctx = build_reverse_compile_context(&ctx, cache, data_dir)?;
+            let compiled = lower_structured_script(&structured, &parsed.metadata, &reverse_ctx)
+                .with_context(|| format!("lowering structured TS from {}", input.display()))?;
+            (compiled, "structured")
+        }
+    } else {
+        (
+            parse_cs2_asm(&source)
+                .with_context(|| format!("parsing ASM pragmas from {}", input.display()))?,
+            "pragma-asm",
+        )
+    };
+    let binary =
+        encode_script(&script, opcode_book, effective_build).context("encoding CS2 binary")?;
 
     std::fs::write(output, &binary).with_context(|| format!("writing {}", output.display()))?;
 
     eprintln!(
-        "Assembled {} instructions → {} ({} bytes, build {})",
+        "Assembled {} instructions → {} ({} bytes, build {}, mode {})",
         script.code.len(),
         output.display(),
         binary.len(),
-        effective_build
+        effective_build,
+        assemble_mode,
     );
     Ok(())
+}
+
+fn build_reverse_compile_context(
+    ctx: &ResolverContext,
+    cache: &FlatCache,
+    data_dir: &Path,
+) -> Result<ReverseCompileContext> {
+    let script_group_names = load_script_group_names_from_cache(cache, data_dir)?;
+    let mut builder = ScriptCatalogBuilder::new(&script_group_names, &ctx.opcode_book, ctx.build);
+    for (&packed_id_raw, data) in &ctx.scripts {
+        builder.add_script(packed_id_raw, data);
+    }
+    Ok(build_reverse_compile_context_from_catalog(
+        ctx,
+        builder.build(),
+    ))
+}
+
+fn build_reverse_compile_context_from_catalog(
+    ctx: &ResolverContext,
+    script_catalog: ScriptCatalog,
+) -> ReverseCompileContext {
+    let mut var_refs_by_name = HashMap::new();
+    for (domain, vars) in &ctx.varps_by_domain {
+        for (&id, entry) in vars {
+            var_refs_by_name.insert(
+                entry.var_name.clone(),
+                VarRef {
+                    domain: *domain,
+                    id: id as u16,
+                    transmog: false,
+                },
+            );
+        }
+    }
+
+    let mut varbit_refs_by_name = HashMap::new();
+    for (&id, entry) in &ctx.varbits {
+        varbit_refs_by_name.insert(
+            entry.varbit_name.clone(),
+            VarBitRef {
+                id: id as u16,
+                transmog: false,
+            },
+        );
+    }
+
+    let mut enum_values_by_name = HashMap::new();
+    for entry in ctx.enums.values() {
+        let object_name = format!("Enum_{}", entry.id);
+        for pair in &entry.values {
+            let property_name = match &pair.value {
+                crate::config::ScalarValue::Str(value) => {
+                    let prop = screaming_snake(value);
+                    if prop.is_empty() {
+                        format!("KEY_{}", pair.key)
+                    } else {
+                        prop
+                    }
+                }
+                _ => format!("KEY_{}", pair.key),
+            };
+            enum_values_by_name.insert(format!("{object_name}.{property_name}"), pair.key);
+        }
+    }
+
+    let mut component_ids_by_name = HashMap::new();
+    for (&interface_id, components) in &ctx.parsed_components {
+        for (&component_id, deps) in components {
+            let property_name = deps
+                .name
+                .as_deref()
+                .map(sanitize_ts_prop)
+                .filter(|prop| !prop.is_empty() && prop != "unnamed")
+                .unwrap_or_else(|| {
+                    sanitize_ts_prop(&crate::interface::component_fallback_name(
+                        interface_id,
+                        component_id,
+                    ))
+                });
+            component_ids_by_name.insert(
+                format!("ComponentId.{property_name}"),
+                crate::interface::component_uid(interface_id, component_id) as i32,
+            );
+        }
+    }
+
+    ReverseCompileContext {
+        build: ctx.build,
+        script_signatures: script_catalog.signature_map(),
+        script_catalog,
+        var_refs_by_name,
+        varbit_refs_by_name,
+        enum_values_by_name,
+        component_ids_by_name,
+        opcode_commands: ctx.opcode_book.commands().map(str::to_string).collect(),
+    }
+}
+
+fn finalize_reversible_transpile_output(
+    source: String,
+    reverse_ctx: &ReverseCompileContext,
+    diagnostics: &mut crate::transpile::Diagnostics,
+    editable_structured: &mut bool,
+    blocking_diagnostics: &mut Vec<String>,
+) -> Result<String> {
+    if !is_reversible_source(&source) {
+        return Ok(source);
+    }
+
+    let parsed = parse_reversible_source(&source)?;
+    let mut metadata = parsed.metadata;
+    if metadata.editable_structured {
+        match parse_structured_typescript(&parsed.structured_source).and_then(|structured| {
+            lower_structured_script(&structured, &metadata, reverse_ctx).map(|_| ())
+        }) {
+            Ok(()) => {}
+            Err(err) => {
+                metadata.editable_structured = false;
+                if !metadata
+                    .blocking_diagnostics
+                    .iter()
+                    .any(|blocker| blocker == "reverse_unsupported")
+                {
+                    metadata
+                        .blocking_diagnostics
+                        .push("reverse_unsupported".to_string());
+                }
+                diagnostics.warning(format!("reverse compile unsupported: {err}"));
+            }
+        }
+    }
+
+    *editable_structured = metadata.editable_structured;
+    *blocking_diagnostics = metadata.blocking_diagnostics.clone();
+    Ok(render_reversible_source(
+        &parsed.structured_source,
+        &metadata,
+        &parsed.asm_trailer,
+    )?)
+}
+
+fn screaming_snake(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for c in value.chars() {
+        if c.is_ascii_alphanumeric() {
+            out.push(c.to_ascii_uppercase());
+        } else if matches!(c, ' ' | '-' | '/' | '.') {
+            out.push('_');
+        }
+    }
+    let trimmed = out.trim_matches('_');
+    if trimmed.is_empty() {
+        String::new()
+    } else if trimmed.starts_with(|c: char| c.is_ascii_digit()) {
+        format!("_{trimmed}")
+    } else {
+        trimmed.to_string()
+    }
 }
 
 fn run_dump_raw_flat(
@@ -4304,8 +4560,10 @@ fn run_transpile_scripts(
         script_catalog_builder.add_script(packed_id_raw, data);
     }
     let script_catalog = script_catalog_builder.build();
+    let reverse_ctx = build_reverse_compile_context_from_catalog(&ctx, script_catalog.clone());
 
     let mut transpiler = Transpiler::new()
+        .with_version(version.build, version.subbuild)
         .with_enums(&ctx.enums)
         .with_enums_map(&ctx.enums)
         .with_vars(&ctx.varps_by_domain)
@@ -4403,6 +4661,8 @@ fn run_transpile_scripts(
                 let crate::transpile::TranspiledScript {
                     source,
                     diagnostics,
+                    editable_structured,
+                    blocking_diagnostics,
                     ..
                 } = ts;
                 let script_name = transpiler
@@ -4411,12 +4671,13 @@ fn run_transpile_scripts(
                 let function_name = script_name.clone();
                 let filename = format!("{}.ts", sanitize_file_component(&script_name));
                 let out_path = out_dir.join(&filename);
-                fs::write(&out_path, &source)?;
                 barrel_exports.push(format!(
                     "export {{ {function_name} }} from './{filename_no_ext}';",
                     filename_no_ext = filename.trim_end_matches(".ts")
                 ));
                 let mut diagnostics = diagnostics;
+                let mut editable_structured = editable_structured;
+                let mut blocking_diagnostics = blocking_diagnostics;
                 if let Some(metadata) = script_catalog.get(script_id) {
                     let base_name = script_base_export_name(metadata);
                     if metadata.export_name != base_name {
@@ -4426,14 +4687,22 @@ fn run_transpile_scripts(
                         ));
                     }
                 }
-                if !diagnostics.is_empty()
-                    && let Some(metadata) = script_catalog.get(script_id)
-                {
+                let source = finalize_reversible_transpile_output(
+                    source,
+                    &reverse_ctx,
+                    &mut diagnostics,
+                    &mut editable_structured,
+                    &mut blocking_diagnostics,
+                )?;
+                fs::write(&out_path, &source)?;
+                if let Some(metadata) = script_catalog.get(script_id) {
                     script_diagnostics.push(ScriptDiagnosticsEntry {
                         packed_id: metadata.packed_id.0,
                         group_id: metadata.group_id.0,
                         export_name: metadata.export_name.clone(),
                         module_name: metadata.module_name.clone(),
+                        editable_structured,
+                        blocking_diagnostics,
                         diagnostics: diagnostics.diagnostics,
                     });
                 }
@@ -4563,8 +4832,10 @@ fn run_filtered_transpile_scripts(
         }
     }
     let script_catalog = script_catalog_builder.build();
+    let reverse_ctx = build_reverse_compile_context_from_catalog(&ctx, script_catalog.clone());
 
     let mut transpiler = Transpiler::new()
+        .with_version(version.build, version.subbuild)
         .with_enums(&ctx.enums)
         .with_enums_map(&ctx.enums)
         .with_vars(&ctx.varps_by_domain)
@@ -4613,6 +4884,8 @@ fn run_filtered_transpile_scripts(
                 let crate::transpile::TranspiledScript {
                     source,
                     diagnostics,
+                    editable_structured,
+                    blocking_diagnostics,
                     ..
                 } = ts;
                 let script_name = transpiler
@@ -4621,12 +4894,13 @@ fn run_filtered_transpile_scripts(
                 let function_name = script_name.clone();
                 let filename = format!("{}.ts", sanitize_file_component(&script_name));
                 let out_path = out_dir.join(&filename);
-                fs::write(&out_path, &source)?;
                 barrel_exports.push(format!(
                     "export {{ {function_name} }} from './{filename_no_ext}';",
                     filename_no_ext = filename.trim_end_matches(".ts")
                 ));
                 let mut diagnostics = diagnostics;
+                let mut editable_structured = editable_structured;
+                let mut blocking_diagnostics = blocking_diagnostics;
                 if let Some(metadata) = script_catalog.get(script_id) {
                     let base_name = script_base_export_name(metadata);
                     if metadata.export_name != base_name {
@@ -4636,14 +4910,22 @@ fn run_filtered_transpile_scripts(
                         ));
                     }
                 }
-                if !diagnostics.is_empty()
-                    && let Some(metadata) = script_catalog.get(script_id)
-                {
+                let source = finalize_reversible_transpile_output(
+                    source,
+                    &reverse_ctx,
+                    &mut diagnostics,
+                    &mut editable_structured,
+                    &mut blocking_diagnostics,
+                )?;
+                fs::write(&out_path, &source)?;
+                if let Some(metadata) = script_catalog.get(script_id) {
                     script_diagnostics.push(ScriptDiagnosticsEntry {
                         packed_id: metadata.packed_id.0,
                         group_id: metadata.group_id.0,
                         export_name: metadata.export_name.clone(),
                         module_name: metadata.module_name.clone(),
+                        editable_structured,
+                        blocking_diagnostics,
                         diagnostics: diagnostics.diagnostics,
                     });
                 }
@@ -4928,6 +5210,10 @@ struct ScriptDiagnosticsEntry {
     group_id: i32,
     export_name: String,
     module_name: String,
+    #[serde(rename = "editableStructured")]
+    editable_structured: bool,
+    #[serde(rename = "blockingDiagnostics")]
+    blocking_diagnostics: Vec<String>,
     diagnostics: Vec<crate::transpile::Diagnostic>,
 }
 
