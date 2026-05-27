@@ -2,10 +2,12 @@
 
 CLI-first Rust toolkit for RS3 cache extraction, CS2, and overlay semantic trees.
 
-Current target snapshot:
+Supported native base revisions:
 
-- build `947.1`
-- OpenRS2 cache id `2519`
+- build `947.1` — OpenRS2 cache id `2519`
+- build `910.0` — separate first-class base revision
+
+`910` and `947` are both native targets in this repo. Treat them as separate first-class revisions with their own opcode books, command semantics, roundtrip checks, and transpile expectations. Do not frame `910` as secondary compatibility mode or `947` as sole runtime truth.
 
 ## What it does
 
@@ -108,6 +110,7 @@ Writes everything the Alerion overlay needs under one directory:
 
 - `raw-flat/` — lossless JS5 group bytes for repack
 - `refs/` — structured config dependency graph (`obj.json`, `npc.json`, …)
+- `deps/` — typed component/script dependency artifacts and coverage
 - `.rs3-cache-manifest.json` — artifact fingerprints for stamp/skip logic
 
 Legacy `config/dump.*` text is not produced here; use the separate `dump-configs` command only if you need human-readable dumps for inspection.
@@ -122,11 +125,13 @@ cargo run --release -- \
 
 Alerion server shortcut: `bun run cache:semantic:sync-947` (947 + 910 trees), then `bun run cacheoverlay:ensure-947-overlay`.
 
-# CS2 workflow (947 active, 910 base)
+# CS2 workflow (`910` and `947` first-class)
 
-Full agent workflow: [docs/cs2_roundtrip_workflow.md](../../docs/cs2_roundtrip_workflow.md).
+Canonical workflow: [docs/workflows/cs2-cache.md](../../docs/workflows/cs2-cache.md).
 
-**947 (donor / runtime truth)** — subbuild `1`:
+Each revision should be run, validated, and reasoned about on its own terms. Use build-specific cache inputs, opcode metadata, and roundtrip checks for both.
+
+**947** — subbuild `1`:
 
 ```bash
 C947="--cache-dir /path/to/cache/unpacked/947 --data-dir /path/to/tools/rs3-cache-rs/data --build 947 --subbuild 1"
@@ -141,20 +146,23 @@ cargo run --release -- $C947 assemble-script --input script.asm.ts --output /tmp
 cargo run --release -- $C947 dep-tree-script --id 4330 --out-file /tmp/deps.json
 ```
 
-**910 (overlay base)** — subbuild `0`: same commands with `--build 910 --subbuild 0` and `cache/unpacked/910`.
+**910** — subbuild `0`: same commands with `--build 910 --subbuild 0` and `cache/unpacked/910`.
 
-**Roundtrip tests** (100 scripts per build):
+**Roundtrip tests** default to `100` scripts per build. Set `RS3_ROUNDTRIP_LIMIT=0` or `RS3_ROUNDTRIP_LIMIT_910=0` for full-corpus proof:
 
 ```bash
 RS3_CACHE_DIR=.../947 cargo test asm_encode_roundtrip_byte_perfect --release
-RS3_CACHE_DIR=.../910 cargo test asm_encode_roundtrip_byte_perfect_910 --release
+RS3_CACHE_DIR_910=.../910 cargo test asm_encode_roundtrip_byte_perfect_910 --release
 ```
 
-**Repack into Alerion runtime:** patch a temp copy of `cache/rs3-cache/947-all/raw-flat`, then `bun run js5pack:pack-flat --archives scripts` in `server/` (see workflow doc).
+**Repack into Alerion runtime:** patch temp copy of revision-appropriate `raw-flat` tree, then `bun run js5pack:pack-flat --archives scripts` in `server/` (see workflow doc).
 
 Alerion env defaults:
 
-- `RS3_CACHE_DIR` → `cache/unpacked/947` (947 tests) or `910` (910 tests)
+- `RS3_CACHE_DIR` → `cache/unpacked/947` for `947` tests
+- `RS3_CACHE_TAR` → `cache-runescape-live-en-b947.1-2026-04-20-10-45-34-openrs2#2519.tar` override for `947` archive backfill
+- `RS3_CACHE_DIR_910` → `cache/unpacked/910` for `910` tests
+- `RS3_CACHE_TAR_910` → `cache-runescape-live-en-b910-2019-12-11-00-00-00-openrs2#1730.tar` override for `910` archive backfill
 - `RS3_DATA_DIR` → `tools/rs3-cache-rs/data`
 
 ## Expected unpack output
@@ -188,4 +196,8 @@ Real-cache tests support env overrides:
 
 - `RS3_CACHE_DIR`
 - `RS3_CACHE_TAR`
+- `RS3_CACHE_DIR_910`
+- `RS3_CACHE_TAR_910`
+- `RS3_ROUNDTRIP_LIMIT`
+- `RS3_ROUNDTRIP_LIMIT_910`
 - `RS3_DATA_DIR`

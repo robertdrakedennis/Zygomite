@@ -874,8 +874,7 @@ impl<'a, S: std::hash::BuildHasher> ExprRecovery<'a, S> {
             // ── String join ──
             "join_string" => {
                 if let OperandNode::Count(n) = op {
-                    let Some(part_count) = usize::try_from(*n)
-                        .ok()
+                    let Some(part_count) = Some(*n)
                         .filter(|count| *count <= self.stack.len())
                         .filter(|count| *count <= MAX_JOIN_STRING_PARTS)
                     else {
@@ -1809,7 +1808,7 @@ mod tests {
                 index: 1,
                 opcode: 0,
                 command: "join_string".to_string(),
-                operand: OperandNode::Count(1543595008),
+                operand: OperandNode::Count(1_543_595_008),
             },
             InstructionNode {
                 index: 2,
@@ -2204,7 +2203,7 @@ mod tests {
                 if matches!(&*call.callee, Expression::Identifier(id) if id.name == "dbgetrowtable")
                     && call.arguments.len() == 1
         ));
-        assert!(matches!(&recovered[1], None));
+        assert!(recovered[1].is_none());
     }
 
     #[test]
@@ -2481,8 +2480,8 @@ mod tests {
             Some(RecoveredStmt::Return(Some(Expression::Call(call))))
                 if matches!(&*call.callee, Expression::Identifier(id) if id.name == "UI.GetGamescreen")
         ));
-        assert!(matches!(&recovered[4], None));
-        assert!(matches!(&recovered[1], None));
+        assert!(recovered[4].is_none());
+        assert!(recovered[1].is_none());
     }
 
     #[test]

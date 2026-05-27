@@ -355,7 +355,7 @@ fn parse_expression(expression: &ast::Expression<'_>, source: &str) -> Result<Ex
                 op: match logical.operator {
                     ast::LogicalOperator::And => BinaryOp::And,
                     ast::LogicalOperator::Or => BinaryOp::Or,
-                    _ => bail!("unsupported logical operator"),
+                    ast::LogicalOperator::Coalesce => bail!("unsupported logical operator"),
                 },
                 left: Box::new(parse_expression(&logical.left, source)?),
                 right: Box::new(parse_expression(&logical.right, source)?),
@@ -589,7 +589,7 @@ fn parse_argument_expression(argument: &ast::Argument<'_>, source: &str) -> Resu
                 op: match logical.operator {
                     ast::LogicalOperator::And => BinaryOp::And,
                     ast::LogicalOperator::Or => BinaryOp::Or,
-                    _ => bail!("unsupported logical operator"),
+                    ast::LogicalOperator::Coalesce => bail!("unsupported logical operator"),
                 },
                 left: Box::new(parse_expression(&logical.left, source)?),
                 right: Box::new(parse_expression(&logical.right, source)?),

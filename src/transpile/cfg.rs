@@ -375,6 +375,10 @@ fn is_cond_flag_instr(cmd: &str) -> bool {
     )
 }
 
+#[expect(
+    clippy::implicit_hasher,
+    reason = "transpile APIs use default HashMap aliases across module boundaries"
+)]
 pub fn build_cfg<S: std::hash::BuildHasher>(
     instructions: &[super::ast::InstructionNode],
     var_names: &std::collections::HashMap<(crate::vars::VarDomain, u16), String>,

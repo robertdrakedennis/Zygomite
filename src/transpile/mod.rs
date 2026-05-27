@@ -200,6 +200,10 @@ impl ScriptCatalog {
     }
 }
 
+#[expect(
+    clippy::implicit_hasher,
+    reason = "transpile APIs use default HashMap aliases across module boundaries"
+)]
 pub fn resolve_script_signature<'a>(
     script_catalog: &'a ScriptCatalog,
     script_signatures: &'a HashMap<ScriptId, ScriptSignature>,
@@ -212,6 +216,10 @@ pub fn resolve_script_signature<'a>(
     })
 }
 
+#[expect(
+    clippy::implicit_hasher,
+    reason = "transpile APIs use default HashMap aliases across module boundaries"
+)]
 pub fn resolve_call_target_signature<'a>(
     script_catalog: &'a ScriptCatalog,
     script_signatures: &'a HashMap<ScriptId, ScriptSignature>,
@@ -374,7 +382,7 @@ fn push_pending_script_metadata<S: BuildHasher>(
         group_id,
         file_id,
         kind,
-        raw_name: script.name.clone(),
+        raw_name: script.name,
         short_name,
         signature,
         export_name: String::new(),
@@ -988,6 +996,10 @@ pub fn extract_script_name_suffix(value: &str) -> String {
         .unwrap_or_else(|| value.trim().to_string())
 }
 
+#[expect(
+    clippy::implicit_hasher,
+    reason = "transpile APIs use default HashMap aliases across module boundaries"
+)]
 pub fn infer_return_type_for_script<S>(
     script: &CompiledScript,
     script_id: ScriptId,
@@ -1205,7 +1217,7 @@ mod tests {
     }
 
     #[test]
-    fn infer_return_type_detects_mixed_returns_without_cfg() {
+    fn infer_return_type_ignores_unreachable_void_return_with_cfg() {
         let script = test_script(vec![
             Instruction {
                 opcode: 0,
@@ -1236,7 +1248,7 @@ mod tests {
                 &ScriptCatalog::default(),
                 &HashMap::new(),
             ),
-            "number | void"
+            "number"
         );
     }
 }

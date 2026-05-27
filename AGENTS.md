@@ -2,7 +2,9 @@
 
 ## Project Structure & Module Organization
 
-`src/main.rs` parses CLI args and delegates to `src/cli.rs`. `src/lib.rs` exports cache and decoder modules: `cache`, `js5`, `config`, `script`, `model`, `audio`, `interface`, `map`, `vfx`, `animator`, `cutscene2d`, `vars`, plus shared `constants` and `fixture`. Integration tests live in `tests/real_cache.rs`; they use external RS3 cache data and Java repo lookup files. `README.md` documents target snapshot, CLI examples, and expected unpack output.
+`src/main.rs` parses CLI args and delegates to `src/cli.rs`. `src/lib.rs` exports cache and decoder modules: `cache`, `js5`, `config`, `script`, `model`, `audio`, `interface`, `map`, `vfx`, `animator`, `cutscene2d`, `vars`, plus shared `constants` and `fixture`. Integration tests live in `tests/real_cache.rs`; they use external RS3 cache data and Java repo lookup files. `README.md` documents supported base revisions, CLI examples, and expected unpack output.
+
+Treat build `910` and build `947` as separate first-class native revisions. Both should work natively for decode, validate, assemble, transpile, and roundtrip flows. Do not describe `910` as fallback, overlay-only, or secondary to `947`; use revision-specific fixtures, metadata, and verification where relevant.
 
 ## Build, Test, and Development Commands
 
@@ -20,7 +22,9 @@ Use Rust 2024, 4-space indentation, and rustfmt defaults. Keep `unsafe` absent; 
 
 ## Testing Guidelines
 
-Tests use Rust built-in harness and often return `anyhow::Result<()>`. Put cross-module tests in `tests/`; use clear behavior names like `parses_every_interface_file`. Set `RS3_CACHE_DIR`, `RS3_CACHE_TAR`, and `RS3_DATA_DIR` when cache assets are outside README defaults. Prefer targeted tests for new decoder behavior, plus one CLI smoke path when output shape changes.
+Tests use Rust built-in harness and often return `anyhow::Result<()>`. Put cross-module tests in `tests/`; use clear behavior names like `parses_every_interface_file`. Set `RS3_CACHE_DIR`, `RS3_CACHE_TAR`, `RS3_CACHE_DIR_910`, `RS3_CACHE_TAR_910`, and `RS3_DATA_DIR` when cache assets are outside README defaults. Prefer targeted tests for new decoder behavior, plus one CLI smoke path when output shape changes.
+
+When behavior is build-sensitive, verify both `910` and `947` instead of assuming one revision proves other. Prefer revision-specific checks for opcode metadata, transpile output, and byte-perfect script roundtrip.
 
 Avoid parallel heavy runs in this repo. Full `cargo test --test ts_export`, full `cs2 --out-dir ...`, and broad `transpile-scripts` runs can compile, decode cache, and write many files at once; that can spike memory and keep background jobs alive after interrupts. Prefer one heavy command at a time, keep runs scoped, and check for leftover `cargo` or `rs3-cache-rs` processes before starting another full-cache pass.
 

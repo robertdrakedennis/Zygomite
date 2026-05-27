@@ -1,6 +1,10 @@
 use crate::dep_tree::ResolverContext;
-use crate::script::{CompiledScript, Operand};
+use crate::script::{CompiledScript, OpcodeBook, Operand};
+use crate::transpile::{
+    ScriptCatalog, ScriptCatalogBuilder, ScriptId, ScriptSignature, build_script_catalog,
+};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 // ── Error types ──
 
@@ -196,41 +200,41 @@ impl<'a> Cs2Validator<'a> {
     }
 
     pub fn validate(&self, script_id: u32) -> ValidationReport {
+        let Some(script) = self.ctx.decoded_scripts.get(&script_id) else {
+            return missing_script_report(script_id, self.ctx.build);
+        };
+        let script_catalog = build_validation_catalog(self.ctx, &[]);
+        let script_signatures = script_catalog.signature_map();
+
+        self.validate_compiled(
+            script_id,
+            script,
+            &script_catalog,
+            &script_signatures,
+            script.name.clone(),
+        )
+    }
+
+    pub fn validate_compiled(
+        &self,
+        script_id: u32,
+        script: &CompiledScript,
+        script_catalog: &ScriptCatalog,
+        script_signatures: &HashMap<ScriptId, ScriptSignature>,
+        script_name: Option<String>,
+    ) -> ValidationReport {
         let mut report = ValidationReport {
             script_id,
-            script_name: self
-                .ctx
-                .decoded_scripts
-                .get(&script_id)
-                .and_then(|s| s.name.clone()),
+            script_name,
             build: self.ctx.build,
-            instruction_count: 0,
+            instruction_count: script.code.len(),
             errors: Vec::new(),
             warnings: Vec::new(),
         };
 
-        let Some(script) = self.ctx.decoded_scripts.get(&script_id) else {
-            report.errors.push(ValidationError::ScriptNotFound {
-                index: 0,
-                called_id: script_id as i32,
-            });
-            return report;
-        };
-        let script = script.clone();
-        report.instruction_count = script.code.len();
-        let empty_group_names = std::collections::HashMap::<u32, String>::new();
-        let script_catalog = crate::transpile::build_script_catalog(
-            &self.ctx.scripts,
-            &empty_group_names,
-            &self.ctx.opcode_book,
-            self.ctx.build,
-        );
-        let script_signatures = script_catalog.signature_map();
-
-        self.pass_structural(&script, &mut report);
-        self.pass_stack(&script, &script_catalog, &script_signatures, &mut report);
-        self.pass_cross_ref(&script, &script_catalog, &mut report);
-
+        self.pass_structural(script, &mut report);
+        self.pass_stack(script, script_catalog, script_signatures, &mut report);
+        self.pass_cross_ref(script, script_catalog, &mut report);
         report
     }
 
@@ -1200,6 +1204,71 @@ impl<'a> Cs2Validator<'a> {
     }
 }
 
+pub fn build_validation_catalog(
+    ctx: &ResolverContext,
+    extra_scripts: &[(u32, Vec<u8>)],
+) -> ScriptCatalog {
+    let empty_group_names = HashMap::<u32, String>::new();
+    if extra_scripts.is_empty() {
+        return build_script_catalog(
+            &ctx.scripts,
+            &empty_group_names,
+            &ctx.opcode_book,
+            ctx.build,
+        );
+    }
+    let mut merged_scripts = ctx.scripts.clone();
+    for (packed_id, bytes) in extra_scripts {
+        merged_scripts.insert(*packed_id, bytes.clone());
+    }
+    build_script_catalog(
+        &merged_scripts,
+        &empty_group_names,
+        &ctx.opcode_book,
+        ctx.build,
+    )
+}
+
+pub fn extend_validation_catalog(
+    base_catalog: &ScriptCatalog,
+    opcode_book: &OpcodeBook,
+    build: u32,
+    extra_scripts: &[(u32, &[u8])],
+) -> ScriptCatalog {
+    if extra_scripts.is_empty() {
+        return base_catalog.clone();
+    }
+
+    let empty_group_names = HashMap::<u32, String>::new();
+    let mut builder = ScriptCatalogBuilder::new(&empty_group_names, opcode_book, build);
+    for (packed_id, bytes) in extra_scripts {
+        builder.add_script(*packed_id, bytes);
+    }
+
+    let mut catalog = base_catalog.clone();
+    let overlay_catalog = builder.build();
+    for metadata in overlay_catalog.iter() {
+        catalog.insert(metadata.clone());
+    }
+    catalog
+}
+
+fn missing_script_report(script_id: u32, build: u32) -> ValidationReport {
+    let mut report = ValidationReport {
+        script_id,
+        script_name: None,
+        build,
+        instruction_count: 0,
+        errors: Vec::new(),
+        warnings: Vec::new(),
+    };
+    report.errors.push(ValidationError::ScriptNotFound {
+        index: 0,
+        called_id: script_id as i32,
+    });
+    report
+}
+
 // ── Batch validation ──
 
 #[derive(Debug, Clone, Serialize)]
@@ -1285,10 +1354,10 @@ mod tests {
     #[test]
     fn gosub_stack_effect_resolves_group_id_void_callee() -> crate::error::Result<()> {
         const BUILD: u32 = 910;
-        let callee_id = 100_u32 << 16;
-        let caller_id = 200_u32 << 16;
+        let void_callee_id = 100_u32 << 16;
+        let void_entry_id = 200_u32 << 16;
 
-        let callee = CompiledScript {
+        let void_callee = CompiledScript {
             name: Some("[proc,callee_void]".to_string()),
             local_count_int: 0,
             local_count_object: 0,
@@ -1303,7 +1372,7 @@ mod tests {
             }],
         };
 
-        let caller = CompiledScript {
+        let void_entry = CompiledScript {
             name: Some("[proc,caller_void]".to_string()),
             local_count_int: 1,
             local_count_object: 0,
@@ -1340,8 +1409,11 @@ mod tests {
             ],
         };
 
-        let ctx = build_ctx(BUILD, &[(callee_id, callee), (caller_id, caller)])?;
-        let report = Cs2Validator::new(&ctx).validate(caller_id);
+        let ctx = build_ctx(
+            BUILD,
+            &[(void_callee_id, void_callee), (void_entry_id, void_entry)],
+        )?;
+        let report = Cs2Validator::new(&ctx).validate(void_entry_id);
 
         assert!(
             report
@@ -1361,10 +1433,10 @@ mod tests {
     #[test]
     fn gosub_stack_effect_resolves_group_id_value_callee() -> crate::error::Result<()> {
         const BUILD: u32 = 910;
-        let callee_id = 101_u32 << 16;
-        let caller_id = 201_u32 << 16;
+        let value_callee_id = 101_u32 << 16;
+        let value_entry_id = 201_u32 << 16;
 
-        let callee = CompiledScript {
+        let value_callee = CompiledScript {
             name: Some("[proc,callee_value]".to_string()),
             local_count_int: 0,
             local_count_object: 0,
@@ -1386,7 +1458,7 @@ mod tests {
             ],
         };
 
-        let caller = CompiledScript {
+        let value_entry = CompiledScript {
             name: Some("[proc,caller_value]".to_string()),
             local_count_int: 1,
             local_count_object: 0,
@@ -1423,8 +1495,14 @@ mod tests {
             ],
         };
 
-        let ctx = build_ctx(BUILD, &[(callee_id, callee), (caller_id, caller)])?;
-        let report = Cs2Validator::new(&ctx).validate(caller_id);
+        let ctx = build_ctx(
+            BUILD,
+            &[
+                (value_callee_id, value_callee),
+                (value_entry_id, value_entry),
+            ],
+        )?;
+        let report = Cs2Validator::new(&ctx).validate(value_entry_id);
 
         assert!(
             report

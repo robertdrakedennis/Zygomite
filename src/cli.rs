@@ -66,6 +66,7 @@ use std::fmt::Write;
 use std::fs;
 use std::io::{BufWriter, Write as IoWrite};
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 #[derive(Parser, Debug)]
 #[command(name = "rs3-cache-rs")]
@@ -211,6 +212,9 @@ pub enum Command {
         interface_group: u32,
         #[arg(long)]
         out_file: PathBuf,
+        /// Optional directory for split audit artifacts.
+        #[arg(long)]
+        audit_dir: Option<PathBuf>,
         #[arg(long)]
         source_cache_tar: Option<PathBuf>,
         #[arg(long, default_value_t = 947)]
@@ -223,12 +227,21 @@ pub enum Command {
         /// Buffer above target's max ID for allocating free IDs (default 10000).
         #[arg(long, default_value_t = 10000)]
         remap_buffer: u32,
+        /// Validate migrated dependency bundle against target build by rewriting and encoding scripts.
+        #[arg(long)]
+        validate_target: bool,
+        /// Allow heuristic dependency sites during target validation instead of blocking them.
+        #[arg(long)]
+        allow_heuristic_sites: bool,
     },
     MigrateScript {
         #[arg(long)]
         script_id: u32,
         #[arg(long)]
         out_file: PathBuf,
+        /// Optional directory for split audit artifacts.
+        #[arg(long)]
+        audit_dir: Option<PathBuf>,
         #[arg(long)]
         source_cache_tar: Option<PathBuf>,
         #[arg(long, default_value_t = 947)]
@@ -239,6 +252,12 @@ pub enum Command {
         remap: bool,
         #[arg(long, default_value_t = 10000)]
         remap_buffer: u32,
+        /// Validate migrated dependency bundle against target build by rewriting and encoding scripts.
+        #[arg(long)]
+        validate_target: bool,
+        /// Allow heuristic dependency sites during target validation instead of blocking them.
+        #[arg(long)]
+        allow_heuristic_sites: bool,
     },
     /// Validate a CS2 script's bytecode against the target build.
     ValidateScript {
@@ -299,6 +318,34 @@ pub enum Command {
         /// Comma-separated archive IDs for raw-flat (default: all)
         #[arg(long)]
         archives: Option<String>,
+    },
+    /// Build canonical overlay plan JSON for Bun cacheoverlay wrapper.
+    #[command(name = "overlay-plan")]
+    OverlayPlan {
+        /// Existing Bun cacheoverlay manifest JSON path
+        #[arg(long)]
+        manifest: PathBuf,
+        /// Optional output file; prints plan JSON to stdout when omitted
+        #[arg(long)]
+        out_file: Option<PathBuf>,
+        /// Optional directory for split proof audit artifacts
+        #[arg(long)]
+        audit_dir: Option<PathBuf>,
+        /// Allow heuristic proof gaps without blocking plan
+        #[arg(long)]
+        allow_heuristic_sites: bool,
+        /// Target base build for proof metadata
+        #[arg(long, default_value_t = 910)]
+        base_build: u32,
+        /// Target donor build for proof metadata
+        #[arg(long, default_value_t = 947)]
+        donor_build: u32,
+        /// Target base subbuild for proof metadata
+        #[arg(long, default_value_t = 0)]
+        base_subbuild: u32,
+        /// Target donor subbuild for proof metadata
+        #[arg(long, default_value_t = 1)]
+        donor_subbuild: u32,
     },
 }
 
@@ -623,6 +670,34 @@ struct UnpackRunOptions {
 }
 
 pub fn run(cli: Cli) -> Result<()> {
+    let _ = crate::parallel::init_global_rayon()?;
+
+    if let Command::OverlayPlan {
+        manifest,
+        out_file,
+        audit_dir,
+        allow_heuristic_sites,
+        base_build,
+        donor_build,
+        base_subbuild,
+        donor_subbuild,
+    } = &cli.command
+    {
+        return crate::overlay_plan::run_overlay_plan_command(
+            crate::overlay_plan::OverlayPlanCommandOptions {
+                manifest,
+                out_file: out_file.as_deref(),
+                audit_dir: audit_dir.as_deref(),
+                allow_heuristic_sites: *allow_heuristic_sites,
+                data_dir: &cli.data_dir,
+                base_build: *base_build,
+                donor_build: *donor_build,
+                base_subbuild: *base_subbuild,
+                donor_subbuild: *donor_subbuild,
+            },
+        );
+    }
+
     let tar_path = cli.cache_tar.unwrap_or_else(default_tar_path);
     let cache = open_cache(cli.cache_dir.as_deref())?;
     let version = RuntimeVersion {
@@ -781,44 +856,56 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::MigrateCheck {
             interface_group,
             out_file,
+            audit_dir,
             source_cache_tar,
             source_build,
             source_subbuild,
             remap,
             remap_buffer,
+            validate_target,
+            allow_heuristic_sites,
         } => run_migrate_check(
             &cache,
             &tar_path,
             &cli.data_dir,
             interface_group,
             &out_file,
+            audit_dir.as_deref(),
             version,
             source_cache_tar.as_deref(),
             source_build,
             source_subbuild,
             remap,
             remap_buffer,
+            validate_target,
+            allow_heuristic_sites,
         ),
         Command::MigrateScript {
             script_id,
             out_file,
+            audit_dir,
             source_cache_tar,
             source_build,
             source_subbuild,
             remap,
             remap_buffer,
+            validate_target,
+            allow_heuristic_sites,
         } => run_migrate_script(
             &cache,
             &tar_path,
             &cli.data_dir,
             script_id,
             &out_file,
+            audit_dir.as_deref(),
             version,
             source_cache_tar.as_deref(),
             source_build,
             source_subbuild,
             remap,
             remap_buffer,
+            validate_target,
+            allow_heuristic_sites,
         ),
         Command::ValidateScript {
             script_id,
@@ -858,11 +945,13 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::PrepareOverlay { out_dir, archives } => run_prepare_overlay(
             &cache,
             &tar_path,
+            &cli.data_dir,
             &out_dir,
             version.build,
             version.subbuild,
             archives.as_deref(),
         ),
+        Command::OverlayPlan { .. } => unreachable!("handled before cache open"),
     }
 }
 
@@ -3508,7 +3597,7 @@ fn export_script_signatures_from_cache(
     if crate::fixture::ensure_archive_complete(cache.root(), tar_path, ARCHIVE_CLIENTSCRIPTS)
         .is_err()
     {
-        return write_lines(&out_dir.join("scripts.d.ts"), lines);
+        return write_lines(&out_dir.join("scripts.d.ts"), &lines);
     }
 
     let cache2 = FlatCache::open(cache.root())?;
@@ -3555,7 +3644,7 @@ fn export_script_signatures_from_cache(
 
     entries.sort_by(|a, b| a.0.cmp(&b.0));
     lines.extend(entries.into_iter().map(|(_, line)| line));
-    write_lines(&out_dir.join("scripts.d.ts"), lines)
+    write_lines(&out_dir.join("scripts.d.ts"), &lines)
 }
 
 fn load_hash_name_map(path: &Path) -> Result<HashMap<i32, String>> {
@@ -3620,7 +3709,7 @@ fn write_text(path: &Path, text: &str) -> Result<()> {
     fs::write(path, text).with_context(|| format!("failed writing {}", path.display()))
 }
 
-fn write_lines(path: &Path, lines: Vec<String>) -> Result<()> {
+fn write_lines(path: &Path, lines: &[String]) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .with_context(|| format!("failed creating {}", parent.display()))?;
@@ -3966,11 +4055,10 @@ fn run_assemble_script(
         }
     }
 
-    let effective_build = reversible
-        .as_ref()
-        .map_or(build.unwrap_or(version.build), |parsed| {
-            parsed.metadata.build
-        });
+    let effective_build = reversible.as_ref().map_or_else(
+        || build.unwrap_or(version.build),
+        |parsed| parsed.metadata.build,
+    );
     let effective_subbuild = reversible.as_ref().map_or_else(
         || subbuild.unwrap_or(version.subbuild),
         |parsed| parsed.metadata.subbuild,
@@ -4168,7 +4256,7 @@ fn finalize_reversible_transpile_output(
     }
 
     *editable_structured = metadata.editable_structured;
-    *blocking_diagnostics = metadata.blocking_diagnostics.clone();
+    blocking_diagnostics.clone_from(&metadata.blocking_diagnostics);
     Ok(render_reversible_source(
         &parsed.structured_source,
         &metadata,
@@ -4209,7 +4297,12 @@ fn run_dump_raw_flat(
 
     // Ensure all archives are extracted from tar if needed
     if tar_path.is_file() {
-        for id in crate::dump::discover_archives(cache)? {
+        let archives_to_ensure = if let Some(filter) = archive_filter.as_deref() {
+            filter.to_vec()
+        } else {
+            crate::dump::discover_archives(cache)?
+        };
+        for id in archives_to_ensure {
             crate::fixture::ensure_archive_complete(cache.root(), tar_path, id)?;
         }
     }
@@ -4242,6 +4335,19 @@ fn run_dump_refs(cache: &FlatCache, tar_path: &Path, out_dir: &Path, build: u32)
     Ok(())
 }
 
+fn run_dump_deps(
+    cache: &FlatCache,
+    tar_path: &Path,
+    data_dir: &Path,
+    out_dir: &Path,
+    build: u32,
+    subbuild: u32,
+) -> Result<()> {
+    let ctx = ResolverContext::load_lazy(cache, tar_path, data_dir, build, subbuild)?;
+    let _ = crate::overlay_deps::write_dependency_files(&ctx, out_dir)?;
+    Ok(())
+}
+
 fn run_dump_configs(cache: &FlatCache, tar_path: &Path, out_dir: &Path, build: u32) -> Result<()> {
     for archive in [
         ARCHIVE_CONFIG,
@@ -4263,25 +4369,61 @@ fn run_dump_configs(cache: &FlatCache, tar_path: &Path, out_dir: &Path, build: u
 fn run_prepare_overlay(
     cache: &FlatCache,
     tar_path: &Path,
+    data_dir: &Path,
     semantic_root: &Path,
     build: u32,
     subbuild: u32,
     archives: Option<&str>,
 ) -> Result<()> {
     let mut commands_run = Vec::new();
+    let raw_flat_started = Instant::now();
 
     let raw_flat_dir = semantic_root.join("raw-flat");
     run_dump_raw_flat(cache, tar_path, &raw_flat_dir, archives)?;
+    let raw_flat_elapsed = raw_flat_started.elapsed();
     commands_run.push("dump-raw-flat".to_string());
 
     let refs_dir = semantic_root.join("refs");
-    run_dump_refs(cache, tar_path, &refs_dir, build)?;
+    let deps_dir = semantic_root.join("deps");
+    for archive in [
+        ARCHIVE_CONFIG,
+        ARCHIVE_ENUM_CONFIG,
+        ARCHIVE_OBJ_CONFIG,
+        ARCHIVE_NPC_CONFIG,
+        ARCHIVE_LOC_CONFIG,
+        ARCHIVE_SEQ_CONFIG,
+        ARCHIVE_SPOT_CONFIG,
+        ARCHIVE_STRUCT_CONFIG,
+        ARCHIVE_INTERFACES,
+        ARCHIVE_CLIENTSCRIPTS,
+    ] {
+        ensure_archive_complete(cache.root(), tar_path, archive)?;
+    }
+    let cache_root = cache.root().to_path_buf();
+    let (refs_result, deps_result) = rayon::join(
+        || -> Result<std::time::Duration> {
+            let started = Instant::now();
+            let refs_cache = FlatCache::open(&cache_root)?;
+            run_dump_refs(&refs_cache, tar_path, &refs_dir, build)?;
+            Ok(started.elapsed())
+        },
+        || -> Result<std::time::Duration> {
+            let started = Instant::now();
+            let deps_cache = FlatCache::open(&cache_root)?;
+            run_dump_deps(&deps_cache, tar_path, data_dir, &deps_dir, build, subbuild)?;
+            Ok(started.elapsed())
+        },
+    );
+    let refs_elapsed = refs_result?;
+    let deps_elapsed = deps_result?;
     commands_run.push("dump-refs".to_string());
+    commands_run.push("dump-deps".to_string());
 
     let cache_fingerprint = crate::overlay_manifest::cache_fingerprint(cache);
     let artifacts = vec![
         crate::overlay_manifest::artifact_record("raw-flat", semantic_root)?,
         crate::overlay_manifest::artifact_record("refs", semantic_root)?,
+        crate::overlay_manifest::artifact_record("deps", semantic_root)?,
     ];
 
     let manifest = crate::overlay_manifest::Rs3CacheManifest {
@@ -4311,6 +4453,12 @@ fn run_prepare_overlay(
         "Prepared overlay semantic tree at {} (manifest: {})",
         semantic_root.display(),
         manifest_path.display()
+    );
+    eprintln!(
+        "prepare-overlay timing: raw-flat={}ms refs={}ms deps={}ms",
+        raw_flat_elapsed.as_millis(),
+        refs_elapsed.as_millis(),
+        deps_elapsed.as_millis(),
     );
     let _ = print_json(&manifest);
     Ok(())
@@ -4364,12 +4512,15 @@ fn run_migrate_check(
     data_dir: &Path,
     interface_group: u32,
     out_file: &Path,
+    audit_dir: Option<&Path>,
     target_version: RuntimeVersion,
     source_cache_tar: Option<&Path>,
     source_build: u32,
     source_subbuild: u32,
     enable_remap: bool,
     remap_buffer: u32,
+    validate_target: bool,
+    allow_heuristic_sites: bool,
 ) -> Result<()> {
     let target_ctx = ResolverContext::load_lazy(
         cache,
@@ -4389,11 +4540,19 @@ fn run_migrate_check(
     )?;
 
     let analyzer = crate::migrate::MigrationAnalyzer::new(source_ctx, target_ctx);
-    let report = if enable_remap {
+    let mut report = if enable_remap {
         analyzer.remap_interface(interface_group, remap_buffer)
     } else {
         analyzer.analyze_interface(interface_group)
     };
+    if validate_target {
+        report.target_validation = Some(analyzer.validate_interface_target(
+            interface_group,
+            &report.entities,
+            report.remap.as_ref(),
+            allow_heuristic_sites,
+        ));
+    }
 
     let json = serde_json::to_string_pretty(&report)?;
     std::fs::write(out_file, &json)?;
@@ -4408,6 +4567,23 @@ fn run_migrate_check(
         report.summary.script_changed,
         out_file.display()
     );
+    if let Some(target_validation) = &report.target_validation {
+        eprintln!(
+            "target validation: {} components ({} blocked), {} scripts checked, {} encoded, {} valid, {} with errors, {} blocked, {} heuristic sites, {} unsupported sites",
+            target_validation.summary.components_checked,
+            target_validation.summary.components_blocked,
+            target_validation.summary.scripts_checked,
+            target_validation.summary.scripts_encoded,
+            target_validation.summary.scripts_valid,
+            target_validation.summary.scripts_with_errors,
+            target_validation.summary.scripts_blocked,
+            target_validation.summary.heuristic_sites,
+            target_validation.summary.unsupported_sites,
+        );
+    }
+    if let Some(audit_dir) = audit_dir {
+        write_conflict_audit(&report, audit_dir)?;
+    }
     Ok(())
 }
 
@@ -4419,12 +4595,15 @@ fn run_migrate_script(
     data_dir: &Path,
     script_id: u32,
     out_file: &Path,
+    audit_dir: Option<&Path>,
     target_version: RuntimeVersion,
     source_cache_tar: Option<&Path>,
     source_build: u32,
     source_subbuild: u32,
     enable_remap: bool,
     remap_buffer: u32,
+    validate_target: bool,
+    allow_heuristic_sites: bool,
 ) -> Result<()> {
     let target_ctx = ResolverContext::load_lazy(
         cache,
@@ -4444,11 +4623,18 @@ fn run_migrate_script(
     )?;
 
     let analyzer = crate::migrate::MigrationAnalyzer::new(source_ctx, target_ctx);
-    let report = if enable_remap {
+    let mut report = if enable_remap {
         analyzer.remap_script(script_id, remap_buffer)
     } else {
         analyzer.analyze_script(script_id)
     };
+    if validate_target {
+        report.target_validation = Some(analyzer.validate_script_target(
+            &report.entities,
+            report.remap.as_ref(),
+            allow_heuristic_sites,
+        ));
+    }
 
     let json = serde_json::to_string_pretty(&report)?;
     std::fs::write(out_file, &json)?;
@@ -4463,6 +4649,176 @@ fn run_migrate_script(
         report.summary.script_changed,
         out_file.display()
     );
+    if let Some(target_validation) = &report.target_validation {
+        eprintln!(
+            "target validation: {} scripts checked, {} encoded, {} valid, {} with errors, {} blocked, {} heuristic sites, {} unsupported sites",
+            target_validation.summary.scripts_checked,
+            target_validation.summary.scripts_encoded,
+            target_validation.summary.scripts_valid,
+            target_validation.summary.scripts_with_errors,
+            target_validation.summary.scripts_blocked,
+            target_validation.summary.heuristic_sites,
+            target_validation.summary.unsupported_sites,
+        );
+    }
+    if let Some(audit_dir) = audit_dir {
+        write_script_audit(&report, audit_dir)?;
+    }
+    Ok(())
+}
+
+fn write_conflict_audit(report: &crate::migrate::ConflictReport, audit_dir: &Path) -> Result<()> {
+    let Some(target_validation) = &report.target_validation else {
+        return Ok(());
+    };
+    write_target_validation_audit(
+        target_validation,
+        report.reference_updates.as_deref().unwrap_or(&[]),
+        audit_dir,
+        &serde_json::json!({
+            "source_build": report.source_build,
+            "target_build": report.target_build,
+            "interface_group": report.interface_group,
+            "total_entities": report.total_entities,
+            "summary": report.summary,
+        }),
+    )
+}
+
+fn write_script_audit(report: &crate::migrate::ScriptReport, audit_dir: &Path) -> Result<()> {
+    let Some(target_validation) = &report.target_validation else {
+        return Ok(());
+    };
+    write_target_validation_audit(
+        target_validation,
+        report.reference_updates.as_deref().unwrap_or(&[]),
+        audit_dir,
+        &serde_json::json!({
+            "source_build": report.source_build,
+            "target_build": report.target_build,
+            "script_id": report.script_id,
+            "total_entities": report.total_entities,
+            "summary": report.summary,
+        }),
+    )
+}
+
+fn write_target_validation_audit(
+    target_validation: &crate::migrate::TargetValidationReport,
+    reference_updates: &[crate::migrate::ReferenceUpdate],
+    audit_dir: &Path,
+    migration_summary: &serde_json::Value,
+) -> Result<()> {
+    fs::create_dir_all(audit_dir).with_context(|| format!("creating {}", audit_dir.display()))?;
+
+    let summary_path = audit_dir.join("summary.json");
+    fs::write(
+        &summary_path,
+        serde_json::to_string_pretty(&serde_json::json!({
+            "migration": migration_summary,
+            "target_validation": target_validation.summary,
+            "remap_applied": target_validation.remap_applied,
+            "target_build": target_validation.target_build,
+        }))?,
+    )
+    .with_context(|| format!("writing {}", summary_path.display()))?;
+
+    let failed_components = target_validation
+        .components
+        .iter()
+        .filter(|component| {
+            !component.blocking_issues.is_empty()
+                || !component.heuristic_sites.is_empty()
+                || !component.unsupported_sites.is_empty()
+        })
+        .collect::<Vec<_>>();
+    write_jsonl_file(
+        &audit_dir.join("components_failed.jsonl"),
+        &failed_components,
+    )?;
+
+    let failed_scripts = target_validation
+        .scripts
+        .iter()
+        .filter(|script| {
+            script.failure.is_some()
+                || !script.validation_errors.is_empty()
+                || !script.blockers.is_empty()
+                || !script.unsupported_sites.is_empty()
+        })
+        .collect::<Vec<_>>();
+    write_jsonl_file(&audit_dir.join("scripts_failed.jsonl"), &failed_scripts)?;
+
+    let heuristic_sites = target_validation
+        .components
+        .iter()
+        .flat_map(|component| {
+            component.heuristic_sites.iter().map(move |site| {
+                serde_json::json!({
+                    "owner_kind": "component",
+                    "component_id": component.component_id,
+                    "component_name": component.name,
+                    "site": site,
+                })
+            })
+        })
+        .chain(target_validation.scripts.iter().flat_map(|script| {
+            script.heuristic_sites.iter().map(move |site| {
+                serde_json::json!({
+                    "owner_kind": "script",
+                    "source_script_id": script.source_script_id,
+                    "target_script_id": script.target_script_id,
+                    "script_name": script.script_name,
+                    "site": site,
+                })
+            })
+        }))
+        .collect::<Vec<_>>();
+    write_jsonl_file(&audit_dir.join("heuristic_sites.jsonl"), &heuristic_sites)?;
+
+    let unsupported_sites = target_validation
+        .components
+        .iter()
+        .flat_map(|component| {
+            component.unsupported_sites.iter().map(move |site| {
+                serde_json::json!({
+                    "owner_kind": "component",
+                    "component_id": component.component_id,
+                    "component_name": component.name,
+                    "site": site,
+                })
+            })
+        })
+        .chain(target_validation.scripts.iter().flat_map(|script| {
+            script.unsupported_sites.iter().map(move |site| {
+                serde_json::json!({
+                    "owner_kind": "script",
+                    "source_script_id": script.source_script_id,
+                    "target_script_id": script.target_script_id,
+                    "script_name": script.script_name,
+                    "site": site,
+                })
+            })
+        }))
+        .collect::<Vec<_>>();
+    write_jsonl_file(
+        &audit_dir.join("unsupported_sites.jsonl"),
+        &unsupported_sites,
+    )?;
+
+    write_jsonl_file(&audit_dir.join("rewrites_applied.jsonl"), reference_updates)?;
+    Ok(())
+}
+
+fn write_jsonl_file<T: Serialize>(path: &Path, rows: &[T]) -> Result<()> {
+    let file = fs::File::create(path).with_context(|| format!("creating {}", path.display()))?;
+    let mut writer = BufWriter::new(file);
+    for row in rows {
+        serde_json::to_writer(&mut writer, row)
+            .with_context(|| format!("writing {}", path.display()))?;
+        writer.write_all(b"\n")?;
+    }
+    writer.flush()?;
     Ok(())
 }
 
@@ -5320,7 +5676,7 @@ fn export_var_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
     lines.push(String::new());
     lines.push(format!("export const VAR_COUNT = {};", entries.len()));
 
-    write_lines(&out_dir.join("vars.ts"), lines)
+    write_lines(&out_dir.join("vars.ts"), &lines)
 }
 
 struct VarTypeEntry {
@@ -5389,7 +5745,7 @@ fn export_varbit_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
         ctx.varbits.len()
     ));
 
-    write_lines(&out_dir.join("varbits.ts"), lines)
+    write_lines(&out_dir.join("varbits.ts"), &lines)
 }
 
 fn export_enum_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
@@ -5579,7 +5935,7 @@ fn export_struct_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
         ctx.structs.len()
     ));
 
-    write_lines(&out_dir.join("structs.ts"), lines)
+    write_lines(&out_dir.join("structs.ts"), &lines)
 }
 
 fn format_scalar_value(value: &crate::config::ScalarValue) -> String {
@@ -5635,7 +5991,7 @@ fn export_param_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
     lines.push(String::new());
     lines.push(format!("export const PARAM_COUNT = {};", ctx.params.len()));
 
-    write_lines(&out_dir.join("params.ts"), lines)
+    write_lines(&out_dir.join("params.ts"), &lines)
 }
 
 fn export_inv_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
@@ -5680,7 +6036,7 @@ fn export_inv_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
     }
     lines.push(format!("export const INV_COUNT = {};", ctx.invs.len()));
 
-    write_lines(&out_dir.join("invs.ts"), lines)
+    write_lines(&out_dir.join("invs.ts"), &lines)
 }
 
 fn export_obj_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
@@ -5885,7 +6241,7 @@ fn export_spot_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
     }
     lines.push(format!("export const SPOT_COUNT = {};", entries.len()));
 
-    write_lines(&out_dir.join("spots.ts"), lines)
+    write_lines(&out_dir.join("spots.ts"), &lines)
 }
 
 /// Extract a name from op list entries like "name=Attack" or "name=Man".
@@ -5955,7 +6311,7 @@ fn export_named_oplist_ids(
         named.len()
     ));
 
-    write_lines(&out_dir.join(format!("named_{source_file}.ts")), lines)
+    write_lines(&out_dir.join(format!("named_{source_file}.ts")), &lines)
 }
 
 fn export_script_signatures(
@@ -6001,7 +6357,7 @@ fn export_script_signatures(
     entries.sort_by(|a, b| a.0.cmp(&b.0));
     lines.extend(entries.into_iter().map(|(_, line)| line));
 
-    write_lines(&out_dir.join("scripts.d.ts"), lines)
+    write_lines(&out_dir.join("scripts.d.ts"), &lines)
 }
 
 fn export_db_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {

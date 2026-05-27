@@ -447,28 +447,27 @@ impl<'a> StructuredLowerer<'a> {
     }
 
     fn emit_call(&mut self, call: &super::CallExpr) -> Result<ValueKind> {
-        if let Expression::Identifier(identifier) = &*call.callee {
-            if let Some(script_metadata) = self
+        if let Expression::Identifier(identifier) = &*call.callee
+            && let Some(script_metadata) = self
                 .ctx
                 .script_catalog
                 .resolve_export_name(&identifier.name)
-            {
-                for argument in &call.arguments {
-                    self.emit_expr(argument)?;
-                }
-                self.emit_instruction(
-                    "gosub_with_params",
-                    Operand::Script(script_metadata.group_id.0),
-                );
-                let return_kind = self
-                    .ctx
-                    .script_signatures
-                    .get(&script_metadata.packed_id)
-                    .map_or(ValueKind::Unknown, |signature| {
-                        kind_from_return_type(&signature.return_type)
-                    });
-                return Ok(return_kind);
+        {
+            for argument in &call.arguments {
+                self.emit_expr(argument)?;
             }
+            self.emit_instruction(
+                "gosub_with_params",
+                Operand::Script(script_metadata.group_id.0),
+            );
+            let return_kind = self
+                .ctx
+                .script_signatures
+                .get(&script_metadata.packed_id)
+                .map_or(ValueKind::Unknown, |signature| {
+                    kind_from_return_type(&signature.return_type)
+                });
+            return Ok(return_kind);
         }
 
         if let Expression::PropertyAccess(callee) = &*call.callee

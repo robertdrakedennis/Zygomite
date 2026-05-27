@@ -16,6 +16,7 @@ use crate::constants::{
 use crate::error::{Context, Result};
 use crate::js5;
 use crate::vars::VarDomain;
+use rayon::prelude::*;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -337,53 +338,103 @@ fn varbit_refs(entry: &crate::vars::VarBitEntry) -> RefMap {
     refs
 }
 
-#[allow(clippy::field_reassign_with_default)]
-pub fn build_config_ref_graph(cache: &FlatCache, build: u32) -> Result<ConfigRefGraph> {
-    let mut g = ConfigRefGraph::default();
+#[derive(Clone, Copy)]
+enum GraphSectionTask {
+    Obj,
+    Npc,
+    Loc,
+    Bas,
+    Seq,
+    Spot,
+    Struct,
+    DbTable,
+    DbRow,
+    Param,
+    VarBit,
+    Enum,
+    Varp(VarDomain, u32),
+}
 
-    g.obj = build_split_oplist_section(
+enum GraphSection {
+    Obj(BTreeMap<u32, RefMap>),
+    Npc(BTreeMap<u32, RefMap>),
+    Loc(BTreeMap<u32, RefMap>),
+    Bas(BTreeMap<u32, RefMap>),
+    Seq(BTreeMap<u32, RefMap>),
+    Spot(BTreeMap<u32, RefMap>),
+    Struct(BTreeMap<u32, RefMap>),
+    DbTable(BTreeMap<u32, RefMap>),
+    DbRow(BTreeMap<u32, RefMap>),
+    Param(BTreeMap<u32, RefMap>),
+    VarBit(BTreeMap<u32, RefMap>),
+    Enum(BTreeMap<u32, RefMap>),
+    Varp(VarDomain, BTreeMap<u32, RefMap>),
+}
+
+impl GraphSectionTask {
+    fn build(self, cache: &FlatCache, build: u32) -> Result<GraphSection> {
+        match self {
+            Self::Obj => Ok(GraphSection::Obj(build_split_oplist_section(
+                cache,
+                ARCHIVE_OBJ_CONFIG,
+                8,
+                CONFIG_GROUP_OBJ_LEGACY,
+                crate::config::parse_obj,
+            )?)),
+            Self::Npc => Ok(GraphSection::Npc(build_split_oplist_section(
+                cache,
+                ARCHIVE_NPC_CONFIG,
+                7,
+                CONFIG_GROUP_NPC_LEGACY,
+                crate::config::parse_npc,
+            )?)),
+            Self::Loc => Ok(GraphSection::Loc(build_split_oplist_section(
+                cache,
+                ARCHIVE_LOC_CONFIG,
+                8,
+                CONFIG_GROUP_LOC_LEGACY,
+                crate::config::parse_loc,
+            )?)),
+            Self::Bas => Ok(GraphSection::Bas(build_legacy_oplist_section(
+                cache,
+                ARCHIVE_CONFIG,
+                CONFIG_GROUP_BAS,
+                |id, data| crate::config::parse_bas(id, data, build),
+            )?)),
+            Self::Seq => Ok(GraphSection::Seq(build_seq_section(cache)?)),
+            Self::Spot => Ok(GraphSection::Spot(build_spot_section(cache)?)),
+            Self::Struct => Ok(GraphSection::Struct(build_struct_section(cache)?)),
+            Self::DbTable => Ok(GraphSection::DbTable(build_dbtable_section(cache)?)),
+            Self::DbRow => Ok(GraphSection::DbRow(build_dbrow_section(cache)?)),
+            Self::Param => Ok(GraphSection::Param(build_param_section(cache)?)),
+            Self::VarBit => Ok(GraphSection::VarBit(build_varbit_section(cache)?)),
+            Self::Enum => Ok(GraphSection::Enum(build_enum_section(cache)?)),
+            Self::Varp(domain, group) => Ok(GraphSection::Varp(
+                domain,
+                build_varp_section(cache, group, domain)?,
+            )),
+        }
+    }
+}
+
+fn build_seq_section(cache: &FlatCache) -> Result<BTreeMap<u32, RefMap>> {
+    let mut map = BTreeMap::new();
+    for_each_split_or_legacy_file(
         cache,
-        ARCHIVE_OBJ_CONFIG,
-        8,
-        CONFIG_GROUP_OBJ_LEGACY,
-        crate::config::parse_obj,
-    )?;
-    g.npc = build_split_oplist_section(
-        cache,
-        ARCHIVE_NPC_CONFIG,
+        ARCHIVE_SEQ_CONFIG,
         7,
-        CONFIG_GROUP_NPC_LEGACY,
-        crate::config::parse_npc,
+        CONFIG_GROUP_SEQ,
+        |id, data| {
+            let entry = crate::config::parse_seq(id, data)?;
+            map.insert(id, scan_seq(&entry));
+            Ok(())
+        },
     )?;
-    g.loc = build_split_oplist_section(
-        cache,
-        ARCHIVE_LOC_CONFIG,
-        8,
-        CONFIG_GROUP_LOC_LEGACY,
-        crate::config::parse_loc,
-    )?;
-    g.bas = build_legacy_oplist_section(cache, ARCHIVE_CONFIG, CONFIG_GROUP_BAS, |id, d| {
-        crate::config::parse_bas(id, d, build)
-    })?;
+    Ok(map)
+}
 
-    // Seq — archive 20 (split)
-    g.seq = {
-        let mut map = BTreeMap::new();
-        for_each_split_or_legacy_file(
-            cache,
-            ARCHIVE_SEQ_CONFIG,
-            7,
-            CONFIG_GROUP_SEQ,
-            |id, data| {
-                let entry = crate::config::parse_seq(id, data)?;
-                map.insert(id, scan_seq(&entry));
-                Ok(())
-            },
-        )?;
-        map
-    };
-
-    // Spot — archive 21 (split)
+fn build_spot_section(cache: &FlatCache) -> Result<BTreeMap<u32, RefMap>> {
+    let mut map = BTreeMap::new();
     for_each_split_or_legacy_file(
         cache,
         ARCHIVE_SPOT_CONFIG,
@@ -391,12 +442,15 @@ pub fn build_config_ref_graph(cache: &FlatCache, build: u32) -> Result<ConfigRef
         CONFIG_GROUP_SPOT,
         |id, data| {
             let entry = crate::config::parse_spot(id, data)?;
-            g.spot.insert(id, scan_spot(&entry));
+            map.insert(id, scan_spot(&entry));
             Ok(())
         },
     )?;
+    Ok(map)
+}
 
-    // Struct — archive 22 (split)
+fn build_struct_section(cache: &FlatCache) -> Result<BTreeMap<u32, RefMap>> {
+    let mut map = BTreeMap::new();
     for_each_split_or_legacy_file(
         cache,
         ARCHIVE_STRUCT_CONFIG,
@@ -408,12 +462,15 @@ pub fn build_config_ref_graph(cache: &FlatCache, build: u32) -> Result<ConfigRef
             for p in &entry.params {
                 refs.entry("param".into()).or_default().insert(p.param_id);
             }
-            g.r#struct.insert(id, refs);
+            map.insert(id, refs);
             Ok(())
         },
     )?;
+    Ok(map)
+}
 
-    // DbTable
+fn build_dbtable_section(cache: &FlatCache) -> Result<BTreeMap<u32, RefMap>> {
+    let mut map = BTreeMap::new();
     for_each_group_file(cache, ARCHIVE_CONFIG, CONFIG_GROUP_DBTABLE, |id, data| {
         let entry = crate::config::parse_dbtable(id, data)?;
         let mut refs = RefMap::new();
@@ -424,11 +481,14 @@ pub fn build_config_ref_graph(cache: &FlatCache, build: u32) -> Result<ConfigRef
                     .insert(u32::from(tid));
             }
         }
-        g.dbtable.insert(id, refs);
+        map.insert(id, refs);
         Ok(())
     })?;
+    Ok(map)
+}
 
-    // DbRow
+fn build_dbrow_section(cache: &FlatCache) -> Result<BTreeMap<u32, RefMap>> {
+    let mut map = BTreeMap::new();
     for_each_group_file(cache, ARCHIVE_CONFIG, CONFIG_GROUP_DBROW, |id, data| {
         let entry = crate::config::parse_dbrow(id, data)?;
         let mut refs = RefMap::new();
@@ -442,11 +502,14 @@ pub fn build_config_ref_graph(cache: &FlatCache, build: u32) -> Result<ConfigRef
                     .insert(u32::from(tid));
             }
         }
-        g.dbrow.insert(id, refs);
+        map.insert(id, refs);
         Ok(())
     })?;
+    Ok(map)
+}
 
-    // Param
+fn build_param_section(cache: &FlatCache) -> Result<BTreeMap<u32, RefMap>> {
+    let mut map = BTreeMap::new();
     for_each_group_file(cache, ARCHIVE_CONFIG, CONFIG_GROUP_PARAM, |id, data| {
         let entry = crate::config::parse_param(id, data)?;
         let mut refs = RefMap::new();
@@ -455,48 +518,29 @@ pub fn build_config_ref_graph(cache: &FlatCache, build: u32) -> Result<ConfigRef
                 .or_default()
                 .insert(u32::from(tid));
         }
-        g.param.insert(id, refs);
+        map.insert(id, refs);
         Ok(())
     })?;
+    Ok(map)
+}
 
-    // Varps (all domains)
-    for (group, domain) in [
-        (CONFIG_GROUP_VAR_PLAYER, crate::vars::VarDomain::Player),
-        (CONFIG_GROUP_VAR_NPC, crate::vars::VarDomain::Npc),
-        (CONFIG_GROUP_VAR_CLIENT, crate::vars::VarDomain::Client),
-        (CONFIG_GROUP_VAR_WORLD, crate::vars::VarDomain::World),
-        (CONFIG_GROUP_VAR_REGION, crate::vars::VarDomain::Region),
-        (CONFIG_GROUP_VAR_OBJECT, crate::vars::VarDomain::Object),
-        (CONFIG_GROUP_VAR_CLAN, crate::vars::VarDomain::Clan),
-        (
-            CONFIG_GROUP_VAR_CLAN_SETTING,
-            crate::vars::VarDomain::ClanSetting,
-        ),
-        (
-            CONFIG_GROUP_VAR_CONTROLLER,
-            crate::vars::VarDomain::Controller,
-        ),
-        (CONFIG_GROUP_VAR_GLOBAL, crate::vars::VarDomain::Global),
-        (
-            CONFIG_GROUP_VAR_PLAYER_GROUP,
-            crate::vars::VarDomain::PlayerGroup,
-        ),
-    ] {
-        let section = build_varp_section(cache, group, domain)?;
-        g.varp.insert(domain.as_label().to_string(), section);
-    }
-
-    // Varbits
+fn build_varbit_section(cache: &FlatCache) -> Result<BTreeMap<u32, RefMap>> {
+    let mut map = BTreeMap::new();
     for_each_group_file(cache, ARCHIVE_CONFIG, CONFIG_GROUP_VAR_BIT, |id, data| {
         let entry = crate::vars::parse_varbit(id, data)?;
-        g.varbit.insert(id, varbit_refs(&entry));
+        map.insert(id, varbit_refs(&entry));
         Ok(())
     })?;
+    Ok(map)
+}
 
-    // Enums (archive 17)
-    {
-        let index = cache.archive_index(ARCHIVE_ENUM_CONFIG)?;
-        for &group in &index.group_id {
+fn build_enum_section(cache: &FlatCache) -> Result<BTreeMap<u32, RefMap>> {
+    let index = cache.archive_index(ARCHIVE_ENUM_CONFIG)?;
+    let groups = index.group_id;
+    let sections = groups
+        .into_par_iter()
+        .map(|group| -> Result<BTreeMap<u32, RefMap>> {
+            let mut map = BTreeMap::new();
             for_each_group_file(cache, ARCHIVE_ENUM_CONFIG, group, |id, data| {
                 let entry = crate::config::parse_enum((group << 8) | id, data)?;
                 let mut refs = RefMap::new();
@@ -510,12 +554,70 @@ pub fn build_config_ref_graph(cache: &FlatCache, build: u32) -> Result<ConfigRef
                         .or_default()
                         .insert(u32::from(tid));
                 }
-                g.r#enum.insert((group << 8) | id, refs);
+                map.insert((group << 8) | id, refs);
                 Ok(())
             })?;
+            Ok(map)
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let mut out = BTreeMap::new();
+    for section in sections {
+        out.extend(section);
+    }
+    Ok(out)
+}
+
+#[allow(clippy::field_reassign_with_default)]
+pub fn build_config_ref_graph(cache: &FlatCache, build: u32) -> Result<ConfigRefGraph> {
+    let sections = [
+        GraphSectionTask::Obj,
+        GraphSectionTask::Npc,
+        GraphSectionTask::Loc,
+        GraphSectionTask::Bas,
+        GraphSectionTask::Seq,
+        GraphSectionTask::Spot,
+        GraphSectionTask::Struct,
+        GraphSectionTask::DbTable,
+        GraphSectionTask::DbRow,
+        GraphSectionTask::Param,
+        GraphSectionTask::VarBit,
+        GraphSectionTask::Enum,
+        GraphSectionTask::Varp(VarDomain::Player, CONFIG_GROUP_VAR_PLAYER),
+        GraphSectionTask::Varp(VarDomain::Npc, CONFIG_GROUP_VAR_NPC),
+        GraphSectionTask::Varp(VarDomain::Client, CONFIG_GROUP_VAR_CLIENT),
+        GraphSectionTask::Varp(VarDomain::World, CONFIG_GROUP_VAR_WORLD),
+        GraphSectionTask::Varp(VarDomain::Region, CONFIG_GROUP_VAR_REGION),
+        GraphSectionTask::Varp(VarDomain::Object, CONFIG_GROUP_VAR_OBJECT),
+        GraphSectionTask::Varp(VarDomain::Clan, CONFIG_GROUP_VAR_CLAN),
+        GraphSectionTask::Varp(VarDomain::ClanSetting, CONFIG_GROUP_VAR_CLAN_SETTING),
+        GraphSectionTask::Varp(VarDomain::Controller, CONFIG_GROUP_VAR_CONTROLLER),
+        GraphSectionTask::Varp(VarDomain::Global, CONFIG_GROUP_VAR_GLOBAL),
+        GraphSectionTask::Varp(VarDomain::PlayerGroup, CONFIG_GROUP_VAR_PLAYER_GROUP),
+    ]
+    .into_par_iter()
+    .map(|task| task.build(cache, build))
+    .collect::<Result<Vec<_>>>()?;
+
+    let mut g = ConfigRefGraph::default();
+    for section in sections {
+        match section {
+            GraphSection::Obj(value) => g.obj = value,
+            GraphSection::Npc(value) => g.npc = value,
+            GraphSection::Loc(value) => g.loc = value,
+            GraphSection::Bas(value) => g.bas = value,
+            GraphSection::Seq(value) => g.seq = value,
+            GraphSection::Spot(value) => g.spot = value,
+            GraphSection::Struct(value) => g.r#struct = value,
+            GraphSection::DbTable(value) => g.dbtable = value,
+            GraphSection::DbRow(value) => g.dbrow = value,
+            GraphSection::Param(value) => g.param = value,
+            GraphSection::VarBit(value) => g.varbit = value,
+            GraphSection::Enum(value) => g.r#enum = value,
+            GraphSection::Varp(domain, value) => {
+                g.varp.insert(domain.as_label().to_string(), value);
+            }
         }
     }
-
     Ok(g)
 }
 

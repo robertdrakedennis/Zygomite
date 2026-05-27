@@ -127,9 +127,8 @@ pub fn render_reversible_source(
 }
 
 pub fn structured_digest(script: &StructuredScript) -> String {
-    let canonical = script.canonical_source();
     let mut hasher = DefaultHasher::new();
-    canonical.hash(&mut hasher);
+    script.canonical_source().hash(&mut hasher);
     format!("{:016x}", hasher.finish())
 }
 

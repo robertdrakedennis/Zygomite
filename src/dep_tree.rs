@@ -425,6 +425,10 @@ pub struct ResolverContext {
 }
 
 #[derive(Clone, Copy)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "loader modes are small fixed switches on resolver bootstrap"
+)]
 struct ResolverLoadOptions {
     decode_scripts: bool,
     retain_script_bytes: bool,

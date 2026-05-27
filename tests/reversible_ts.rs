@@ -94,7 +94,7 @@ fn make_metadata(
         subbuild: 0,
         packed_id,
         group_id: packed_id >> 16,
-        file_id: (packed_id & 0xffff) as u16,
+        file_id: u16::try_from(packed_id & 0xffff).expect("file id fits u16"),
         script_id: packed_id,
         export_name: export_name.to_string(),
         raw_name: Some(raw_name.to_string()),
@@ -195,7 +195,7 @@ fn assemble_reversible_structured_edits_910() {
     let original_source = clean_structured_source(export_name, 1);
     let metadata = make_metadata(
         910,
-        910001,
+        910_001,
         export_name,
         raw_name,
         &original_source,
@@ -242,7 +242,7 @@ fn assemble_reversible_structured_edits_947() {
     let original_source = clean_structured_source(export_name, 1);
     let metadata = make_metadata(
         947,
-        947001,
+        947_001,
         export_name,
         raw_name,
         &original_source,
@@ -289,7 +289,7 @@ fn assemble_reversible_dirty_script_falls_back_to_embedded_asm() {
     let structured_source = dirty_structured_source(export_name);
     let metadata = make_metadata(
         947,
-        947777,
+        947_777,
         export_name,
         raw_name,
         &structured_source,
@@ -321,6 +321,36 @@ fn assemble_reversible_dirty_script_falls_back_to_embedded_asm() {
 }
 
 #[test]
+fn assemble_reversible_dirty_script_strict_mode_fails_without_fallback() {
+    if require_fixture(947).is_none() {
+        return;
+    }
+    let dir = tempfile::tempdir().expect("tempdir");
+    let input = dir.path().join("dirty-strict.ts");
+    let output = dir.path().join("dirty-strict.cs2");
+    let export_name = "script947_dirty";
+    let raw_name = "[proc,script947_dirty]";
+    let structured_source = dirty_structured_source(export_name);
+    let metadata = make_metadata(
+        947,
+        947_778,
+        export_name,
+        raw_name,
+        &structured_source,
+        false,
+        vec!["residual_goto".to_string()],
+    );
+    let original_script = dirty_script(raw_name);
+    write_reversible_file(&input, &structured_source, &metadata, &original_script);
+
+    let result = run_assemble(947, &input, &output, true);
+    assert!(!result.status.success(), "strict mode should fail");
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(stderr.contains("structured edits blocked"));
+    assert!(stderr.contains("residual_goto"));
+}
+
+#[test]
 fn assemble_reversible_dirty_script_edit_fails_with_blocker() {
     if require_fixture(910).is_none() {
         return;
@@ -333,7 +363,7 @@ fn assemble_reversible_dirty_script_edit_fails_with_blocker() {
     let structured_source = dirty_structured_source(export_name);
     let metadata = make_metadata(
         910,
-        910777,
+        910_777,
         export_name,
         raw_name,
         &structured_source,
