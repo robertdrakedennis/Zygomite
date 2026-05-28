@@ -121,6 +121,10 @@ struct OverlayImports {
     db_tables: Vec<u32>,
     #[serde(default)]
     db_rows: Vec<u32>,
+    #[serde(default)]
+    interfaces: Vec<u32>,
+    #[serde(default)]
+    scripts: Vec<u32>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -243,6 +247,8 @@ struct OverlayPlanImports {
     varps: Vec<u32>,
     db_tables: Vec<u32>,
     db_rows: Vec<u32>,
+    interfaces: Vec<u32>,
+    scripts: Vec<u32>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -648,6 +654,8 @@ struct PlanBuilder<'a> {
     primary_varps: BTreeSet<u32>,
     primary_db_tables: BTreeSet<u32>,
     primary_db_rows: BTreeSet<u32>,
+    primary_interfaces: BTreeSet<u32>,
+    primary_scripts: BTreeSet<u32>,
     dependencies: BTreeMap<RefKind, BTreeSet<u32>>,
     warnings: Vec<OverlayWarning>,
     blocked: Vec<OverlayBlockedIssue>,
@@ -743,6 +751,8 @@ pub fn run_overlay_plan_command(options: OverlayPlanCommandOptions<'_>) -> Resul
         primary_varps: BTreeSet::new(),
         primary_db_tables: BTreeSet::new(),
         primary_db_rows: BTreeSet::new(),
+        primary_interfaces: BTreeSet::new(),
+        primary_scripts: BTreeSet::new(),
         dependencies: BTreeMap::new(),
         warnings: Vec::new(),
         blocked: Vec::new(),
@@ -1182,6 +1192,14 @@ fn seed_imports(builder: &mut PlanBuilder<'_>) -> Result<()> {
     for id in builder.manifest.imports.db_rows.clone() {
         builder.primary_db_rows.insert(id);
         builder.queue(RefKind::DbRow, id, "manifest", SelectionMode::Primary);
+    }
+    for id in builder.manifest.imports.interfaces.clone() {
+        builder.primary_interfaces.insert(id);
+        builder.queue(RefKind::Interface, id, "manifest", SelectionMode::Primary);
+    }
+    for id in builder.manifest.imports.scripts.clone() {
+        builder.primary_scripts.insert(id);
+        builder.queue(RefKind::Script, id, "manifest", SelectionMode::Primary);
     }
     Ok(())
 }
@@ -2541,6 +2559,8 @@ fn finalize_plan(
             varps: sorted_iter(builder.primary_varps.iter().copied()),
             db_tables: sorted_iter(builder.primary_db_tables.iter().copied()),
             db_rows: sorted_iter(builder.primary_db_rows.iter().copied()),
+            interfaces: sorted_iter(builder.primary_interfaces.iter().copied()),
+            scripts: sorted_iter(builder.primary_scripts.iter().copied()),
         },
         dependencies: dependencies_for_report(&builder),
         db: OverlayPlanDb {
@@ -3910,6 +3930,29 @@ mod tests {
         assert!(temp.path().join("summary.json").is_file());
         assert!(temp.path().join("unsupported_sites.jsonl").is_file());
         assert!(temp.path().join("scripts_failed.jsonl").is_file());
+    }
+
+    #[test]
+    fn manifest_deserializes_script_and_interface_imports() {
+        let manifest: super::CacheOverlayManifest = serde_json::from_value(serde_json::json!({
+            "roots": {
+                "baseRawRoot": "/tmp/base-raw",
+                "donorRawRoot": "/tmp/donor-raw",
+                "baseSemanticRoot": "/tmp/base-semantic",
+                "donorSemanticRoot": "/tmp/donor-semantic",
+                "basePackRoot": "/tmp/base-pack",
+                "outputPackRoot": "/tmp/output-pack",
+                "clientOutputPackRoot": "/tmp/client-pack"
+            },
+            "imports": {
+                "interfaces": [1213, 1218],
+                "scripts": [548, 5690]
+            }
+        }))
+        .expect("manifest");
+
+        assert_eq!(manifest.imports.interfaces, vec![1213, 1218]);
+        assert_eq!(manifest.imports.scripts, vec![548, 5690]);
     }
 
     #[test]
