@@ -4151,7 +4151,7 @@ mod tests {
     }
 
     #[test]
-    fn parses_dbtable_basic_schema() {
+    fn parses_dbtable_column_schema() {
         let bytes = [1, 1, 0, 1, 0, 255, 0];
         let parsed = parse_dbtable(40, &bytes).expect("parse dbtable");
         assert_eq!(40, parsed.id);
@@ -4161,7 +4161,7 @@ mod tests {
     }
 
     #[test]
-    fn parses_dbrow_basic_data() {
+    fn parses_dbrow_table_and_column_values() {
         let bytes = [3, 0, 0, 1, 0, 1, 0, 0, 0, 5, 255, 4, 42, 0];
         let parsed = parse_dbrow(41, &bytes).expect("parse dbrow");
         assert_eq!(41, parsed.id);

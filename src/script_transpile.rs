@@ -549,7 +549,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn sanitize_ts_ident_works() {
+    fn sanitize_ts_ident_normalizes_invalid_identifiers() {
         assert_eq!("hello_world", sanitize_ts_ident("hello/world"));
         assert_eq!("_123abc", sanitize_ts_ident("123abc"));
         assert_eq!("unnamed", sanitize_ts_ident(""));
