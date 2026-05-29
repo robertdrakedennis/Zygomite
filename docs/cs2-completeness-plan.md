@@ -59,13 +59,23 @@ Status legend: `[ ]` todo · `[~]` in progress · `[x]` done
   lever is P1.** Remaining P2 (model `random`/`addpercent`/`setbit`/… and categorize
   `reverse_unsupported`) needs authoritative opcode arities (derive from the client `ScriptRunner`)
   and is gated behind P1 for coverage impact.
-- **P1 ⬜ (the lever — not yet implemented).** Start with **switch-body reconstruction** (cfg.rs:687,
-  self-contained, no relooper) then the Relooper-style if/else-join + back-edge loops. This is the
-  dedicated next effort.
-- **P3 ⬜** recompile-loop test (validate editable scripts recompile byte-identically). Note:
-  `transpile-scripts` output is not directly the reversible/assemble-able format used by
-  `assemble-script` — P3 needs a harness that drives the reversible transpile → strict-structured
-  recompile per editable script. Bounded but non-trivial; do alongside P1 as its regression net.
+- **P3 ✅ (done right).** `editable_structured` now requires the structured form to **recompile
+  byte-identically** to the original (encode(lower(structured)) == encode(original), original = the
+  embedded canonical ASM trailer). Mismatches → `recompile_mismatch` blocker. **This corrected a
+  ~2-3x overstatement**: the *honest* gated baselines are **947 = 3.0% (620/20577)** and **910 =
+  5.9% (849/14313)** vs the previously-claimed 8.7% / 12.2%. Editable is now provably-recompilable
+  by construction; a dev harness (`/tmp/p1validate.sh`: assemble default-vs-`--strict-structured`,
+  compare) confirmed 79/79 editable scripts recompile, 0 mismatch. Committed.
+- **P1 ⬜ (foundation done; structuring next).** The recompile gate is the P1 *foundation*: it
+  de-risks all structuring work — any improvement that doesn't recompile correctly simply won't
+  count (no false-editables). The structuring algorithms still need building, gate-protected:
+  1. **Switch-body reconstruction** (cfg.rs:683 emits empty case bodies; CFG already has the case
+     edges + `instr_to_block`). Needs join (immediate post-dominator) detection. CS2 is switch-heavy
+     — likely the biggest single bucket.
+  2. **Relooper-style if/else-join + back-edge loops** to kill `residual_goto`/`commented_branch`.
+  3. **Flush-unvisited-blocks guard** (correctness: the structurer can silently drop unreached blocks).
+  Honest gated blockers (947): residual_goto 12773, commented_branch 10068, reverse_unsupported
+  5281, residual_pop 3776, recompile_mismatch 1155.
 
 ## P1 — Control-flow recovery (the dominant lever: ~62%+49% of corpus)
 Target `cfg.rs` (build_cfg / emit_structured) + the branch/goto handling.
