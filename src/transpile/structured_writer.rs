@@ -38,7 +38,7 @@ impl<'a> StructuredWriter<'a> {
             self.script_catalog,
             self.script_signatures,
         );
-        let structured = emit_structured(blocks);
+        let structured = emit_structured(&blocks);
         let return_type =
             resolve_script_signature(self.script_catalog, self.script_signatures, decl.script_id)
                 .and_then(|signature| {

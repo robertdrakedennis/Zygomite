@@ -285,7 +285,7 @@ impl<'a> CfgBuilder<'a> {
     }
 }
 
-fn branch_condition_expr(stmt: &RecoveredStmt) -> Option<Expression> {
+pub(crate) fn branch_condition_expr(stmt: &RecoveredStmt) -> Option<Expression> {
     match stmt {
         RecoveredStmt::Branch {
             condition,
@@ -311,7 +311,7 @@ fn branch_condition_expr(stmt: &RecoveredStmt) -> Option<Expression> {
     }
 }
 
-fn assignment_target_from_recovered(target: &str) -> AssignmentTarget {
+pub(crate) fn assignment_target_from_recovered(target: &str) -> AssignmentTarget {
     if let Some((array, index)) = target.split_once('[')
         && let Some(index) = index.strip_suffix(']')
     {
@@ -793,8 +793,8 @@ fn is_loop_back_stmt(stmt: &RecoveredStmt, loop_target: usize) -> bool {
     }
 }
 
-pub fn emit_structured(blocks: Vec<Block>) -> Vec<StructuredStmt> {
-    StructuredEmitter::new(blocks).emit()
+pub fn emit_structured(blocks: &[Block]) -> Vec<StructuredStmt> {
+    super::structurer::structure(blocks)
 }
 
 /// Scan structured statements for `Return` nodes to determine the

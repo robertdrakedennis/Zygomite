@@ -7,6 +7,7 @@ pub mod reversible_format;
 pub mod scope;
 pub mod structured;
 pub mod structured_writer;
+pub mod structurer;
 pub mod ts_lower;
 pub mod ts_parse;
 pub mod writer;
@@ -1022,7 +1023,7 @@ where
             script_catalog,
             script_signatures,
         );
-        let structured = emit_structured(blocks);
+        let structured = emit_structured(&blocks);
         return detect_return_type(&structured).to_string();
     }
 
