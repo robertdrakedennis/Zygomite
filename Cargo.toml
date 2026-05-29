@@ -22,6 +22,7 @@ tar = "0.4.44"
 rayon = "1.11.0"
 tempfile = "3.23.0"
 thiserror = "2.0.17"
+reflink-copy = "0.1.29"
 
 [lints.rust]
 unsafe_code = "forbid"

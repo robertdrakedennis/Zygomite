@@ -2,6 +2,7 @@
 
 use crate::cache::FlatCache;
 use crate::error::{Context, Result};
+use rayon::prelude::*;
 use serde::Serialize;
 use std::collections::hash_map::DefaultHasher;
 use std::fs;
@@ -57,19 +58,25 @@ fn path_mtime_ms(path: &Path) -> Option<u64> {
 }
 
 fn count_dat_files(dir: &Path) -> usize {
-    let mut count = 0_usize;
     let Ok(entries) = fs::read_dir(dir) else {
         return 0;
     };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            count += count_dat_files(&path);
-        } else if path.extension().is_some_and(|ext| ext == "dat") {
-            count += 1;
-        }
-    }
-    count
+    // Collect first so subdirectories can be walked in parallel — a flat cache
+    // tree has hundreds of thousands of `.dat` files, and `file_type()` reads
+    // the kind straight from the directory entry (no per-file `stat` syscall).
+    let entries: Vec<fs::DirEntry> = entries.flatten().collect();
+    entries
+        .par_iter()
+        .map(|entry| match entry.file_type() {
+            Ok(file_type) if file_type.is_dir() => count_dat_files(&entry.path()),
+            Ok(_) => usize::from(
+                Path::new(&entry.file_name())
+                    .extension()
+                    .is_some_and(|ext| ext == "dat"),
+            ),
+            Err(_) => 0,
+        })
+        .sum()
 }
 
 pub fn artifact_record(relative: &str, root: &Path) -> Result<ArtifactRecord> {
