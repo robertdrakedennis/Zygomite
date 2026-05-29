@@ -35,6 +35,12 @@ pub enum StructuredStmt {
     Goto {
         target: usize,
     },
+    /// A jump target for `goto`, at the instruction index `target` (a block
+    /// start). Emitted only by the linear fallback for irreducible control flow;
+    /// lowers to a label, not an instruction.
+    Label {
+        target: usize,
+    },
     Return {
         value: Option<Expression>,
     },
@@ -213,6 +219,10 @@ impl StructuredRenderer {
             StructuredStmt::Goto { target } => {
                 self.write_indent(out);
                 let _ = writeln!(out, "goto({target});");
+            }
+            StructuredStmt::Label { target } => {
+                self.write_indent(out);
+                let _ = writeln!(out, "label({target});");
             }
             StructuredStmt::Return { value } => {
                 self.write_indent(out);

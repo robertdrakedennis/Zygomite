@@ -869,9 +869,9 @@ impl Transpiler {
             .unwrap_or_else(|| format!("script{script_id}"));
         let script_span = Span::new(0, 0).with_source(source_id);
 
-        if source.contains("goto(") {
-            diagnostics.warning_at(script_span.clone(), "parity miss: residual goto in output");
-        }
+        // `goto(...)` is no longer an automatic blocker: the linear fallback
+        // emits lowerable gotos for irreducible control flow, and the
+        // recompile-fidelity gate decides whether the result is byte-identical.
         if source.contains("pop()") {
             diagnostics.warning_at(
                 script_span.clone(),

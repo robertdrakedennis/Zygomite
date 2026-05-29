@@ -802,7 +802,17 @@ pub fn emit_structured(blocks: &[Block]) -> Vec<StructuredStmt> {
 pub fn detect_return_type(stmts: &[StructuredStmt]) -> &'static str {
     let mut has_value_return = false;
     let mut has_void_return = false;
-    scan_for_returns(stmts, &mut has_value_return, &mut has_void_return);
+    // In the linear (goto) form every block is reachable via its label, so code
+    // after a terminator is NOT dead and the scan must not stop early. Only the
+    // nested form has a genuinely-unreachable tail (the dead default-return
+    // epilogue) to skip.
+    let stop_at_terminator = !contains_label(stmts);
+    scan_for_returns(
+        stmts,
+        &mut has_value_return,
+        &mut has_void_return,
+        stop_at_terminator,
+    );
     match (has_value_return, has_void_return) {
         (true, false) => "number",
         (false, true) => "void",
@@ -811,7 +821,18 @@ pub fn detect_return_type(stmts: &[StructuredStmt]) -> &'static str {
     }
 }
 
-fn scan_for_returns(stmts: &[StructuredStmt], has_val: &mut bool, has_void: &mut bool) {
+fn contains_label(stmts: &[StructuredStmt]) -> bool {
+    stmts
+        .iter()
+        .any(|s| matches!(s, StructuredStmt::Label { .. }))
+}
+
+fn scan_for_returns(
+    stmts: &[StructuredStmt],
+    has_val: &mut bool,
+    has_void: &mut bool,
+    stop_at_terminator: bool,
+) {
     for stmt in stmts {
         match stmt {
             StructuredStmt::Return { value } => {
@@ -821,28 +842,31 @@ fn scan_for_returns(stmts: &[StructuredStmt], has_val: &mut bool, has_void: &mut
                     *has_void = true;
                 }
             }
-            StructuredStmt::While { body } => scan_for_returns(body, has_val, has_void),
+            StructuredStmt::While { body } => {
+                scan_for_returns(body, has_val, has_void, stop_at_terminator);
+            }
             StructuredStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                scan_for_returns(then_body, has_val, has_void);
+                scan_for_returns(then_body, has_val, has_void, stop_at_terminator);
                 if let Some(else_b) = else_body {
-                    scan_for_returns(else_b, has_val, has_void);
+                    scan_for_returns(else_b, has_val, has_void, stop_at_terminator);
                 }
             }
             StructuredStmt::Switch { cases, .. } => {
                 for case in cases {
-                    scan_for_returns(&case.body, has_val, has_void);
+                    scan_for_returns(&case.body, has_val, has_void, stop_at_terminator);
                 }
             }
             _ => {}
         }
-        // Statements after an unconditional terminator are unreachable — notably
-        // the compiler's dead default-return epilogue the structurer now emits
-        // for byte fidelity. Don't let them influence the inferred return type.
-        if stmt_terminates(stmt) {
+        // In the nested form, statements after an unconditional terminator are
+        // unreachable — notably the dead default-return epilogue the structurer
+        // emits for byte fidelity — so don't let them influence the inferred
+        // return type. The linear form keeps everything reachable via labels.
+        if stop_at_terminator && stmt_terminates(stmt) {
             break;
         }
     }

@@ -71,6 +71,127 @@ pub fn structure(blocks: &[Block]) -> Vec<StructuredStmt> {
             out.extend(s.emit_region(b, None, &[], 0));
         }
     }
+
+    // Irreducible control flow (shared blocks, jump tables) leaves residual
+    // `goto`s the nested structuring can't express. Fall back to a linear
+    // emission: every block in original order, jump targets labelled, branches
+    // as `goto`/`if (cond) goto`. This isn't pretty but it preserves the
+    // original instruction order exactly, so it recompiles byte-identically and
+    // the script becomes editable instead of stranded on the ASM trailer.
+    if contains_goto(&out) {
+        emit_linear(blocks)
+    } else {
+        out
+    }
+}
+
+fn contains_goto(stmts: &[StructuredStmt]) -> bool {
+    stmts.iter().any(|s| match s {
+        StructuredStmt::Goto { .. } => true,
+        StructuredStmt::While { body } => contains_goto(body),
+        StructuredStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => contains_goto(then_body) || else_body.as_deref().is_some_and(contains_goto),
+        StructuredStmt::Switch { cases, .. } => cases.iter().any(|c| contains_goto(&c.body)),
+        _ => false,
+    })
+}
+
+/// Linear control-flow emission: transcribe the CFG block-by-block in original
+/// order, labelling jump targets and emitting each terminator as a `goto` /
+/// `if (cond) goto` / `switch`/`return`. Order-faithful, so it recompiles
+/// byte-identically; used only as the fallback for control flow that cannot be
+/// reduced to nested `if`/`while`/`switch`.
+fn emit_linear(blocks: &[Block]) -> Vec<StructuredStmt> {
+    let n = blocks.len();
+    let mut needs_label = vec![false; n];
+    let mut mark = |instr: usize| {
+        if let Some(bi) = block_at_instr(blocks, instr) {
+            needs_label[bi] = true;
+        }
+    };
+    for b in blocks {
+        for stmt in &b.statements {
+            match stmt {
+                RecoveredStmt::Goto(t)
+                | RecoveredStmt::Branch { target: t, .. }
+                | RecoveredStmt::BranchBinary { target: t, .. } => mark(*t),
+                RecoveredStmt::Switch { cases, .. } => {
+                    for (_, t) in cases {
+                        mark(*t);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let label_start =
+        |instr: usize| block_at_instr(blocks, instr).map_or(instr, |bi| blocks[bi].start);
+    let mut out = Vec::new();
+    for (bi, b) in blocks.iter().enumerate() {
+        if needs_label[bi] {
+            out.push(StructuredStmt::Label { target: b.start });
+        }
+        for stmt in &b.statements {
+            match stmt {
+                RecoveredStmt::Expression(expr) => {
+                    out.push(StructuredStmt::Expr { expr: expr.clone() });
+                }
+                RecoveredStmt::Assignment { target, value, .. } => {
+                    out.push(StructuredStmt::Assignment {
+                        target: assignment_target_from_recovered(target),
+                        value: value.clone(),
+                    });
+                }
+                RecoveredStmt::Comment(text) => out.push(StructuredStmt::Comment(text.clone())),
+                RecoveredStmt::Return(value) => {
+                    out.push(StructuredStmt::Return {
+                        value: value.clone(),
+                    });
+                }
+                RecoveredStmt::Goto(target) => out.push(StructuredStmt::Goto {
+                    target: label_start(*target),
+                }),
+                RecoveredStmt::Branch { target, .. }
+                | RecoveredStmt::BranchBinary { target, .. } => {
+                    if let Some(condition) = super::cfg::branch_condition_expr(stmt) {
+                        out.push(StructuredStmt::If {
+                            condition,
+                            then_body: vec![StructuredStmt::Goto {
+                                target: label_start(*target),
+                            }],
+                            else_body: None,
+                        });
+                    } else {
+                        out.push(StructuredStmt::Goto {
+                            target: label_start(*target),
+                        });
+                    }
+                }
+                RecoveredStmt::Switch {
+                    discriminant,
+                    cases,
+                } => {
+                    let cases = cases
+                        .iter()
+                        .map(|(value, target)| SwitchCaseStmt {
+                            value: *value,
+                            body: vec![StructuredStmt::Goto {
+                                target: label_start(*target),
+                            }],
+                        })
+                        .collect();
+                    out.push(StructuredStmt::Switch {
+                        expr: discriminant.clone(),
+                        cases,
+                    });
+                }
+            }
+        }
+    }
     out
 }
 

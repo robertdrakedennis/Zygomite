@@ -296,10 +296,42 @@ fn parse_expression_statement(
                 value: parse_expression(&expr.right, source)?,
             })
         }
+        // `goto(N)` / `label(N)` are the linear control-flow markers (a jump and
+        // its target); parse them back to dedicated statements rather than
+        // generic calls so they round-trip and lower to branches/labels.
+        ast::Expression::CallExpression(call) => {
+            if let Some(target) = control_marker_target(call, "goto") {
+                Ok(StructuredStmt::Goto { target })
+            } else if let Some(target) = control_marker_target(call, "label") {
+                Ok(StructuredStmt::Label { target })
+            } else {
+                Ok(StructuredStmt::Expr {
+                    expr: parse_expression(&statement.expression, source)?,
+                })
+            }
+        }
         expr => Ok(StructuredStmt::Expr {
             expr: parse_expression(expr, source)?,
         }),
     }
+}
+
+/// If `call` is `name(<integer>)`, return the integer target; else `None`.
+fn control_marker_target(call: &CallExpression<'_>, name: &str) -> Option<usize> {
+    let ast::Expression::Identifier(ident) = &call.callee else {
+        return None;
+    };
+    if ident.name.as_str() != name || call.arguments.len() != 1 {
+        return None;
+    }
+    let ast::Argument::NumericLiteral(num) = &call.arguments[0] else {
+        return None;
+    };
+    let value = num.value;
+    if value < 0.0 || value.fract() != 0.0 {
+        return None;
+    }
+    Some(value as usize)
 }
 
 fn parse_assignment_target(

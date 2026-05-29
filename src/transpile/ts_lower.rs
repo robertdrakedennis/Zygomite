@@ -69,6 +69,11 @@ fn command_result_kind(command: &str) -> ValueKind {
     }
 }
 
+/// Lowering label for a `goto`/`label` target (an instruction-start index).
+fn block_label(target: usize) -> String {
+    format!("block_{target}")
+}
+
 /// Whether a statement sequence unconditionally leaves its block — its last
 /// statement returns, breaks, continues, gotos, or is an if/else whose arms all
 /// do. Used to decide whether a fall-through jump after a block is reachable
@@ -245,8 +250,13 @@ impl<'a> StructuredLowerer<'a> {
                 }
                 Ok(())
             }
-            StructuredStmt::Goto { .. } => {
-                bail!("structured recompilation does not support goto statements")
+            StructuredStmt::Goto { target } => {
+                self.emit_branch_to("branch", &block_label(*target));
+                Ok(())
+            }
+            StructuredStmt::Label { target } => {
+                self.mark_label(&block_label(*target));
+                Ok(())
             }
             StructuredStmt::Return { value } => {
                 if let Some(value) = value {
@@ -288,6 +298,15 @@ impl<'a> StructuredLowerer<'a> {
         then_body: &[StructuredStmt],
         else_body: Option<&[StructuredStmt]>,
     ) -> Result<()> {
+        // Conditional goto (`if (cond) goto(N)`) from the linear fallback: emit a
+        // single conditional branch to the target — matching the original
+        // opcode, with the false path falling through to the next block.
+        if else_body.is_none()
+            && let [StructuredStmt::Goto { target }] = then_body
+        {
+            return self.emit_goto_condition(condition, &block_label(*target));
+        }
+
         let then_label = self.new_label("if_then");
         let end_label = self.new_label("if_end");
         let else_label = else_body
@@ -382,6 +401,39 @@ impl<'a> StructuredLowerer<'a> {
             }
             AssignmentTarget::Opaque(target) => {
                 bail!("opaque assignment target is not reversible: {target}")
+            }
+        }
+    }
+
+    /// Emit a single conditional branch to `target_label` for an
+    /// `if (cond) goto(N)` (linear control flow), reproducing the original
+    /// branch opcode. The false path falls through.
+    fn emit_goto_condition(&mut self, condition: &Expression, target_label: &str) -> Result<()> {
+        match condition {
+            Expression::BinaryOperation(binary) => {
+                let branch = match binary.op {
+                    BinaryOp::Eq => "branch_equals",
+                    BinaryOp::Ne => "branch_not",
+                    BinaryOp::Lt => "branch_less_than",
+                    BinaryOp::Le => "branch_less_than_or_equals",
+                    BinaryOp::Gt => "branch_greater_than",
+                    BinaryOp::Ge => "branch_greater_than_or_equals",
+                    _ => bail!("unsupported goto condition operator"),
+                };
+                self.emit_expr(&binary.left)?;
+                self.emit_expr(&binary.right)?;
+                self.emit_branch_to(branch, target_label);
+                Ok(())
+            }
+            Expression::UnaryOperation(unary) if unary.op == UnaryOp::Not => {
+                self.emit_expr(&unary.operand)?;
+                self.emit_branch_to("branch_if_false", target_label);
+                Ok(())
+            }
+            other => {
+                self.emit_expr(other)?;
+                self.emit_branch_to("branch_if_true", target_label);
+                Ok(())
             }
         }
     }
