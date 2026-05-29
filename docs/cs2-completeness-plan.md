@@ -82,11 +82,25 @@ Status legend: `[ ]` todo · `[~]` in progress · `[x]` done
 The relooper structures the control flow; the remaining editable gain is locked behind making that
 structure recompile **byte-identically**. Gate-protected, measured via `transpile_coverage`.
 
-**Current gated baseline (full corpus): 947 = 4735/20577 = 23.01%, 910 = 3739/14313 = 26.12%**
-(up from the post-relooper 4.6%/5.9% — a 5.0x / 4.4x session gain, all byte-identity gated).
-`recompile_mismatch` remains the dominant blocker (947 ~6600, 910 ~4400), now followed by
-`reverse_unsupported` (947 1436, 910 1145). Both are data-driven via `recompile_mismatch_cause:*`
-and `reverse_unsupported_cause:*` histograms.
+**Current gated baseline (full corpus): 947 = 5685/20577 = 27.63%, 910 = 4513/14313 = 31.53%**
+(up from the post-relooper 4.6%/5.9% — a 6.0x / 5.3x session gain, all byte-identity gated).
+`recompile_mismatch` is still the dominant blocker, now led by `branch:operand` (947 3003) and
+`length:structured_shorter` (1096); `residual_pop` was roughly halved and `reverse_unsupported`
+keeps shrinking. All data-driven via the `recompile_mismatch_cause:*` / `reverse_unsupported_cause:*`
+histograms.
+
+Deep-work pass on the three dominant buckets (each gate-verified):
+- **✅ residual_pop (unmodeled opcodes).** Extracted exact stack effects from the client ScriptRunner
+  for the component getters (`if_getwidth`/`cc_getheight`/`getx`/`gety`/`gethide`/…) and value ops
+  (`tostring`/`max`/`min`/`string_length`/`oc_name`/`scale`/`testbit`/`append`/`movecoord`/
+  `clientclock`); made the CC/IF recovery arm push value-producing results; added a getter lowering
+  arm (arg-count cc/if + result type). **947 +671, 910 +566; residual_pop ~halved.**
+- **✅ residual_goto (control flow).** In-loop `return`s were miscounted as loop exits, making search
+  loops `LoopExit::Multi` → goto fallback; treat terminal successors as inline returns so they
+  structure as `while`. **947 +8, 910 +30** (mostly readability — many move to recompile_mismatch).
+- **✅ branch:operand (layout fidelity).** `lower_if` emitted a stray `branch -> end` after a
+  terminating then-body that the original compiler omits, shifting every downstream target. Skip it
+  when the then-body returns/breaks/continues. **947 +271, 910 +208; branch:operand 3758->3003.**
 
 Done this session (each gate-verified, byte-identity preserved):
 - **✅ Rank `recompile_mismatch` by cause.** `recompile_fidelity_check` classifies the first
