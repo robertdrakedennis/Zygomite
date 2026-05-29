@@ -477,7 +477,11 @@ fn decode_operand(
         | "long_branch_less_than_or_equals"
         | "long_branch_greater_than_or_equals"
         | "branch_if_true"
-        | "branch_if_false" => Ok(Operand::Branch(index + packet.g4s()?)),
+        // Jump target is relative to the instruction *after* the branch: the
+        // client executes `pc += operand` then its dispatch loop pre-increments
+        // pc (`instructions[++pc]`), so the next instruction run is
+        // `branch_index + operand + 1` (ScriptRunner.branch + the main loop).
+        | "branch_if_false" => Ok(Operand::Branch(index + packet.g4s()? + 1)),
         "switch" => {
             let switch_index =
                 usize::try_from(packet.g4s()?).context("negative switch table index")?;
@@ -493,8 +497,10 @@ fn decode_operand(
             let mut cases = Vec::with_capacity(values.len());
             for (value, offset) in values.iter().zip(offsets) {
                 cases.push(SwitchCase {
+                    // Same +1 as branches: the client does `pc += case_offset`
+                    // then the loop pre-increments.
+                    target: index + *offset + 1,
                     value: *value,
-                    target: index + *offset,
                 });
             }
             Ok(Operand::Switch(cases))
@@ -602,8 +608,10 @@ pub fn encode_script(
     }
 
     // ── Pass 2: patch branch relative offsets ──
+    // The client jumps to `branch_index + operand + 1` (see decode_operand), so
+    // the stored operand is `target - branch_index - 1`.
     for bp in &branch_patches {
-        let relative = bp.target - bp.instr_index;
+        let relative = bp.target - bp.instr_index - 1;
         patch_i32_at(&mut writer.data, bp.pos, relative)?;
     }
 
@@ -635,7 +643,7 @@ pub fn encode_script(
         let case_count = u16::try_from(sw.values.len()).context("switch case count overflow")?;
         writer.p2(case_count);
         for (value, target) in sw.values.iter().zip(sw.targets.iter()) {
-            let relative = *target - sw.instr_index;
+            let relative = *target - sw.instr_index - 1;
             writer.p4s(*value);
             writer.p4s(relative);
         }
