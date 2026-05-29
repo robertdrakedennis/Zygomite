@@ -82,8 +82,22 @@ Status legend: `[ ]` todo · `[~]` in progress · `[x]` done
 The relooper structures the control flow; the remaining editable gain is locked behind making that
 structure recompile **byte-identically**. Gate-protected, measured via `transpile_coverage`.
 
-**Current gated baseline (full corpus): 947 = 6216/20577 = 30.21%, 910 = 4962/14313 = 34.67%**
-(up from the post-relooper 4.6%/5.9% — a 6.6x / 5.9x session gain, all byte-identity gated).
+**Current gated baseline (full corpus): 947 = 7689/20577 = 37.37%, 910 = 5698/14313 = 39.81%**
+(up from the post-relooper 4.6%/5.9% — an 8.1x / 6.7x session gain, all byte-identity gated).
+
+**Highest-blast instruction-order fix: emit the dead-return epilogue.** The RT7 compiler appends an
+unreachable `push <default>; return` after a script's real return. The structurer walked only
+reachable blocks, dropping it — so every such recompile was shorter than the original and branch
+targets shifted (`length:structured_shorter` + a large share of `branch:operand`). Emitting unvisited
+blocks in original order (with return-type inference taught to stop at unreachable code) reproduces
+the tail byte-for-byte. **947 +1473, 910 +736; length:structured_shorter eliminated, branch:operand
+3091->2033.** (Earlier this pass: terminating-then jump omission, +271/+208.)
+
+Remaining instruction-order tail is heterogeneous and lower-blast: `branch:operand` cascades from
+assorted small order/length diffs, operand-evaluation-order swaps (`push_int_local` vs
+`push_constant_string`, partly recovery reorderings / variant-flag opcode arity like `db_find`),
+`switch:operand`. With recompile_mismatch down to 4858, **`residual_goto` (5291) is now the single
+largest blocker** — control-flow structuring, a different bucket.
 
 **Foundation: client-extracted opcode stack-effect table.** Rather than hand-model opcodes one at a
 time, `scripts/extract-stack-effects.py` parses every handler in the client `ScriptRunner` into
