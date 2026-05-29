@@ -4367,7 +4367,10 @@ fn recompile_fidelity_check(
     })?;
 
     if actual != expected {
-        return Err(("recompile_mismatch", recompile_divergence(&original, &compiled)));
+        return Err((
+            "recompile_mismatch",
+            recompile_divergence(&original, &compiled),
+        ));
     }
     Ok(())
 }

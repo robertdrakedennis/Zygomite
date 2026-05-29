@@ -395,6 +395,15 @@ impl<'a> StructuredLowerer<'a> {
     fn emit_expr(&mut self, expr: &Expression) -> Result<ValueKind> {
         match expr {
             Expression::NumberLiteral(value) => {
+                // Int constants have two CS2 encodings: push_constant_int and
+                // push_constant_string with an int discriminator. The corpus
+                // predominantly uses the latter (measured +81 editable by the
+                // byte gate), but the stack-effect validator (validate.rs) models
+                // push_constant_string as a string push, so emitting it here
+                // makes assemble-script's verifier flag a false StackUnderflow —
+                // i.e. byte-gate and validator disagree. Stay on
+                // push_constant_int until the validator models the int
+                // discriminator (a prerequisite of the byte-fidelity work).
                 self.emit_instruction("push_constant_int", Operand::Int(value.value));
                 Ok(ValueKind::Int)
             }
