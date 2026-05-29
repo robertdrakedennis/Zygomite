@@ -55,6 +55,20 @@ enum ValueKind {
     Void,
 }
 
+/// Result kind of a generic CS2 command, from the client-extracted stack-effect
+/// table. A void command (or one absent from the table) is `Void`; a multi-value
+/// push is treated as `Void` too since the recovery models it as a single value
+/// and the gate will block any genuine value use it can't represent.
+fn command_result_kind(command: &str) -> ValueKind {
+    use super::expr_recovery::PushedType;
+    match super::expr_recovery::opcode_stack_effect(command).map(|e| e.pushed_type) {
+        Some(PushedType::Int) => ValueKind::Int,
+        Some(PushedType::Obj) => ValueKind::Object,
+        Some(PushedType::Long) => ValueKind::Long,
+        _ => ValueKind::Void,
+    }
+}
+
 /// Whether a statement sequence unconditionally leaves its block — its last
 /// statement returns, breaks, continues, gotos, or is an if/else whose arms all
 /// do. Used to decide whether a fall-through jump after a block is reachable
@@ -581,11 +595,10 @@ impl<'a> StructuredLowerer<'a> {
 
         // Generic CS2 command call: the decompiler renders any command without a
         // dedicated form as `sanitize_command(cmd)(args)`. Invert it — push the
-        // arguments (already in source/stack order) and emit the opcode. The
-        // command's result type isn't recoverable here, so report Void: a void
-        // command used as a statement round-trips exactly, while a value-
-        // producing one needs a discard the gate will find missing and correctly
-        // block (no worse than the previous bail).
+        // arguments (already in source/stack order) and emit the opcode, and
+        // report the result kind from the client-extracted stack-effect table so
+        // a value-producing command lowers with the right discard (statement)
+        // or assignment type instead of bailing.
         if let Expression::Identifier(identifier) = &*call.callee
             && let Some(command) = self
                 .ctx
@@ -596,7 +609,7 @@ impl<'a> StructuredLowerer<'a> {
                 self.emit_expr(argument)?;
             }
             self.emit_instruction(&command, Operand::Byte(0));
-            return Ok(ValueKind::Void);
+            return Ok(command_result_kind(&command));
         }
 
         bail!("unsupported call expression")
