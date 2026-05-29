@@ -13,7 +13,7 @@ pub mod ts_parse;
 
 pub use ast::*;
 pub use cfg::{Block, build_cfg, detect_return_type, emit_structured};
-pub use codegen::{CodeGen, generate_program};
+pub use codegen::CodeGen;
 pub use diagnostics::{Diagnostic, Diagnostics, Severity, Span};
 pub use expr_recovery::detect_return_type_from_recovered;
 pub use expr_recovery::opcode_stack_effect;
