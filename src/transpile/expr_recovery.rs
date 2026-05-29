@@ -451,15 +451,103 @@ fn stack_effect(
         "scale" => StackEffect { pops: 3, pushes: 1 },
         "movecoord" => StackEffect { pops: 4, pushes: 1 },
 
-        _ => match categorize(cmd) {
-            OpcodeCategory::Push => StackEffect { pops: 0, pushes: 1 },
-            OpcodeCategory::Pop
-            | OpcodeCategory::Branch
-            | OpcodeCategory::CC
-            | OpcodeCategory::IF => StackEffect { pops: 1, pushes: 0 },
-            OpcodeCategory::Other => StackEffect { pops: 0, pushes: 0 },
-        },
+        // The explicit arms above are hand-verified and win; for everything else
+        // consult the client-extracted opcode table (the long tail of getters,
+        // config lookups and value ops) before the coarse categorisation
+        // default. A wrong table effect only leaves its scripts gate-blocked,
+        // never miscompiles.
+        _ => {
+            if let Some(&(pops, pushes)) = opcode_stack_effects().get(cmd) {
+                StackEffect { pops, pushes }
+            } else {
+                match categorize(cmd) {
+                    OpcodeCategory::Push => StackEffect { pops: 0, pushes: 1 },
+                    OpcodeCategory::Pop
+                    | OpcodeCategory::Branch
+                    | OpcodeCategory::CC
+                    | OpcodeCategory::IF => StackEffect { pops: 1, pushes: 0 },
+                    OpcodeCategory::Other => StackEffect { pops: 0, pushes: 0 },
+                }
+            }
+        }
     }
+}
+
+/// Stack effect of an opcode: `(pops, pushes, pushed_type)`. `pushed_type` is
+/// the stack the produced value lands on — used by the lowerer to recover a
+/// generic command call's result kind.
+#[derive(Clone, Copy)]
+pub struct OpcodeStackEffect {
+    pub pops: usize,
+    pub pushes: usize,
+    pub pushed_type: PushedType,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum PushedType {
+    Int,
+    Obj,
+    Long,
+    None,
+    Multi,
+}
+
+/// The client-extracted opcode stack-effect table (see
+/// `scripts/extract-stack-effects.py` and `data/stack-effects.txt`). Keyed by
+/// command name; build independent.
+pub fn opcode_stack_effect(command: &str) -> Option<OpcodeStackEffect> {
+    opcode_stack_effect_full().get(command).copied()
+}
+
+fn opcode_stack_effects() -> &'static std::collections::HashMap<&'static str, (usize, usize)> {
+    static COUNTS: std::sync::OnceLock<std::collections::HashMap<&'static str, (usize, usize)>> =
+        std::sync::OnceLock::new();
+    COUNTS.get_or_init(|| {
+        opcode_stack_effect_full()
+            .iter()
+            .map(|(&name, e)| (name, (e.pops, e.pushes)))
+            .collect()
+    })
+}
+
+fn opcode_stack_effect_full() -> &'static std::collections::HashMap<&'static str, OpcodeStackEffect>
+{
+    static TABLE: std::sync::OnceLock<std::collections::HashMap<&'static str, OpcodeStackEffect>> =
+        std::sync::OnceLock::new();
+    TABLE.get_or_init(|| {
+        let mut map = std::collections::HashMap::new();
+        for line in include_str!("../../data/stack-effects.txt").lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let mut fields = line.split_whitespace();
+            let (Some(name), Some(pops), Some(pushes), Some(kind)) =
+                (fields.next(), fields.next(), fields.next(), fields.next())
+            else {
+                continue;
+            };
+            let (Ok(pops), Ok(pushes)) = (pops.parse::<usize>(), pushes.parse::<usize>()) else {
+                continue;
+            };
+            let pushed_type = match kind {
+                "int" => PushedType::Int,
+                "obj" => PushedType::Obj,
+                "long" => PushedType::Long,
+                "multi" => PushedType::Multi,
+                _ => PushedType::None,
+            };
+            map.insert(
+                name,
+                OpcodeStackEffect {
+                    pops,
+                    pushes,
+                    pushed_type,
+                },
+            );
+        }
+        map
+    })
 }
 
 #[derive(Debug, Clone)]
