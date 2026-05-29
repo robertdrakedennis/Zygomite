@@ -55,6 +55,27 @@ enum ValueKind {
     Void,
 }
 
+/// Whether a statement sequence unconditionally leaves its block — its last
+/// statement returns, breaks, continues, gotos, or is an if/else whose arms all
+/// do. Used to decide whether a fall-through jump after a block is reachable
+/// (and thus whether the original compiler would have emitted it).
+fn stmts_terminate(stmts: &[StructuredStmt]) -> bool {
+    match stmts.last() {
+        Some(
+            StructuredStmt::Return { .. }
+            | StructuredStmt::Break
+            | StructuredStmt::Continue
+            | StructuredStmt::Goto { .. },
+        ) => true,
+        Some(StructuredStmt::If {
+            then_body,
+            else_body: Some(else_body),
+            ..
+        }) => stmts_terminate(then_body) && stmts_terminate(else_body),
+        _ => false,
+    }
+}
+
 pub fn lower_structured_script(
     script: &StructuredScript,
     metadata: &ReversibleMetadata,
@@ -263,7 +284,15 @@ impl<'a> StructuredLowerer<'a> {
         self.mark_label(&then_label);
         self.lower_stmts(then_body)?;
         if let Some(else_body) = else_body {
-            self.emit_branch_to("branch", &end_label);
+            // The jump over the else body is unreachable — and the original
+            // compiler omits it — when the then body already terminates
+            // (returns / breaks / continues). Emitting it anyway adds a stray
+            // `branch` that shifts every downstream target (the dominant
+            // branch:operand mismatch). Only emit it when control can fall
+            // through the then body into the else.
+            if !stmts_terminate(then_body) {
+                self.emit_branch_to("branch", &end_label);
+            }
             self.mark_label(&else_label);
             self.lower_stmts(else_body)?;
         }
