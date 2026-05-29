@@ -82,9 +82,10 @@ Status legend: `[ ]` todo · `[~]` in progress · `[x]` done
 The relooper structures the control flow; the remaining editable gain is locked behind making that
 structure recompile **byte-identically**. Gate-protected, measured via `transpile_coverage`.
 
-**Current gated baseline (full corpus): 947 = 2707/20577 = 13.16%, 910 = 2029/14313 = 14.18%**
-(up from the post-relooper 4.6%/5.9%). `recompile_mismatch` is now the dominant blocker
-(947 7378, 910 5030). Made data-driven via the `recompile_mismatch_cause:*` histogram.
+**Current gated baseline (full corpus): 947 = 3640/20577 = 17.69%, 910 = 2775/14313 = 19.39%**
+(up from the post-relooper 4.6%/5.9% — a 3.8x / 3.3x session gain, all byte-identity gated).
+`recompile_mismatch` remains the dominant blocker (947 6602, 910 4373). Made data-driven via the
+`recompile_mismatch_cause:*` histogram.
 
 Done this session (each gate-verified, byte-identity preserved):
 - **✅ Rank `recompile_mismatch` by cause.** `recompile_fidelity_check` classifies the first
@@ -100,18 +101,29 @@ Done this session (each gate-verified, byte-identity preserved):
   Now mirrors the renderer's lazily-inferred signatures into the reverse context. **+1673 (947) /
   +1101 (910) editable** — by far the largest win; the spurious discard also cascaded into length
   mismatches, so fixing it unblocked more than its first-divergence count.
+- **✅ UI `if_*` set-method lowering.** The decompiler renders generic interface set-methods via
+  `sanitize_camel` (capital-first, `if_sethide`->`UI.Sethide`), distinct from the explicit
+  lowercase-first `cc_*` names. The lowering lowercased and always picked `cc_<lower>`, so
+  `UI.Sethide(component, flag)` recompiled to `cc_sethide`. Now picks `if_<lower>` for capital-first
+  methods backed by an `if_*` opcode. **+710 (947) / +592 (910)** — the whole `if_*` set family.
+- **✅ Centralized int-constant encoding.** Routed every plain int-constant emit site (boolean/id/
+  enum/component/negated, not just NumberLiteral) through one `emit_int_constant` helper that uses
+  the typed-constant opcode. Cut `push_constant_string->push_constant_int` 1173->24; **+223 (947) /
+  +154 (910)**, zero regression.
 
-Next, from the current cause histogram (947):
-- [ ] **Branch-operand fidelity** (`branch_equals:operand` 1699, `branch_greater_than`/`less_than`
-  ~190 each — now the dominant cause). The structurer/`emit_condition` reconstructs a branch whose
-  instruction-relative target differs from the original (polarity or region split). NB branch
-  offsets are instruction-relative (`script.rs` pass-2 `target - instr_index`), **not** byte-relative
-  — so this is a structural/polarity mismatch, not a byte cascade.
-- [ ] **UI method aliasing** (`if_sethide->cc_sethide` 493, `if_setgraphic->cc_setgraphic`, …):
-  the lowering emits the component-context `cc_*` opcode where the original used the
-  interface-context `if_*` form. Pick the opcode the original used (likely keyed on whether the
-  target is an explicit component id).
-- [ ] **`length:structured_shorter`** (525): the structured form lowers to fewer instructions than
+Next, from the current cause histogram (947) — the frontier is now **structural**:
+- [ ] **Branch-operand / if-else recovery** (`branch_equals:operand` 1792 + `branch_greater_than`/
+  `less_than`/`_or_equals` ~520 — by far the dominant remaining cause, ~2540 scripts). NOT a byte
+  cascade (branch offsets are instruction-relative: `script.rs` pass-2 `target - instr_index`) and
+  NOT simple polarity. The structurer mis-recovers if/else where **both arms diverge (return/exit)**:
+  e.g. `bool_to_int` (`if (a==1) return 1; else return 0`) recovers as an **empty-then `if` + single
+  `return`**, dropping the else path, because there is no common post-dominator join. Fixing the
+  relooper to emit if/else when both arms terminate (no ipdom join) is the next big lever and a
+  dedicated effort — the structurer's join logic assumes a fall-through merge.
+- [ ] **`return`-value recovery** (`push_int_local->return` 403, `push_var->return` 129): the
+  original pushes a value then returns it; we recover a bare `return;`, dropping the value. Likely
+  the same class as the void-call fix but on the return side.
+- [ ] **`length:structured_shorter`** (541): the structured form lowers to fewer instructions than
   the original — a dropped/absorbed instruction. Investigate per-cause.
 - [ ] **Categorize `reverse_unsupported`** (instrument each `ts_lower` `bail!` with a tag) to rank
   the 3744/2608 opaque count.
