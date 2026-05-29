@@ -1071,10 +1071,62 @@ pub fn sanitize_ts_ident(name: &str) -> String {
         }
     }
     if out.is_empty() {
-        "unnamed".to_string()
-    } else {
-        out
+        return "unnamed".to_string();
     }
+    // A CS2 command or name that collides with a TS reserved word (e.g. the
+    // `enum` opcode) would render as `enum(...)` and fail oxc re-parse, blocking
+    // the script. Suffix `_` to keep it a valid identifier; the lowering inverts
+    // the same transform, so the round-trip is unaffected.
+    if is_ts_reserved_word(&out) {
+        out.push('_');
+    }
+    out
+}
+
+/// TS/JS reserved words and contextual keywords that are invalid as a bare
+/// identifier (function name / variable). Used to escape CS2 names that collide
+/// — notably the `enum` opcode.
+fn is_ts_reserved_word(word: &str) -> bool {
+    matches!(
+        word,
+        "break"
+            | "case"
+            | "catch"
+            | "class"
+            | "const"
+            | "continue"
+            | "debugger"
+            | "default"
+            | "delete"
+            | "do"
+            | "else"
+            | "enum"
+            | "export"
+            | "extends"
+            | "false"
+            | "finally"
+            | "for"
+            | "function"
+            | "if"
+            | "import"
+            | "in"
+            | "instanceof"
+            | "new"
+            | "null"
+            | "return"
+            | "super"
+            | "switch"
+            | "this"
+            | "throw"
+            | "true"
+            | "try"
+            | "typeof"
+            | "var"
+            | "void"
+            | "while"
+            | "with"
+            | "yield"
+    )
 }
 
 #[cfg(test)]
