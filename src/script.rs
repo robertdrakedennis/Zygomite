@@ -378,6 +378,18 @@ pub fn decode_script(
     })
 }
 
+/// Decode the trailing 1-byte var/varbit secondary ("transmog") flag, which the
+/// client reads as a boolean (`== 1`). Reject any other value rather than
+/// silently collapsing it to `false` and re-encoding it as `0` — that would be
+/// a silent byte change the structural round-trip cannot detect.
+fn decode_transmog_flag(packet: &mut Packet<'_>) -> Result<bool> {
+    match packet.g1()? {
+        0 => Ok(false),
+        1 => Ok(true),
+        other => bail!("unexpected var secondary flag {other} (expected 0 or 1)"),
+    }
+}
+
 fn decode_operand(
     command: &str,
     is_large_operand: bool,
@@ -415,7 +427,7 @@ fn decode_operand(
             } else {
                 let domain = VarDomain::from_id(packet.g1()?)?;
                 let id = packet.g2()?;
-                let transmog = packet.g1()? == 1;
+                let transmog = decode_transmog_flag(packet)?;
                 Ok(Operand::VarRef(VarRef {
                     domain,
                     id,
@@ -432,7 +444,7 @@ fn decode_operand(
                 }))
             } else {
                 let id = packet.g2()?;
-                let transmog = packet.g1()? == 1;
+                let transmog = decode_transmog_flag(packet)?;
                 Ok(Operand::VarBitRef(VarBitRef { id, transmog }))
             }
         }
@@ -465,7 +477,11 @@ fn decode_operand(
         | "long_branch_less_than_or_equals"
         | "long_branch_greater_than_or_equals"
         | "branch_if_true"
-        | "branch_if_false" => Ok(Operand::Branch(index + packet.g4s()?)),
+        // Jump target is relative to the instruction *after* the branch: the
+        // client executes `pc += operand` then its dispatch loop pre-increments
+        // pc (`instructions[++pc]`), so the next instruction run is
+        // `branch_index + operand + 1` (ScriptRunner.branch + the main loop).
+        | "branch_if_false" => Ok(Operand::Branch(index + packet.g4s()? + 1)),
         "switch" => {
             let switch_index =
                 usize::try_from(packet.g4s()?).context("negative switch table index")?;
@@ -481,8 +497,10 @@ fn decode_operand(
             let mut cases = Vec::with_capacity(values.len());
             for (value, offset) in values.iter().zip(offsets) {
                 cases.push(SwitchCase {
+                    // Same +1 as branches: the client does `pc += case_offset`
+                    // then the loop pre-increments.
+                    target: index + *offset + 1,
                     value: *value,
-                    target: index + *offset,
                 });
             }
             Ok(Operand::Switch(cases))
@@ -537,7 +555,7 @@ pub fn encode_script(
 
     // ── Write name at position 0 ──
     if version >= 459 {
-        writer.pjstrnull(script.name.as_deref());
+        writer.pjstrnull(script.name.as_deref())?;
     }
 
     // ── Pass 1: emit instructions. Branches and switches get placeholder i32=0. ──
@@ -590,8 +608,10 @@ pub fn encode_script(
     }
 
     // ── Pass 2: patch branch relative offsets ──
+    // The client jumps to `branch_index + operand + 1` (see decode_operand), so
+    // the stored operand is `target - branch_index - 1`.
     for bp in &branch_patches {
-        let relative = bp.target - bp.instr_index;
+        let relative = bp.target - bp.instr_index - 1;
         patch_i32_at(&mut writer.data, bp.pos, relative)?;
     }
 
@@ -623,7 +643,7 @@ pub fn encode_script(
         let case_count = u16::try_from(sw.values.len()).context("switch case count overflow")?;
         writer.p2(case_count);
         for (value, target) in sw.values.iter().zip(sw.targets.iter()) {
-            let relative = *target - sw.instr_index;
+            let relative = *target - sw.instr_index - 1;
             writer.p4s(*value);
             writer.p4s(relative);
         }
@@ -635,6 +655,20 @@ pub fn encode_script(
     writer.p2(trailer_size);
 
     Ok(writer.data)
+}
+
+/// Narrow an `i32` operand into a single byte slot without silent truncation.
+///
+/// A 1-byte operand round-trips through `g1`/`p1` (u8), so any value the byte
+/// slot can hold losslessly fits the signed-or-unsigned range `-128..=255`.
+/// Anything outside that would be silently truncated on repack and produce
+/// byte-wrong CS2, so reject it instead.
+fn encode_byte_operand(value: i32) -> Result<u8> {
+    if (-128..=255).contains(&value) {
+        Ok(value as u8)
+    } else {
+        bail!("operand {value} does not fit in a 1-byte slot (expected -128..=255)");
+    }
 }
 
 fn encode_operand(
@@ -656,7 +690,7 @@ fn encode_operand(
         "push_constant_string" => {
             if version < 800 {
                 match operand {
-                    Operand::Str(s) => writer.pjstr(s),
+                    Operand::Str(s) => writer.pjstr(s)?,
                     Operand::Int(v) => writer.p4s(*v),
                     _ => bail!("push_constant_string unexpected operand type for v<800"),
                 }
@@ -672,7 +706,7 @@ fn encode_operand(
                     }
                     Operand::Str(s) => {
                         writer.p1(2);
-                        writer.pjstr(s);
+                        writer.pjstr(s)?;
                     }
                     _ => bail!("push_constant_string unexpected operand type for v>=800"),
                 }
@@ -749,9 +783,14 @@ fn encode_operand(
             Operand::Byte(b) if is_large_operand => writer.p4s(i32::from(*b)),
             Operand::Byte(b) => writer.p1(*b),
             Operand::Int(v) if is_large_operand => writer.p4s(*v),
-            Operand::Int(v) => writer.p1(*v as u8),
-            _ if is_large_operand => writer.p4s(0),
-            _ => writer.p1(0),
+            Operand::Int(v) => writer.p1(encode_byte_operand(*v)?),
+            // Refuse to emit a silent zero placeholder for an operand variant the
+            // default encoding can't represent — that would desync every later
+            // instruction. A correctly decoded default-group command only ever
+            // carries Byte/Int here.
+            other => {
+                bail!("command `{command}` has unsupported operand {other:?} for default encoding")
+            }
         },
     }
     Ok(())
@@ -950,7 +989,8 @@ pub fn parse_cs2_asm(source: &str) -> Result<CompiledScript> {
     let mut pending_switch_cases: Vec<SwitchCase> = Vec::new();
     let mut pending_switch_open = false;
 
-    for raw_line in source.lines() {
+    for (line_idx, raw_line) in source.lines().enumerate() {
+        let line_no = line_idx + 1;
         let line = raw_line.trim();
 
         // Only process @cs2 pragma lines
@@ -985,7 +1025,8 @@ pub fn parse_cs2_asm(source: &str) -> Result<CompiledScript> {
                 &mut local_count_int,
                 &mut local_count_object,
                 &mut local_count_long,
-            )?;
+            )
+            .with_context(|| format!("line {line_no}: {line}"))?;
             continue;
         }
 
@@ -995,7 +1036,8 @@ pub fn parse_cs2_asm(source: &str) -> Result<CompiledScript> {
                 &mut argument_count_int,
                 &mut argument_count_object,
                 &mut argument_count_long,
-            )?;
+            )
+            .with_context(|| format!("line {line_no}: {line}"))?;
             continue;
         }
 
@@ -1003,8 +1045,12 @@ pub fn parse_cs2_asm(source: &str) -> Result<CompiledScript> {
         if let Some(case_str) = cs2_content.strip_prefix("case ") {
             let parts: Vec<&str> = case_str.split_whitespace().collect();
             if parts.len() >= 2 {
-                let value = parts[0].parse::<i32>().context("invalid case value")?;
-                let target = parts[1].parse::<i32>().context("invalid case target")?;
+                let value = parts[0]
+                    .parse::<i32>()
+                    .with_context(|| format!("line {line_no}: invalid case value in `{line}`"))?;
+                let target = parts[1]
+                    .parse::<i32>()
+                    .with_context(|| format!("line {line_no}: invalid case target in `{line}`"))?;
                 pending_switch_cases.push(SwitchCase { value, target });
             }
             pending_switch_open = true;
@@ -1036,7 +1082,8 @@ pub fn parse_cs2_asm(source: &str) -> Result<CompiledScript> {
         instructions.push(Instruction {
             opcode: 0,
             command: opcode_name.to_string(),
-            operand: parse_operand_asm(opcode_name, operand_text)?,
+            operand: parse_operand_asm(opcode_name, operand_text)
+                .with_context(|| format!("line {line_no}: {line}"))?,
         });
     }
 
@@ -1060,14 +1107,15 @@ pub fn parse_cs2_asm(source: &str) -> Result<CompiledScript> {
 
 fn parse_counts(input: &str, int: &mut u16, obj: &mut u16, long: &mut u16) -> Result<()> {
     for part in input.split_whitespace() {
-        if let Some((key, val)) = part.split_once('=') {
-            let v = val.parse::<u16>().context("invalid count value")?;
-            match key {
-                "int" => *int = v,
-                "obj" => *obj = v,
-                "long" => *long = v,
-                _ => {}
-            }
+        let Some((key, val)) = part.split_once('=') else {
+            bail!("malformed locals count token `{part}` (expected key=value)");
+        };
+        let v = val.parse::<u16>().context("invalid count value")?;
+        match key {
+            "int" => *int = v,
+            "obj" => *obj = v,
+            "long" => *long = v,
+            other => bail!("unknown locals count key `{other}` (expected int/obj/long)"),
         }
     }
     Ok(())
@@ -1223,11 +1271,15 @@ fn parse_operand_asm(opcode_name: &str, operand_text: &str) -> Result<Operand> {
                     raw32.parse::<i32>().context("expected raw32 operand")?,
                 ));
             }
-            // Unknown command: 1-byte operand
-            if let Ok(v) = operand_text.parse::<i32>() {
-                Ok(Operand::Byte(v as u8))
-            } else {
+            // Unknown command: 1-byte operand. An empty operand is the no-operand
+            // case (byte 0); a non-empty token that isn't an integer is a typo we
+            // must reject rather than silently encode as 0.
+            if operand_text.is_empty() {
                 Ok(Operand::Byte(0))
+            } else if let Ok(v) = operand_text.parse::<i32>() {
+                Ok(Operand::Byte(encode_byte_operand(v)?))
+            } else {
+                bail!("unparseable operand `{operand_text}` for command `{opcode_name}`")
             }
         }
     }

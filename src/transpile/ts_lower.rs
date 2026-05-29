@@ -1,7 +1,7 @@
 use super::ast::{BinaryOp, Expression, ScriptId, TypeAnnotation, UnaryOp};
 use super::reversible_format::ReversibleMetadata;
 use super::structured::{
-    AssignmentTarget, StructuredScript, StructuredStmt, parse_type_annotation,
+    AssignmentTarget, StructuredScript, StructuredStmt, parse_type_annotation, stmts_terminate,
 };
 use super::{ScriptCatalog, ScriptSignature};
 use crate::cache_bail as bail;
@@ -25,6 +25,25 @@ impl ReverseCompileContext {
     pub fn has_command(&self, command: &str) -> bool {
         self.opcode_commands.contains(command)
     }
+
+    /// Invert the decompiler's generic command rendering. A CS2 command with no
+    /// dedicated lowering is decompiled as `sanitize_command(cmd)(args)`, which
+    /// strips underscores and TS-sanitizes — lossy — so recover the opcode by
+    /// matching that transform against every command name. Deterministic across
+    /// runs (`HashSet` order is not): ties break by shortest then lexicographic.
+    pub fn resolve_command(&self, sanitized: &str) -> Option<&str> {
+        let mut best: Option<&str> = None;
+        for cmd in &self.opcode_commands {
+            if super::sanitize_ts_ident(&cmd.replace('_', "")) != sanitized {
+                continue;
+            }
+            best = Some(match best {
+                Some(cur) if (cur.len(), cur) <= (cmd.len(), cmd.as_str()) => cur,
+                _ => cmd.as_str(),
+            });
+        }
+        best
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -34,6 +53,25 @@ enum ValueKind {
     Object,
     Unknown,
     Void,
+}
+
+/// Result kind of a generic CS2 command, from the client-extracted stack-effect
+/// table. A void command (or one absent from the table) is `Void`; a multi-value
+/// push is treated as `Void` too since the recovery models it as a single value
+/// and the gate will block any genuine value use it can't represent.
+fn command_result_kind(command: &str) -> ValueKind {
+    use super::expr_recovery::PushedType;
+    match super::expr_recovery::opcode_stack_effect(command).map(|e| e.pushed_type()) {
+        Some(PushedType::Int) => ValueKind::Int,
+        Some(PushedType::Obj) => ValueKind::Object,
+        Some(PushedType::Long) => ValueKind::Long,
+        _ => ValueKind::Void,
+    }
+}
+
+/// Lowering label for a `goto`/`label` target (an instruction-start index).
+fn block_label(target: usize) -> String {
+    format!("block_{target}")
 }
 
 pub fn lower_structured_script(
@@ -125,6 +163,22 @@ impl<'a> StructuredLowerer<'a> {
             self.instructions[*index].operand = Operand::Switch(resolved);
         }
 
+        // Reject any emitted command absent from the target build's opcode table
+        // before it reaches the encoder. This catches lowering that names an
+        // opcode that does not exist for this build (e.g. `sub` on 910, which
+        // has no subtraction opcode) with a source-attributed error instead of
+        // a bare "missing opcode mapping" at encode time, and makes
+        // `--strict-structured` a real guarantee.
+        for (index, instruction) in self.instructions.iter().enumerate() {
+            if !self.ctx.has_command(&instruction.command) {
+                bail!(
+                    "instruction {index} uses command `{}`, which is not available in build {}",
+                    instruction.command,
+                    self.ctx.build
+                );
+            }
+        }
+
         Ok(CompiledScript {
             name: self.metadata.raw_name.clone(),
             local_count_int: count_locals(&self.script.locals, TypeAnnotation::Number),
@@ -156,13 +210,32 @@ impl<'a> StructuredLowerer<'a> {
             StructuredStmt::Assignment { target, value } => self.lower_assignment(target, value),
             StructuredStmt::Expr { expr } => {
                 let kind = self.emit_expr(expr)?;
-                if kind != ValueKind::Void {
-                    bail!("expression statement leaves value on stack: {:?}", expr);
+                // A value-producing call used as a bare statement discards its
+                // result, which in CS2 is an explicit pop_*_discard after the
+                // call. Emit it so such statements round-trip (the recompile gate
+                // confirms byte-identity).
+                match kind {
+                    ValueKind::Void => {}
+                    ValueKind::Int => self.emit_instruction("pop_int_discard", Operand::Byte(0)),
+                    ValueKind::Object => {
+                        self.emit_instruction("pop_string_discard", Operand::Byte(0));
+                    }
+                    ValueKind::Long => self.emit_instruction("pop_long_discard", Operand::Byte(0)),
+                    ValueKind::Unknown => {
+                        bail!(
+                            "expression statement leaves value of unknown type on stack: {expr:?}"
+                        )
+                    }
                 }
                 Ok(())
             }
-            StructuredStmt::Goto { .. } => {
-                bail!("structured recompilation does not support goto statements")
+            StructuredStmt::Goto { target } => {
+                self.emit_branch_to("branch", &block_label(*target));
+                Ok(())
+            }
+            StructuredStmt::Label { target } => {
+                self.mark_label(&block_label(*target));
+                Ok(())
             }
             StructuredStmt::Return { value } => {
                 if let Some(value) = value {
@@ -204,6 +277,15 @@ impl<'a> StructuredLowerer<'a> {
         then_body: &[StructuredStmt],
         else_body: Option<&[StructuredStmt]>,
     ) -> Result<()> {
+        // Conditional goto (`if (cond) goto(N)`) from the linear fallback: emit a
+        // single conditional branch to the target — matching the original
+        // opcode, with the false path falling through to the next block.
+        if else_body.is_none()
+            && let [StructuredStmt::Goto { target }] = then_body
+        {
+            return self.emit_goto_condition(condition, &block_label(*target));
+        }
+
         let then_label = self.new_label("if_then");
         let end_label = self.new_label("if_end");
         let else_label = else_body
@@ -214,7 +296,15 @@ impl<'a> StructuredLowerer<'a> {
         self.mark_label(&then_label);
         self.lower_stmts(then_body)?;
         if let Some(else_body) = else_body {
-            self.emit_branch_to("branch", &end_label);
+            // The jump over the else body is unreachable — and the original
+            // compiler omits it — when the then body already terminates
+            // (returns / breaks / continues). Emitting it anyway adds a stray
+            // `branch` that shifts every downstream target (the dominant
+            // branch:operand mismatch). Only emit it when control can fall
+            // through the then body into the else.
+            if !stmts_terminate(then_body) {
+                self.emit_branch_to("branch", &end_label);
+            }
             self.mark_label(&else_label);
             self.lower_stmts(else_body)?;
         }
@@ -277,15 +367,52 @@ impl<'a> StructuredLowerer<'a> {
                     bail!("unsupported array target {array}");
                 };
                 let array_id = array_id.parse::<i32>()?;
-                let command = match value_kind {
-                    ValueKind::Object => "pop_array_string",
-                    _ => "pop_array_int",
-                };
-                self.emit_instruction(command, Operand::Array(array_id));
+                // Only integer arrays exist in the CS2 opcode set; there is no
+                // pop_array_string. Reject string-array assignment cleanly rather
+                // than emitting a phantom command.
+                if value_kind == ValueKind::Object {
+                    bail!(
+                        "string arrays are not supported (no pop_array_string opcode): {array}[..]"
+                    );
+                }
+                self.emit_instruction("pop_array_int", Operand::Array(array_id));
                 Ok(())
             }
             AssignmentTarget::Opaque(target) => {
                 bail!("opaque assignment target is not reversible: {target}")
+            }
+        }
+    }
+
+    /// Emit a single conditional branch to `target_label` for an
+    /// `if (cond) goto(N)` (linear control flow), reproducing the original
+    /// branch opcode. The false path falls through.
+    fn emit_goto_condition(&mut self, condition: &Expression, target_label: &str) -> Result<()> {
+        match condition {
+            Expression::BinaryOperation(binary) => {
+                let branch = match binary.op {
+                    BinaryOp::Eq => "branch_equals",
+                    BinaryOp::Ne => "branch_not",
+                    BinaryOp::Lt => "branch_less_than",
+                    BinaryOp::Le => "branch_less_than_or_equals",
+                    BinaryOp::Gt => "branch_greater_than",
+                    BinaryOp::Ge => "branch_greater_than_or_equals",
+                    _ => bail!("unsupported goto condition operator"),
+                };
+                self.emit_expr(&binary.left)?;
+                self.emit_expr(&binary.right)?;
+                self.emit_branch_to(branch, target_label);
+                Ok(())
+            }
+            Expression::UnaryOperation(unary) if unary.op == UnaryOp::Not => {
+                self.emit_expr(&unary.operand)?;
+                self.emit_branch_to("branch_if_false", target_label);
+                Ok(())
+            }
+            other => {
+                self.emit_expr(other)?;
+                self.emit_branch_to("branch_if_true", target_label);
+                Ok(())
             }
         }
     }
@@ -361,7 +488,17 @@ impl<'a> StructuredLowerer<'a> {
     fn emit_expr(&mut self, expr: &Expression) -> Result<ValueKind> {
         match expr {
             Expression::NumberLiteral(value) => {
-                self.emit_instruction("push_constant_int", Operand::Int(value.value));
+                // Int constants have two CS2 encodings: the legacy
+                // push_constant_int (4-byte int) and the typed-constant
+                // push_constant_string with an int tag (1-byte tag + 4-byte
+                // int). The RT7 corpus (910/947) emits the typed form
+                // universally — push_constant_int as an int-constant origin is
+                // essentially absent — so lowering to it is the byte-faithful
+                // default and the largest single recompile_mismatch cause
+                // (2527 on 947). The recompile-fidelity gate is the backstop:
+                // any script whose original genuinely used push_constant_int
+                // recompiles non-identically and is correctly marked blocked.
+                self.emit_int_constant(value.value);
                 Ok(ValueKind::Int)
             }
             Expression::BigIntLiteral(value) => {
@@ -373,7 +510,7 @@ impl<'a> StructuredLowerer<'a> {
                 Ok(ValueKind::Object)
             }
             Expression::BooleanLiteral(value) => {
-                self.emit_instruction("push_constant_int", Operand::Int(i32::from(value.value)));
+                self.emit_int_constant(i32::from(value.value));
                 Ok(ValueKind::Int)
             }
             Expression::Identifier(identifier) => self.emit_identifier(&identifier.name),
@@ -391,6 +528,15 @@ impl<'a> StructuredLowerer<'a> {
                 bail!("stack pseudo-operations are not reversible")
             }
         }
+    }
+
+    /// Emit an int constant using the typed-constant `push_constant_string`
+    /// (int tag), the RT7 corpus's universal int-constant encoding (see the
+    /// `NumberLiteral` lowering). Centralizes the choice so every plain int
+    /// constant — literals, booleans, ids, enum/component constants — recompiles
+    /// to the same opcode the original used. The recompile gate is the backstop.
+    fn emit_int_constant(&mut self, value: i32) {
+        self.emit_instruction("push_constant_string", Operand::Int(value));
     }
 
     fn emit_identifier(&mut self, name: &str) -> Result<ValueKind> {
@@ -431,7 +577,7 @@ impl<'a> StructuredLowerer<'a> {
         if let Expression::Identifier(object) = &*access.object {
             let qualified = format!("{}.{}", object.name, access.property);
             if let Some(value) = self.ctx.enum_values_by_name.get(&qualified) {
-                self.emit_instruction("push_constant_string", Operand::Int(*value));
+                self.emit_int_constant(*value);
                 return Ok(ValueKind::Int);
             }
             if object.name == "ComponentId" {
@@ -439,7 +585,7 @@ impl<'a> StructuredLowerer<'a> {
                 let Some(value) = self.ctx.component_ids_by_name.get(&key).copied() else {
                     bail!("unknown component constant {key}");
                 };
-                self.emit_instruction("push_constant_int", Operand::Int(value));
+                self.emit_int_constant(value);
                 return Ok(ValueKind::Int);
             }
         }
@@ -453,20 +599,21 @@ impl<'a> StructuredLowerer<'a> {
                 .script_catalog
                 .resolve_export_name(&identifier.name)
         {
+            let mut arg_kinds = Vec::with_capacity(call.arguments.len());
             for argument in &call.arguments {
-                self.emit_expr(argument)?;
+                arg_kinds.push(self.emit_expr(argument)?);
+            }
+            let signature = self.ctx.script_signatures.get(&script_metadata.packed_id);
+            if let Some(signature) = signature {
+                check_call_arity(&identifier.name, signature, &arg_kinds)?;
             }
             self.emit_instruction(
                 "gosub_with_params",
                 Operand::Script(script_metadata.group_id.0),
             );
-            let return_kind = self
-                .ctx
-                .script_signatures
-                .get(&script_metadata.packed_id)
-                .map_or(ValueKind::Unknown, |signature| {
-                    kind_from_return_type(&signature.return_type)
-                });
+            let return_kind = signature.map_or(ValueKind::Unknown, |signature| {
+                kind_from_return_type(&signature.return_type)
+            });
             return Ok(return_kind);
         }
 
@@ -477,15 +624,37 @@ impl<'a> StructuredLowerer<'a> {
             return self.emit_ui_call(&callee.property, &call.arguments);
         }
 
+        // Generic CS2 command call: the decompiler renders any command without a
+        // dedicated form as `sanitize_command(cmd)(args)`. Invert it — push the
+        // arguments (already in source/stack order) and emit the opcode, and
+        // report the result kind from the client-extracted stack-effect table so
+        // a value-producing command lowers with the right discard (statement)
+        // or assignment type instead of bailing.
+        if let Expression::Identifier(identifier) = &*call.callee
+            && let Some(command) = self
+                .ctx
+                .resolve_command(&identifier.name)
+                .map(str::to_string)
+        {
+            for argument in &call.arguments {
+                self.emit_expr(argument)?;
+            }
+            self.emit_instruction(&command, Operand::Byte(0));
+            return Ok(command_result_kind(&command));
+        }
+
         bail!("unsupported call expression")
     }
 
     fn emit_ui_call(&mut self, method: &str, arguments: &[Expression]) -> Result<ValueKind> {
         match method {
             "create" => {
-                self.emit_expr(&arguments[0])?;
-                self.emit_expr(&arguments[1])?;
-                self.emit_expr(&arguments[2])?;
+                let [parent, kind, id] = arguments else {
+                    bail!("UI.create expects 3 arguments, got {}", arguments.len());
+                };
+                self.emit_expr(parent)?;
+                self.emit_expr(kind)?;
+                self.emit_expr(id)?;
                 self.emit_instruction("cc_create", Operand::Byte(0));
                 Ok(ValueKind::Void)
             }
@@ -494,7 +663,10 @@ impl<'a> StructuredLowerer<'a> {
                 Ok(ValueKind::Void)
             }
             "deleteAll" => {
-                self.emit_expr(&arguments[0])?;
+                let [target] = arguments else {
+                    bail!("UI.deleteAll expects 1 argument, got {}", arguments.len());
+                };
+                self.emit_expr(target)?;
                 self.emit_instruction("cc_deleteall", Operand::Byte(0));
                 Ok(ValueKind::Void)
             }
@@ -511,7 +683,10 @@ impl<'a> StructuredLowerer<'a> {
                 Ok(ValueKind::Int)
             }
             "getText" => {
-                self.emit_expr(&arguments[0])?;
+                let [component] = arguments else {
+                    bail!("UI.getText expects 1 argument, got {}", arguments.len());
+                };
+                self.emit_expr(component)?;
                 self.emit_instruction("if_gettext", Operand::Byte(0));
                 Ok(ValueKind::Object)
             }
@@ -539,65 +714,95 @@ impl<'a> StructuredLowerer<'a> {
                 self.emit_instruction(command, Operand::Byte(0));
                 Ok(ValueKind::Void)
             }
+            method if method.starts_with("Get") => self.emit_ui_getter(method, arguments),
             method if method.starts_with("Seton") => self.emit_ui_hook_call(method, arguments),
             method => {
-                let command = match method {
-                    "setText" => "cc_settext",
-                    "setGraphic" => "cc_setgraphic",
-                    "setHide" => "cc_sethide",
-                    "setColour" => "cc_setcolour",
-                    "setFill" => "cc_setfill",
-                    "setTrans" => "cc_settrans",
-                    "setLineWid" => "cc_setlinewid",
-                    "setModel" => "cc_setmodel",
-                    "setScrollPos" => "cc_setscrollpos",
-                    "setScrollSize" => "cc_setscrollsize",
-                    "setAspect" => "cc_setaspect",
-                    "setPosition" => "cc_setposition",
-                    "setSize" => "cc_setsize",
-                    "setModelOrigin" => "cc_setmodelorigin",
-                    "setModelAngle" => "cc_setmodelangle",
-                    "setModelZoom" => "cc_setmodelzoom",
-                    "setModelOrthog" => "cc_setmodelorthog",
-                    "setModelTint" => "cc_setmodeltint",
-                    "setModelLighting" => "cc_setmodellighting",
-                    "resetModelLighting" => "cc_resetmodellighting",
-                    "setTextFont" => "cc_settextfont",
-                    "setTextAlign" => "cc_settextalign",
-                    "setTextShadow" => "cc_settextshadow",
-                    "setTextAntiMacro" => "cc_settextantimacro",
-                    "setOutline" => "cc_setoutline",
-                    "setGraphicShadow" => "cc_setgraphicshadow",
-                    "setClickMask" => "cc_setclickmask",
-                    "setHeld" => "cc_setheld",
-                    "setFontMono" => "cc_setfontmono",
-                    "setParam" => "cc_setparam",
-                    "setParamInt" => "cc_setparam_int",
-                    "setParamString" => "cc_setparam_string",
-                    _ => bail!("unsupported UI method {method}"),
+                // Generic inverse of the decompiler's UI naming. The decompiler
+                // renders generic `if_*`/`cc_*` set-methods via `sanitize_camel`
+                // (capital first letter, e.g. `if_sethide` -> `UI.Sethide`),
+                // while explicit `cc_*` cases keep lowercase-first camelCase
+                // (`cc_sethide` -> `UI.setHide`). So a capital-first method
+                // backed by an `if_*` opcode is the interface-targeted form and
+                // must lower to `if_<lower>`, not the current-component
+                // `cc_<lower>` (the if_sethide->cc_sethide mismatch). Otherwise
+                // fall back to `cc_<lower>`. The recompile gate is the backstop
+                // for the rare opcodes that decompile to a colliding name.
+                let lower = method.to_ascii_lowercase();
+                let starts_upper = method.starts_with(|c: char| c.is_ascii_uppercase());
+                let if_form = format!("if_{lower}");
+                let cc_form = format!("cc_{lower}");
+                let command: String = if starts_upper && self.ctx.has_command(&if_form) {
+                    if_form
+                } else if self.ctx.has_command(&cc_form) {
+                    cc_form
+                } else {
+                    match method {
+                        "setParam" => "cc_setparam".to_string(),
+                        "setParamInt" => "cc_setparam_int".to_string(),
+                        "setParamString" => "cc_setparam_string".to_string(),
+                        _ => bail!("unsupported UI method {method}"),
+                    }
                 };
                 for argument in arguments {
                     self.emit_expr(argument)?;
                 }
-                self.emit_instruction(command, Operand::Byte(0));
+                self.emit_instruction(&command, Operand::Byte(0));
                 Ok(ValueKind::Void)
             }
         }
     }
 
-    fn emit_ui_hook_call(&mut self, method: &str, arguments: &[Expression]) -> Result<ValueKind> {
-        let (command_cc, command_if) = match method {
-            "Setonclick" => ("cc_setonclick", "if_setonclick"),
-            "Setonvartransmit" => ("cc_setonvartransmit", "if_setonvartransmit"),
-            "Setonstocktransmit" => ("cc_setonstocktransmit", "if_setonstocktransmit"),
-            "Setoninvtransmit" => ("cc_setoninvtransmit", "if_setoninvtransmit"),
-            _ => bail!("unsupported UI hook method {method}"),
+    /// Lower a component getter (`UI.Getwidth`, `UI.Getx`, ...). These come from
+    /// the recovery's generic `UI.Get*` rendering of `cc_get*`/`if_get*`: the
+    /// current-component `cc_` form takes no argument, the interface `if_` form
+    /// takes an explicit component, so pick by arg count. Getters push a value,
+    /// so return its kind (string for `gettext`, int otherwise) — the inverse of
+    /// the recovery modelling them as value-producing.
+    fn emit_ui_getter(&mut self, method: &str, arguments: &[Expression]) -> Result<ValueKind> {
+        let lower = method.to_ascii_lowercase();
+        let cc_form = format!("cc_{lower}");
+        let if_form = format!("if_{lower}");
+        let command = if arguments.is_empty() && self.ctx.has_command(&cc_form) {
+            cc_form
+        } else if self.ctx.has_command(&if_form) {
+            if_form
+        } else if self.ctx.has_command(&cc_form) {
+            cc_form
+        } else {
+            bail!("unsupported UI getter {method}");
         };
+        for argument in arguments {
+            self.emit_expr(argument)?;
+        }
+        self.emit_instruction(&command, Operand::Byte(0));
+        Ok(if lower == "gettext" {
+            ValueKind::Object
+        } else {
+            ValueKind::Int
+        })
+    }
+
+    fn emit_ui_hook_call(&mut self, method: &str, arguments: &[Expression]) -> Result<ValueKind> {
+        // The decompiler renders every `cc_seton*`/`if_seton*` hook as
+        // `UI.Seton<suffix>` (sanitize_camel). Derive the opcode pair generically
+        // instead of a hardcoded list so the whole hook family round-trips: the
+        // component-context form takes just the callback, the interface form an
+        // extra explicit component (same arg-count split as the cc_/if_ set
+        // methods).
+        let suffix = method
+            .strip_prefix("Seton")
+            .unwrap_or(method)
+            .to_ascii_lowercase();
+        let command_cc = format!("cc_seton{suffix}");
+        let command_if = format!("if_seton{suffix}");
         let (callback_expr, component_expr, command) = match arguments {
-            [callback] => (callback, None, command_cc),
-            [callback, component] => (callback, Some(component), command_if),
+            [callback] => (callback, None, command_cc.as_str()),
+            [callback, component] => (callback, Some(component), command_if.as_str()),
             _ => bail!("UI hook methods expect callback and optional component"),
         };
+        if !self.ctx.has_command(command) {
+            bail!("unsupported UI hook method {method}");
+        }
         let Expression::CallbackLiteral(callback) = callback_expr else {
             bail!("UI hook first argument must be callback literal");
         };
@@ -615,7 +820,7 @@ impl<'a> StructuredLowerer<'a> {
         } else {
             bail!("unknown callback target {}", callback.script);
         };
-        self.emit_instruction("push_constant_int", Operand::Int(raw_id));
+        self.emit_int_constant(raw_id);
         for argument in &callback.arguments {
             self.emit_expr(argument)?;
         }
@@ -623,10 +828,7 @@ impl<'a> StructuredLowerer<'a> {
             for watcher in &callback.watchers {
                 self.emit_callback_watcher(watcher)?;
             }
-            self.emit_instruction(
-                "push_constant_int",
-                Operand::Int(callback.watchers.len() as i32),
-            );
+            self.emit_int_constant(callback.watchers.len() as i32);
         }
         self.emit_instruction(
             "push_constant_string",
@@ -640,29 +842,23 @@ impl<'a> StructuredLowerer<'a> {
     }
 
     fn emit_callback_watcher(&mut self, watcher: &str) -> Result<()> {
+        // Watcher trigger ids are int constants, encoded the same typed-constant
+        // way as every other int constant in the corpus (see emit_int_constant).
         if let Some(var_ref) = self.ctx.var_refs_by_name.get(watcher) {
-            self.emit_instruction("push_constant_int", Operand::Int(i32::from(var_ref.id)));
+            let id = i32::from(var_ref.id);
+            self.emit_int_constant(id);
             return Ok(());
         }
         if let Some(varbit_ref) = self.ctx.varbit_refs_by_name.get(watcher) {
-            self.emit_instruction("push_constant_int", Operand::Int(i32::from(varbit_ref.id)));
+            let id = i32::from(varbit_ref.id);
+            self.emit_int_constant(id);
             return Ok(());
         }
-        if let Some(id) = watcher.strip_prefix("inv_") {
-            self.emit_instruction("push_constant_int", Operand::Int(id.parse::<i32>()?));
-            return Ok(());
-        }
-        if let Some(id) = watcher.strip_prefix("stat_") {
-            self.emit_instruction("push_constant_int", Operand::Int(id.parse::<i32>()?));
-            return Ok(());
-        }
-        if let Some(id) = watcher.strip_prefix("varc_") {
-            self.emit_instruction("push_constant_int", Operand::Int(id.parse::<i32>()?));
-            return Ok(());
-        }
-        if let Some(id) = watcher.strip_prefix("varcstr_") {
-            self.emit_instruction("push_constant_int", Operand::Int(id.parse::<i32>()?));
-            return Ok(());
+        for prefix in ["inv_", "stat_", "varc_", "varcstr_"] {
+            if let Some(id) = watcher.strip_prefix(prefix) {
+                self.emit_int_constant(id.parse::<i32>()?);
+                return Ok(());
+            }
         }
         bail!("unsupported callback watcher {watcher}")
     }
@@ -677,7 +873,7 @@ impl<'a> StructuredLowerer<'a> {
                     BinaryOp::Sub => "sub",
                     BinaryOp::Mul => "multiply",
                     BinaryOp::Div => "divide",
-                    BinaryOp::Mod => "mod",
+                    BinaryOp::Mod => "modulo",
                     _ => unreachable!(),
                 };
                 self.emit_instruction(command, Operand::Byte(0));
@@ -693,7 +889,7 @@ impl<'a> StructuredLowerer<'a> {
         match unary.op {
             UnaryOp::Neg => match &*unary.operand {
                 Expression::NumberLiteral(value) => {
-                    self.emit_instruction("push_constant_int", Operand::Int(-value.value));
+                    self.emit_int_constant(-value.value);
                     Ok(ValueKind::Int)
                 }
                 Expression::BigIntLiteral(value) => {
@@ -758,6 +954,53 @@ impl<'a> StructuredLowerer<'a> {
         self.next_label += 1;
         label
     }
+}
+
+/// Validate a `gosub_with_params` call against the callee's signature. A wrong
+/// argument count (or per-type shape) silently corrupts the tri-typed stack at
+/// runtime, so reject it at compile time. The per-type check only runs when
+/// every argument has a concrete kind; an `Unknown`/`Void` argument falls back
+/// to the total-count check to avoid false positives.
+fn check_call_arity(
+    callee: &str,
+    signature: &ScriptSignature,
+    arg_kinds: &[ValueKind],
+) -> Result<()> {
+    if arg_kinds.len() != signature.total_args() {
+        bail!(
+            "call to `{callee}` expects {} argument(s), got {}",
+            signature.total_args(),
+            arg_kinds.len()
+        );
+    }
+    if arg_kinds
+        .iter()
+        .all(|kind| matches!(kind, ValueKind::Int | ValueKind::Long | ValueKind::Object))
+    {
+        let mut got_int = 0_usize;
+        let mut got_obj = 0_usize;
+        let mut got_long = 0_usize;
+        for kind in arg_kinds {
+            match kind {
+                ValueKind::Int => got_int += 1,
+                ValueKind::Object => got_obj += 1,
+                ValueKind::Long => got_long += 1,
+                _ => {}
+            }
+        }
+        if got_int != signature.arg_count_int as usize
+            || got_obj != signature.arg_count_obj as usize
+            || got_long != signature.arg_count_long as usize
+        {
+            bail!(
+                "call to `{callee}` expects (int={}, obj={}, long={}) arguments, got (int={got_int}, obj={got_obj}, long={got_long})",
+                signature.arg_count_int,
+                signature.arg_count_obj,
+                signature.arg_count_long
+            );
+        }
+    }
+    Ok(())
 }
 
 fn value_kind_for_type(annotation: TypeAnnotation) -> ValueKind {

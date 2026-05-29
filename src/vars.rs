@@ -33,9 +33,10 @@ impl VarDomain {
             8 => Ok(Self::Controller),
             9 => Ok(Self::PlayerGroup),
             10 => Ok(Self::Global),
-            // Older builds may reference additional domains; map to Player as fallback
-            // rather than crashing the entire extraction.
-            _ => Ok(Self::Player),
+            // 910/947 define exactly 11 var domains (0..=10). A byte outside that
+            // range is malformed input; surface it loudly instead of silently
+            // remapping to Player, which would corrupt the value on re-encode.
+            other => bail!("unknown var domain id {other} (valid range 0..=10)"),
         }
     }
 

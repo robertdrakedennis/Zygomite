@@ -52,7 +52,6 @@ fn stack_effect(
         | "push_constant_string"
         | "push_var"
         | "push_varbit"
-        | "pop_varbit"
         | "push_int_local"
         | "push_string_local"
         | "push_long_local"
@@ -73,18 +72,17 @@ fn stack_effect(
             StackEffect { pops: 1, pushes: 2 }
         }
 
-        // Pop/discard: pops 1, pushes 0
-        "pop_int_local" | "pop_string_local" | "pop_long_local" | "pop_var" | "pop_varc_int"
-        | "pop_varc_string" | "pop_int_discard" | "pop_string_discard" | "pop_long_discard" => {
-            StackEffect { pops: 1, pushes: 0 }
-        }
+        // Pop/discard: pops 1, pushes 0 (`pop_varbit` is a store, not a push)
+        "pop_int_local" | "pop_string_local" | "pop_long_local" | "pop_var" | "pop_varbit"
+        | "pop_varc_int" | "pop_varc_string" | "pop_int_discard" | "pop_string_discard"
+        | "pop_long_discard" => StackEffect { pops: 1, pushes: 0 },
 
         // Array pop: pop value, pop index, store
         "pop_array_int" | "pop_array_string" => StackEffect { pops: 2, pushes: 0 },
         "pop_array_int_leave_value_on_stack" => StackEffect { pops: 2, pushes: 1 },
 
-        // Binary arithmetic: pops 2, pushes 1
-        "add" | "sub" | "multiply" | "divide" | "mod" => StackEffect { pops: 2, pushes: 1 },
+        // Binary arithmetic: pops 2, pushes 1 (opcode is `modulo`, not `mod`)
+        "add" | "sub" | "multiply" | "divide" | "modulo" => StackEffect { pops: 2, pushes: 1 },
 
         // Comparison/logical: pops 2, pushes 1 (result int)
         "compare" | "and" | "or" => StackEffect { pops: 2, pushes: 1 },
@@ -423,15 +421,136 @@ fn stack_effect(
         "enum_getreverseindex" => StackEffect { pops: 5, pushes: 1 },
         "enum_getreverseindex_string" => StackEffect { pops: 4, pushes: 1 },
 
-        _ => match categorize(cmd) {
-            OpcodeCategory::Push => StackEffect { pops: 0, pushes: 1 },
-            OpcodeCategory::Pop
-            | OpcodeCategory::Branch
-            | OpcodeCategory::CC
-            | OpcodeCategory::IF => StackEffect { pops: 1, pushes: 0 },
-            OpcodeCategory::Other => StackEffect { pops: 0, pushes: 0 },
-        },
+        // Component getters and value ops (cc_get*/if_get*, tostring, max, min,
+        // oc_name, scale, testbit, append, movecoord, ...) are now supplied by
+        // the client-extracted opcode table consulted in the default arm. Only
+        // `string_length` keeps an explicit entry: its handler's null-check
+        // branch makes the static extractor double-count the push (1->2), so the
+        // hand value overrides the table.
+        "string_length" => StackEffect { pops: 1, pushes: 1 },
+
+        // The explicit arms above are hand-verified and win; for everything else
+        // consult the client-extracted opcode table (the long tail of getters,
+        // config lookups and value ops) before the coarse categorisation
+        // default. A wrong table effect only leaves its scripts gate-blocked,
+        // never miscompiles.
+        _ => {
+            if let Some(effect) = opcode_stack_effect_full().get(cmd) {
+                StackEffect {
+                    pops: effect.total_pops(),
+                    pushes: effect.total_pushes(),
+                }
+            } else {
+                match categorize(cmd) {
+                    OpcodeCategory::Push => StackEffect { pops: 0, pushes: 1 },
+                    OpcodeCategory::Pop
+                    | OpcodeCategory::Branch
+                    | OpcodeCategory::CC
+                    | OpcodeCategory::IF => StackEffect { pops: 1, pushes: 0 },
+                    OpcodeCategory::Other => StackEffect { pops: 0, pushes: 0 },
+                }
+            }
+        }
     }
+}
+
+/// Per-stack pop/push counts of an opcode, extracted from the client.
+///
+/// Used by the recovery (total counts), the lowerer (result kind via
+/// [`OpcodeStackEffect::pushed_type`]) and the validator (typed stack model).
+#[derive(Clone, Copy)]
+pub struct OpcodeStackEffect {
+    pub int_pops: usize,
+    pub obj_pops: usize,
+    pub long_pops: usize,
+    pub int_pushes: usize,
+    pub obj_pushes: usize,
+    pub long_pushes: usize,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum PushedType {
+    Int,
+    Obj,
+    Long,
+    None,
+    Multi,
+}
+
+impl OpcodeStackEffect {
+    pub fn total_pops(&self) -> usize {
+        self.int_pops + self.obj_pops + self.long_pops
+    }
+
+    pub fn total_pushes(&self) -> usize {
+        self.int_pushes + self.obj_pushes + self.long_pushes
+    }
+
+    /// The stack a single pushed value lands on, for result-kind recovery;
+    /// `Multi` when more than one stack is pushed.
+    pub fn pushed_type(&self) -> PushedType {
+        match (
+            self.int_pushes > 0,
+            self.obj_pushes > 0,
+            self.long_pushes > 0,
+        ) {
+            (false, false, false) => PushedType::None,
+            (true, false, false) => PushedType::Int,
+            (false, true, false) => PushedType::Obj,
+            (false, false, true) => PushedType::Long,
+            _ => PushedType::Multi,
+        }
+    }
+}
+
+/// The client-extracted opcode stack-effect table (see
+/// `scripts/extract-stack-effects.py` and `data/stack-effects.txt`). Keyed by
+/// command name; build independent.
+pub fn opcode_stack_effect(command: &str) -> Option<OpcodeStackEffect> {
+    opcode_stack_effect_full().get(command).copied()
+}
+
+fn opcode_stack_effect_full() -> &'static std::collections::HashMap<&'static str, OpcodeStackEffect>
+{
+    static TABLE: std::sync::OnceLock<std::collections::HashMap<&'static str, OpcodeStackEffect>> =
+        std::sync::OnceLock::new();
+    TABLE.get_or_init(|| {
+        let mut map = std::collections::HashMap::new();
+        for line in include_str!("../../data/stack-effects.txt").lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let mut fields = line.split_whitespace();
+            let Some(name) = fields.next() else {
+                continue;
+            };
+            let counts: Vec<usize> = fields.filter_map(|f| f.parse().ok()).collect();
+            let [
+                int_pops,
+                obj_pops,
+                long_pops,
+                int_pushes,
+                obj_pushes,
+                long_pushes,
+            ] = counts[..]
+            else {
+                continue;
+            };
+            map.insert(
+                name,
+                OpcodeStackEffect {
+                    int_pops,
+                    obj_pops,
+                    long_pops,
+                    int_pushes,
+                    obj_pushes,
+                    long_pushes,
+                },
+            );
+        }
+        map
+    })
 }
 
 #[derive(Debug, Clone)]
@@ -626,13 +745,28 @@ impl<'a, S: std::hash::BuildHasher> ExprRecovery<'a, S> {
                 }
                 None
             }
-            "push_varbit" | "pop_varbit" | "push_varclanbit" | "push_varclansettingbit" => {
+            "push_varbit" | "push_varclanbit" | "push_varclansettingbit" => {
                 if let OperandNode::VarBitRef(vbr) = op {
                     let name = vbr
                         .name
                         .clone()
                         .unwrap_or_else(|| format!("VARBITS.get({})", vbr.id));
                     self.stack.push(Expression::Identifier(Identifier { name }));
+                }
+                None
+            }
+            "pop_varbit" => {
+                if let OperandNode::VarBitRef(vbr) = op {
+                    let value = self.pop_or_unknown();
+                    let name = vbr
+                        .name
+                        .clone()
+                        .unwrap_or_else(|| format!("VARBITS.get({})", vbr.id));
+                    return Some(RecoveredStmt::Assignment {
+                        target: name,
+                        value,
+                        var_type: "number".to_string(),
+                    });
                 }
                 None
             }
@@ -775,7 +909,7 @@ impl<'a, S: std::hash::BuildHasher> ExprRecovery<'a, S> {
             }
 
             // ── Binary arithmetic: pop 2, build expression, push result ──
-            "add" | "sub" | "multiply" | "divide" | "mod" => {
+            "add" | "sub" | "multiply" | "divide" | "modulo" => {
                 let right = self.pop_or_unknown();
                 let left = self.pop_or_unknown();
                 let op = match cmd {
@@ -783,7 +917,7 @@ impl<'a, S: std::hash::BuildHasher> ExprRecovery<'a, S> {
                     "sub" => BinaryOp::Sub,
                     "multiply" => BinaryOp::Mul,
                     "divide" => BinaryOp::Div,
-                    "mod" => BinaryOp::Mod,
+                    "modulo" => BinaryOp::Mod,
                     _ => unreachable!(),
                 };
                 let expr = Expression::BinaryOperation(super::ast::BinaryOperation {
@@ -1354,12 +1488,21 @@ impl<'a, S: std::hash::BuildHasher> ExprRecovery<'a, S> {
                         let mut args: Vec<Expression> =
                             (0..effect.pops).map(|_| self.pop_or_unknown()).collect();
                         args.reverse();
-                        return Some(RecoveredStmt::Expression(Expression::Call(CallExpr {
+                        let call = Expression::Call(CallExpr {
                             callee: Box::new(Expression::Identifier(Identifier {
                                 name: format!("UI.{}", sanitize_camel(&cmd[3..])),
                             })),
                             arguments: args,
-                        })));
+                        });
+                        // A getter (cc_getwidth, if_gettext, ...) produces a
+                        // value: push it so a downstream consumer or assignment
+                        // picks it up, instead of stranding the operands. A void
+                        // UI setter (pushes == 0) stays a statement.
+                        if effect.pushes > 0 {
+                            self.stack.push(call);
+                            return None;
+                        }
+                        return Some(RecoveredStmt::Expression(call));
                     }
                     OpcodeCategory::Push => {
                         self.stack.push(operand_expr(op));

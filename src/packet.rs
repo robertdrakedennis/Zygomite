@@ -344,19 +344,25 @@ impl ByteWriter {
         self.data.extend_from_slice(bytes);
     }
 
-    pub fn pjstr(&mut self, s: &str) {
+    pub fn pjstr(&mut self, s: &str) -> Result<()> {
         let (encoded, _, had_errors) = WINDOWS_1252.encode(s);
         if had_errors {
-            self.data.extend_from_slice(s.as_bytes());
-        } else {
-            self.data.extend_from_slice(&encoded);
+            // The decoder (`gjstr`) is strict Windows-1252; emitting raw UTF-8
+            // here would produce bytes the client mis-renders and this tool
+            // cannot re-decode. Fail at the boundary that owns the outcome.
+            bail!("string contains characters outside Windows-1252: {s:?}");
         }
+        self.data.extend_from_slice(&encoded);
         self.data.push(0);
+        Ok(())
     }
 
-    pub fn pjstrnull(&mut self, s: Option<&str>) {
+    pub fn pjstrnull(&mut self, s: Option<&str>) -> Result<()> {
         match s {
-            None => self.data.push(0),
+            None => {
+                self.data.push(0);
+                Ok(())
+            }
             Some(s) => self.pjstr(s),
         }
     }

@@ -223,12 +223,12 @@ fn transpile_stockmarket_oninvtransmit_947_imports_script621() {
         "expected direct script621 import"
     );
     assert!(
-        script.contains("export function stockmarket_oninvtransmit(): void"),
-        "expected void return after canonical call resolution"
+        script.contains("export function stockmarket_oninvtransmit(): number"),
+        "expected the hook to return script621's value (return script621())"
     );
     assert!(
-        script.contains("script621();"),
-        "expected direct script621 call"
+        script.contains("return script621();"),
+        "expected direct script621 tail-return call"
     );
     assert!(
         !script.contains("script_621(pop())"),
@@ -267,12 +267,12 @@ fn transpile_stockmarket_onvartransmit_947_imports_script621() {
         "expected direct script621 import"
     );
     assert!(
-        script.contains("export function stockmarket_onvartransmit(): void"),
-        "expected void return after canonical call resolution"
+        script.contains("export function stockmarket_onvartransmit(): number"),
+        "expected the hook to return script621's value (return script621())"
     );
     assert!(
-        script.contains("script621();"),
-        "expected direct script621 call"
+        script.contains("return script621();"),
+        "expected direct script621 tail-return call"
     );
     let raw = std::fs::read_to_string(raw_dir.join("[clientscript,stockmarket_onvartransmit].cs2"))
         .expect("raw stockmarket_onvartransmit");
@@ -370,13 +370,13 @@ fn transpile_script621_947_uses_group_name_and_signature() {
         "expected raw script identity metadata for script621"
     );
     assert!(
-        script.contains("export function script621(): void"),
+        script.contains("export function script621(): number | void"),
         "expected canonical group-based export name"
     );
 
     let signatures = std::fs::read_to_string(out.join("scripts.d.ts")).expect("scripts.d.ts");
     assert!(
-        signatures.contains("export function script621(): void;"),
+        signatures.contains("export function script621(): number | void;"),
         "expected canonical script621 declaration in scripts.d.ts"
     );
     let diagnostics = std::fs::read_to_string(out.join("transpile-diagnostics.json"))

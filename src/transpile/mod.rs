@@ -5,30 +5,28 @@ pub mod diagnostics;
 pub mod expr_recovery;
 pub mod reversible_format;
 pub mod scope;
-pub mod sema;
 pub mod structured;
 pub mod structured_writer;
+pub mod structurer;
 pub mod ts_lower;
 pub mod ts_parse;
-pub mod writer;
 
 pub use ast::*;
 pub use cfg::{Block, build_cfg, detect_return_type, emit_structured};
-pub use codegen::{CodeGen, generate_program};
+pub use codegen::CodeGen;
 pub use diagnostics::{Diagnostic, Diagnostics, Severity, Span};
 pub use expr_recovery::detect_return_type_from_recovered;
+pub use expr_recovery::opcode_stack_effect;
 pub use reversible_format::{
     ParsedReversibleSource, REVERSIBLE_FORMAT_VERSION, ReversibleMetadata,
     append_reversible_footer, blocking_diagnostics, editable_structured, is_reversible_source,
     parse_reversible_source, render_reversible_source, structured_digest,
 };
 pub use scope::{LocalType, Scope, Scopes, Symbol, SymbolKind, SymbolTable};
-pub use sema::Sema;
 pub use structured::{AssignmentTarget, StructuredScript, StructuredStmt, SwitchCaseStmt};
 pub use structured_writer::StructuredWriter;
 pub use ts_lower::{ReverseCompileContext, lower_structured_script};
 pub use ts_parse::parse_structured_typescript;
-pub use writer::Writer;
 
 use crate::cache_bail as bail;
 use crate::config::EnumEntry;
@@ -870,9 +868,9 @@ impl Transpiler {
             .unwrap_or_else(|| format!("script{script_id}"));
         let script_span = Span::new(0, 0).with_source(source_id);
 
-        if source.contains("goto(") {
-            diagnostics.warning_at(script_span.clone(), "parity miss: residual goto in output");
-        }
+        // `goto(...)` is no longer an automatic blocker: the linear fallback
+        // emits lowerable gotos for irreducible control flow, and the
+        // recompile-fidelity gate decides whether the result is byte-identical.
         if source.contains("pop()") {
             diagnostics.warning_at(
                 script_span.clone(),
@@ -1024,7 +1022,7 @@ where
             script_catalog,
             script_signatures,
         );
-        let structured = emit_structured(blocks);
+        let structured = emit_structured(&blocks);
         return detect_return_type(&structured).to_string();
     }
 
@@ -1072,10 +1070,62 @@ pub fn sanitize_ts_ident(name: &str) -> String {
         }
     }
     if out.is_empty() {
-        "unnamed".to_string()
-    } else {
-        out
+        return "unnamed".to_string();
     }
+    // A CS2 command or name that collides with a TS reserved word (e.g. the
+    // `enum` opcode) would render as `enum(...)` and fail oxc re-parse, blocking
+    // the script. Suffix `_` to keep it a valid identifier; the lowering inverts
+    // the same transform, so the round-trip is unaffected.
+    if is_ts_reserved_word(&out) {
+        out.push('_');
+    }
+    out
+}
+
+/// TS/JS reserved words and contextual keywords that are invalid as a bare
+/// identifier (function name / variable). Used to escape CS2 names that collide
+/// — notably the `enum` opcode.
+fn is_ts_reserved_word(word: &str) -> bool {
+    matches!(
+        word,
+        "break"
+            | "case"
+            | "catch"
+            | "class"
+            | "const"
+            | "continue"
+            | "debugger"
+            | "default"
+            | "delete"
+            | "do"
+            | "else"
+            | "enum"
+            | "export"
+            | "extends"
+            | "false"
+            | "finally"
+            | "for"
+            | "function"
+            | "if"
+            | "import"
+            | "in"
+            | "instanceof"
+            | "new"
+            | "null"
+            | "return"
+            | "super"
+            | "switch"
+            | "this"
+            | "throw"
+            | "true"
+            | "try"
+            | "typeof"
+            | "var"
+            | "void"
+            | "while"
+            | "with"
+            | "yield"
+    )
 }
 
 #[cfg(test)]

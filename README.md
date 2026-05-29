@@ -14,6 +14,9 @@ Supported native base revisions:
 - Extract and render interfaces
 - Decode varps and varbits
 - Decode and decompile CS2 scripts
+- Transpile CS2 to reversible TypeScript and assemble it back to CS2
+- Validate donor `947 -> 910` script/interface slices with migration audit
+- Build native overlay plan JSON for Bun `cacheoverlay` wrapper
 - Decode RT7 models
 - Extract audio (`jaga` + embedded `ogg`, direct `ogg`)
 - Run full unpack flow with top-level exports (`worldmap`, `maps`, `vfx`, `animator`, `cutscene2d`, defaults, `areas.png`, `ttf`, `fontmetrics`, `binary`)
@@ -125,6 +128,16 @@ cargo run --release -- \
 
 Alerion server shortcut: `bun run cache:semantic:sync-947` (947 + 910 trees), then `bun run cacheoverlay:ensure-947-overlay`.
 
+Native planner for donor `947`:
+
+```bash
+cargo run --release -- \
+  --cache-dir /path/to/cache/unpacked/910 \
+  --data-dir /path/to/tools/rs3-cache-rs/data \
+  --build 910 --subbuild 0 \
+  overlay-plan --manifest /path/to/cacheoverlay-manifest.json --out-file /tmp/overlay-plan.json --audit-dir /tmp/overlay-plan-audit
+```
+
 # CS2 workflow (`910` and `947` first-class)
 
 Canonical workflow: [docs/workflows/cs2-cache.md](../../docs/workflows/cs2-cache.md).
@@ -143,6 +156,7 @@ cargo run --release -- $C947 transpile-scripts --out-dir /path/to/cache/rsmv/947
 # Validate / assemble / deps
 cargo run --release -- $C947 validate-script --script-id 4330
 cargo run --release -- $C947 assemble-script --input script.asm.ts --output /tmp/out.cs2
+cargo run --release -- $C947 assemble-script --input script.ts --output /tmp/out.cs2 --strict-structured
 cargo run --release -- $C947 dep-tree-script --id 4330 --out-file /tmp/deps.json
 ```
 

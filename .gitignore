@@ -1,6 +1,9 @@
 /target
 **/*.rs.bk
 
+# tool metadata / snapshots
+codedb.snapshot
+
 # editor + OS noise
 .DS_Store
 *.swp

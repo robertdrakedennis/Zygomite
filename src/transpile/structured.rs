@@ -35,6 +35,12 @@ pub enum StructuredStmt {
     Goto {
         target: usize,
     },
+    /// A jump target for `goto`, at the instruction index `target` (a block
+    /// start). Emitted only by the linear fallback for irreducible control flow;
+    /// lowers to a label, not an instruction.
+    Label {
+        target: usize,
+    },
     Return {
         value: Option<Expression>,
     },
@@ -47,6 +53,29 @@ pub enum StructuredStmt {
 pub struct SwitchCaseStmt {
     pub value: i32,
     pub body: Vec<StructuredStmt>,
+}
+
+/// Whether a statement unconditionally leaves its block — it returns, breaks,
+/// continues, gotos, or is an `if` whose arms all do.
+pub fn stmt_terminates(stmt: &StructuredStmt) -> bool {
+    match stmt {
+        StructuredStmt::Return { .. }
+        | StructuredStmt::Break
+        | StructuredStmt::Continue
+        | StructuredStmt::Goto { .. } => true,
+        StructuredStmt::If {
+            then_body,
+            else_body: Some(else_body),
+            ..
+        } => stmts_terminate(then_body) && stmts_terminate(else_body),
+        _ => false,
+    }
+}
+
+/// Whether a statement sequence unconditionally leaves its block (its last
+/// statement does).
+pub fn stmts_terminate(stmts: &[StructuredStmt]) -> bool {
+    stmts.last().is_some_and(stmt_terminates)
 }
 
 #[derive(Debug, Clone)]
@@ -214,6 +243,10 @@ impl StructuredRenderer {
                 self.write_indent(out);
                 let _ = writeln!(out, "goto({target});");
             }
+            StructuredStmt::Label { target } => {
+                self.write_indent(out);
+                let _ = writeln!(out, "label({target});");
+            }
             StructuredStmt::Return { value } => {
                 self.write_indent(out);
                 out.push_str("return");
@@ -356,10 +389,16 @@ fn format_unary_op(op: UnaryOp) -> &'static str {
 }
 
 fn escape_string(value: &str) -> String {
+    // Escape every char that would break a double-quoted TS string literal on
+    // re-parse (oxc) during recompile. A CS2 string constant containing a raw
+    // CR previously emitted a literal CR inside the quotes → unterminated-string
+    // parse error in assemble-script.
     value
         .replace('\\', "\\\\")
         .replace('"', "\\\"")
         .replace('\n', "\\n")
+        .replace('\r', "\\r")
+        .replace('\t', "\\t")
 }
 
 pub fn parse_type_annotation(value: &str) -> TypeAnnotation {

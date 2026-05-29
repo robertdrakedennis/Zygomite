@@ -265,6 +265,9 @@ pub enum Command {
         script_id: u32,
         #[arg(long)]
         out_file: Option<PathBuf>,
+        /// Emit the validation report as JSON to stdout
+        #[arg(long)]
+        json: bool,
     },
     /// Assemble reversible or pragma-annotated CS2 TypeScript back to CS2 binary.
     #[command(name = "assemble-script")]
@@ -284,6 +287,12 @@ pub enum Command {
         /// Disable embedded ASM fallback and require structured recompilation
         #[arg(long)]
         strict_structured: bool,
+        /// Skip post-compile verification (byte round-trip + stack validation)
+        #[arg(long)]
+        no_verify: bool,
+        /// Emit a structured JSON completion event to stdout
+        #[arg(long)]
+        json: bool,
     },
     /// Dump a lossless raw-flat cache tree for JS5 repacking.
     #[command(name = "dump-raw-flat")]
@@ -910,12 +919,14 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::ValidateScript {
             script_id,
             out_file,
+            json,
         } => run_validate_script(
             &cache,
             &tar_path,
             &cli.data_dir,
             script_id,
             out_file.as_deref(),
+            json,
             version,
         ),
         Command::AssembleScript {
@@ -924,6 +935,8 @@ pub fn run(cli: Cli) -> Result<()> {
             build,
             subbuild,
             strict_structured,
+            no_verify,
+            json,
         } => run_assemble_script(
             &cache,
             &tar_path,
@@ -933,6 +946,8 @@ pub fn run(cli: Cli) -> Result<()> {
             build,
             subbuild,
             strict_structured,
+            no_verify,
+            json,
             version,
         ),
         Command::DumpRawFlat { out_dir, archives } => {
@@ -1753,7 +1768,6 @@ fn run_cs2(
     let opcode_book = OpcodeBook::load(data_dir, version.build, version.subbuild)?;
     let index = cache.archive_index(ARCHIVE_CLIENTSCRIPTS)?;
     let keep_decoded = out_file.is_some();
-    let write_source = out_dir.is_some();
     let script_group_names = load_script_group_names(&index, data_dir)?;
 
     if let Some(path) = out_dir {
@@ -1765,10 +1779,23 @@ fn run_cs2(
     let mut opcode_names = HashMap::<String, usize>::new();
     let mut decoded_all = Vec::new();
 
-    if write_source {
-        for group in &index.group_id {
+    struct GroupCs2Result {
+        scripts: usize,
+        instructions: usize,
+        opcode_counts: HashMap<String, usize>,
+        decoded: Vec<CompiledScript>,
+    }
+
+    let group_results = index
+        .group_id
+        .par_iter()
+        .map(|group| -> Result<GroupCs2Result> {
             let files = cache.group_files_with_index(&index, ARCHIVE_CLIENTSCRIPTS, *group)?;
             let single_file_group = files.len() == 1;
+            let mut scripts = 0_usize;
+            let mut instructions = 0_usize;
+            let mut opcode_counts = HashMap::<String, usize>::new();
+            let mut decoded = Vec::new();
 
             for (file, bytes) in files {
                 let script = match decode_script(&bytes, &opcode_book, version.build) {
@@ -1784,10 +1811,9 @@ fn run_cs2(
                 scripts += 1;
                 instructions += script.code.len();
                 for instruction in &script.code {
-                    *opcode_names.entry(instruction.command.clone()).or_insert(0) += 1;
-                }
-                if keep_decoded {
-                    decoded_all.push(script.clone());
+                    *opcode_counts
+                        .entry(instruction.command.clone())
+                        .or_insert(0) += 1;
                 }
 
                 if let Some(dir) = out_dir {
@@ -1805,67 +1831,30 @@ fn run_cs2(
                     let path = dir.join(file_name);
                     write_text(&path, &format_script_source(*group, file, &script))?;
                 }
-            }
-        }
-    } else {
-        struct GroupCs2Result {
-            scripts: usize,
-            instructions: usize,
-            opcode_counts: HashMap<String, usize>,
-            decoded: Vec<CompiledScript>,
-        }
 
-        let group_results = index
-            .group_id
-            .par_iter()
-            .map(|group| -> Result<GroupCs2Result> {
-                let files = cache.group_files_with_index(&index, ARCHIVE_CLIENTSCRIPTS, *group)?;
-                let mut scripts = 0_usize;
-                let mut instructions = 0_usize;
-                let mut opcode_counts = HashMap::<String, usize>::new();
-                let mut decoded = Vec::new();
-
-                for (_, bytes) in files {
-                    let script = match decode_script(&bytes, &opcode_book, version.build) {
-                        Ok(s) => s,
-                        Err(e) => {
-                            if version.build < MIN_SCRIPT_BUILD {
-                                continue;
-                            }
-                            return Err(e.into());
-                        }
-                    };
-                    for instruction in &script.code {
-                        *opcode_counts
-                            .entry(instruction.command.clone())
-                            .or_insert(0) += 1;
-                    }
-                    instructions += script.code.len();
-                    scripts += 1;
-                    if keep_decoded {
-                        decoded.push(script);
-                    }
+                if keep_decoded {
+                    decoded.push(script);
                 }
+            }
 
-                Ok(GroupCs2Result {
-                    scripts,
-                    instructions,
-                    opcode_counts,
-                    decoded,
-                })
+            Ok(GroupCs2Result {
+                scripts,
+                instructions,
+                opcode_counts,
+                decoded,
             })
-            .collect::<Vec<_>>();
+        })
+        .collect::<Vec<_>>();
 
-        for result in group_results {
-            let result = result?;
-            scripts += result.scripts;
-            instructions += result.instructions;
-            for (opcode, count) in result.opcode_counts {
-                *opcode_names.entry(opcode).or_insert(0) += count;
-            }
-            if keep_decoded {
-                decoded_all.extend(result.decoded);
-            }
+    for result in group_results {
+        let result = result?;
+        scripts += result.scripts;
+        instructions += result.instructions;
+        for (opcode, count) in result.opcode_counts {
+            *opcode_names.entry(opcode).or_insert(0) += count;
+        }
+        if keep_decoded {
+            decoded_all.extend(result.decoded);
         }
     }
 
@@ -1908,37 +1897,6 @@ fn run_models(
 
     if let Some(path) = out_dir {
         fs::create_dir_all(path).with_context(|| format!("failed creating {}", path.display()))?;
-        let mut parsed = Vec::new();
-        let mut parsed_count = 0_usize;
-        let mut parse_errors = 0_usize;
-
-        for group in &groups {
-            let files = cache.group_files_with_index(&index, ARCHIVE_MODELS_RT7, *group)?;
-            let Some(bytes) = files.get(&0) else {
-                continue;
-            };
-            match Model::decode(bytes, build) {
-                Ok(model) => {
-                    parsed_count += 1;
-                    let model_path = path.join(format!("model_{group}.json"));
-                    write_json(&model_path, &model)?;
-                    if out_file.is_some() {
-                        parsed.push((*group, model));
-                    }
-                }
-                Err(_) => {
-                    parse_errors += 1;
-                }
-            }
-        }
-
-        if let Some(path) = out_file {
-            write_json(path, &parsed)?;
-        }
-        return print_json(&ModelsSummary {
-            groups_parsed: parsed_count,
-            parse_errors,
-        });
     }
 
     struct ModelGroupResult {
@@ -1960,11 +1918,17 @@ fn run_models(
                 });
             };
             match Model::decode(bytes, build) {
-                Ok(model) => Ok(ModelGroupResult {
-                    parsed_count: 1,
-                    parse_errors: 0,
-                    parsed_model: keep_models.then_some((*group, model)),
-                }),
+                Ok(model) => {
+                    if let Some(dir) = out_dir {
+                        let model_path = dir.join(format!("model_{group}.json"));
+                        write_json(&model_path, &model)?;
+                    }
+                    Ok(ModelGroupResult {
+                        parsed_count: 1,
+                        parse_errors: 0,
+                        parsed_model: keep_models.then_some((*group, model)),
+                    })
+                }
                 Err(_) => Ok(ModelGroupResult {
                     parsed_count: 0,
                     parse_errors: 1,
@@ -3604,9 +3568,7 @@ fn export_script_signatures_from_cache(
     let index = cache2.archive_index(ARCHIVE_CLIENTSCRIPTS)?;
     for group in &index.group_id {
         let files = cache2.group_files_with_index(&index, ARCHIVE_CLIENTSCRIPTS, *group)?;
-        for (file, data) in files {
-            let script_id_raw = (group << 16) | file;
-            let script_id = crate::transpile::ScriptId(script_id_raw as i32);
+        for (_file, data) in files {
             let Ok(script) = decode_script(&data, opcode_book, build) else {
                 continue;
             };
@@ -3616,8 +3578,12 @@ fn export_script_signatures_from_cache(
                 .map(crate::transpile::extract_script_name_suffix)
                 .filter(|name| !name.is_empty())
                 .or_else(|| group_names.get(group).cloned());
-            let function_name =
-                crate::transpile::script_function_name(script_id, display_name.as_deref());
+            // Name by group (`script<group>`), matching the catalog and the
+            // transpiled output files — not the packed id.
+            let function_name = crate::transpile::script_function_name(
+                crate::transpile::ScriptId(*group as i32),
+                display_name.as_deref(),
+            );
             let mut arg_types: Vec<&str> = Vec::new();
             arg_types.extend(std::iter::repeat_n(
                 "number",
@@ -3926,11 +3892,17 @@ fn run_validate_script(
     data_dir: &Path,
     script_id: u32,
     out_file: Option<&Path>,
+    emit_json: bool,
     version: RuntimeVersion,
 ) -> Result<()> {
     let ctx = ResolverContext::load(cache, tar_path, data_dir, version.build, version.subbuild)?;
     let validator = crate::validate::Cs2Validator::new(&ctx);
     let report = validator.validate(script_id);
+
+    if emit_json {
+        println!("{}", serde_json::to_string(&report)?);
+        return Ok(());
+    }
 
     if let Some(path) = out_file {
         let json = serde_json::to_string_pretty(&report)?;
@@ -4014,8 +3986,11 @@ fn run_assemble_script(
     build: Option<u32>,
     subbuild: Option<u32>,
     strict_structured: bool,
+    no_verify: bool,
+    emit_json: bool,
     version: RuntimeVersion,
 ) -> Result<()> {
+    let started = Instant::now();
     let source =
         std::fs::read_to_string(input).with_context(|| format!("reading {}", input.display()))?;
     let reversible = if is_reversible_source(&source) {
@@ -4111,16 +4086,103 @@ fn run_assemble_script(
     let binary =
         encode_script(&script, opcode_book, effective_build).context("encoding CS2 binary")?;
 
+    if !no_verify {
+        verify_assembled_script(cache, data_dir, &ctx, &script, &binary, output)?;
+    }
+
     std::fs::write(output, &binary).with_context(|| format!("writing {}", output.display()))?;
 
-    eprintln!(
-        "Assembled {} instructions → {} ({} bytes, build {}, mode {})",
-        script.code.len(),
-        output.display(),
-        binary.len(),
-        effective_build,
-        assemble_mode,
+    if emit_json {
+        let event = serde_json::json!({
+            "event": "assemble_script",
+            "outcome": "ok",
+            "build": effective_build,
+            "subbuild": effective_subbuild,
+            "mode": assemble_mode,
+            "instruction_count": script.code.len(),
+            "bytes": binary.len(),
+            "verified": !no_verify,
+            "output": output.display().to_string(),
+            "duration_ms": started.elapsed().as_millis() as u64,
+        });
+        println!("{}", serde_json::to_string(&event)?);
+    } else {
+        eprintln!(
+            "Assembled {} instructions → {} ({} bytes, build {}, mode {})",
+            script.code.len(),
+            output.display(),
+            binary.len(),
+            effective_build,
+            assemble_mode,
+        );
+    }
+    Ok(())
+}
+
+/// Verify a freshly assembled script before writing it: (1) the emitted bytes
+/// must decode back to an identical script (encoder/operand fidelity), and (2)
+/// structural + stack-effect validation against the target build's catalog must
+/// pass (no stack underflow, dangling branch targets, or unknown references).
+/// This stops `assemble-script` from silently producing CS2 the client cannot
+/// run. Bypass with `--no-verify`.
+fn verify_assembled_script(
+    cache: &FlatCache,
+    data_dir: &Path,
+    ctx: &ResolverContext,
+    script: &CompiledScript,
+    binary: &[u8],
+    output: &Path,
+) -> Result<()> {
+    let decoded = decode_script(binary, &ctx.opcode_book, ctx.build)
+        .with_context(|| format!("verifying {}: re-decoding emitted CS2", output.display()))?;
+    // Compare command + operand + header, ignoring the numeric `opcode` field:
+    // lowering/assembly leaves it as a `0` placeholder while decode fills in the
+    // real id, but the byte fidelity we care about lives in command names and
+    // operands. A self-consistent encoder bug (e.g. a zeroed placeholder operand)
+    // still surfaces here, which a bytes-only `encode(decode(b)) == b` check misses.
+    let normalize = |source: &CompiledScript| -> Result<serde_json::Value> {
+        let mut clone = source.clone();
+        for instruction in &mut clone.code {
+            instruction.opcode = 0;
+        }
+        Ok(serde_json::to_value(&clone)?)
+    };
+    if normalize(&decoded)? != normalize(script)? {
+        bail!(
+            "post-compile verification failed for {}: re-decoded CS2 does not match the compiled \
+             script (encoder fidelity bug); pass --no-verify to override",
+            output.display()
+        );
+    }
+
+    let reverse_ctx = build_reverse_compile_context(ctx, cache, data_dir)?;
+    let script_id = script
+        .name
+        .as_deref()
+        .and_then(|name| reverse_ctx.script_catalog.resolve_export_name(name))
+        .map_or(0, |meta| meta.packed_id.0.unsigned_abs());
+    let validator = crate::validate::Cs2Validator::new(ctx);
+    let report = validator.validate_compiled(
+        script_id,
+        script,
+        &reverse_ctx.script_catalog,
+        &reverse_ctx.script_signatures,
+        script.name.clone(),
     );
+    if !report.errors.is_empty() {
+        let detail = report
+            .errors
+            .iter()
+            .map(|error| format!("{error:?}"))
+            .collect::<Vec<_>>()
+            .join("; ");
+        bail!(
+            "post-compile validation failed for {} ({} error(s)): {detail}; pass --no-verify to \
+             override",
+            output.display(),
+            report.errors.len(),
+        );
+    }
     Ok(())
 }
 
@@ -4221,9 +4283,18 @@ fn build_reverse_compile_context_from_catalog(
     }
 }
 
+/// Append `diagnostic` to `diagnostics` only if not already present, keeping the
+/// blocker list free of duplicates across re-checks.
+fn push_unique_diagnostic(diagnostics: &mut Vec<String>, diagnostic: String) {
+    if !diagnostics.iter().any(|existing| existing == &diagnostic) {
+        diagnostics.push(diagnostic);
+    }
+}
+
 fn finalize_reversible_transpile_output(
     source: String,
     reverse_ctx: &ReverseCompileContext,
+    opcode_book: &OpcodeBook,
     diagnostics: &mut crate::transpile::Diagnostics,
     editable_structured: &mut bool,
     blocking_diagnostics: &mut Vec<String>,
@@ -4233,26 +4304,26 @@ fn finalize_reversible_transpile_output(
     }
 
     let parsed = parse_reversible_source(&source)?;
-    let mut metadata = parsed.metadata;
-    if metadata.editable_structured {
-        match parse_structured_typescript(&parsed.structured_source).and_then(|structured| {
-            lower_structured_script(&structured, &metadata, reverse_ctx).map(|_| ())
-        }) {
-            Ok(()) => {}
-            Err(err) => {
-                metadata.editable_structured = false;
-                if !metadata
-                    .blocking_diagnostics
-                    .iter()
-                    .any(|blocker| blocker == "reverse_unsupported")
-                {
-                    metadata
-                        .blocking_diagnostics
-                        .push("reverse_unsupported".to_string());
-                }
-                diagnostics.warning(format!("reverse compile unsupported: {err}"));
-            }
+    let mut metadata = parsed.metadata.clone();
+    if metadata.editable_structured
+        && let Err(block) = recompile_fidelity_check(&parsed, &metadata, reverse_ctx, opcode_book)
+    {
+        metadata.editable_structured = false;
+        push_unique_diagnostic(
+            &mut metadata.blocking_diagnostics,
+            block.blocker.to_string(),
+        );
+        // A low-cardinality sub-bucket so the coverage histogram ranks *why* a
+        // blocker fired (recompile_mismatch_cause:push_constant_string->... or
+        // reverse_unsupported_cause:ui_method) instead of collapsing them into
+        // one opaque tag.
+        if let Some(cause) = block.cause {
+            push_unique_diagnostic(
+                &mut metadata.blocking_diagnostics,
+                format!("{}_cause:{cause}", block.blocker),
+            );
         }
+        diagnostics.warning(block.message);
     }
 
     *editable_structured = metadata.editable_structured;
@@ -4262,6 +4333,164 @@ fn finalize_reversible_transpile_output(
         &metadata,
         &parsed.asm_trailer,
     )?)
+}
+
+/// A script is only truly `editable_structured` if its structured TS recompiles
+/// to the **same bytes** as the original. The original is the embedded ASM
+/// trailer (canonical); the candidate is the structured body lowered + encoded.
+/// Comparing them gates out scripts that lower cleanly but to different bytes —
+/// the false-editables that would silently corrupt the script if a user edited
+/// the structured form. Returns `Err((blocker, message))` to mark non-editable.
+/// Why a structured recompile was rejected by the fidelity gate. `blocker` is
+/// the stable coverage tag; `cause` is a low-cardinality sub-bucket that turns
+/// the opaque blocker into a ranked histogram (`<blocker>_cause:*`); `message`
+/// is the human-readable detail.
+struct RecompileBlock {
+    blocker: &'static str,
+    cause: Option<String>,
+    message: String,
+}
+
+/// Bucket a `reverse_unsupported` failure into a low-cardinality cause so the
+/// coverage histogram ranks *which* lowering gap blocked the script (parallel
+/// to `recompile_mismatch_cause:*`). Keys are static substrings of the bail
+/// sites, never interpolated names/ids.
+fn classify_reverse_unsupported(message: &str) -> &'static str {
+    // The non-lowering phases of recompile_fidelity_check each get their own
+    // bucket; everything else is a structured-lowering bail, keyed by the bail
+    // text regardless of anyhow context position.
+    if message.starts_with("embedded ASM parse") {
+        return "asm_parse";
+    }
+    if message.starts_with("encoding original") {
+        return "encode_original";
+    }
+    if message.starts_with("structured parse") {
+        return "structured_parse";
+    }
+    if message.starts_with("encoding structured") {
+        return "encode_structured";
+    }
+    let patterns: &[(&str, &str)] = &[
+        ("goto", "goto"),
+        ("comment-only", "comment_control_flow"),
+        ("UI hook", "ui_hook"),
+        ("UI method", "ui_method"),
+        ("UI.", "ui_arity"),
+        ("callback watcher", "callback_watcher"),
+        ("callback target", "callback_target"),
+        ("callback literal", "callback_literal"),
+        ("component constant", "unknown_component"),
+        ("property access", "property_access"),
+        ("negation", "negation"),
+        ("logical not", "logical_not"),
+        ("string arrays", "string_array"),
+        ("array", "array"),
+        ("void", "void_local"),
+        ("identifier expression", "unknown_identifier"),
+        ("assignment target", "assignment_target"),
+        ("stack pseudo", "stack_pseudo"),
+        ("branch label", "missing_branch_label"),
+        ("switch label", "missing_switch_label"),
+        ("numeric suffix", "numeric_suffix"),
+        ("outside loop", "break_continue_outside_loop"),
+    ];
+    for (needle, bucket) in patterns {
+        if message.contains(needle) {
+            return bucket;
+        }
+    }
+    "other"
+}
+
+impl RecompileBlock {
+    fn reverse_unsupported(message: String) -> Self {
+        let cause = classify_reverse_unsupported(&message).to_string();
+        Self {
+            blocker: "reverse_unsupported",
+            cause: Some(cause),
+            message,
+        }
+    }
+}
+
+fn recompile_fidelity_check(
+    parsed: &crate::transpile::ParsedReversibleSource,
+    metadata: &crate::transpile::ReversibleMetadata,
+    reverse_ctx: &ReverseCompileContext,
+    opcode_book: &OpcodeBook,
+) -> std::result::Result<(), RecompileBlock> {
+    let build = metadata.build;
+    let original = parse_cs2_asm(&parsed.asm_trailer).map_err(|e| {
+        RecompileBlock::reverse_unsupported(format!("embedded ASM parse failed: {e}"))
+    })?;
+    let expected = encode_script(&original, opcode_book, build).map_err(|e| {
+        RecompileBlock::reverse_unsupported(format!("encoding original failed: {e}"))
+    })?;
+
+    let structured = parse_structured_typescript(&parsed.structured_source).map_err(|e| {
+        RecompileBlock::reverse_unsupported(format!("structured parse failed: {e}"))
+    })?;
+    let compiled = lower_structured_script(&structured, metadata, reverse_ctx).map_err(|e| {
+        RecompileBlock::reverse_unsupported(format!("structured lowering failed: {e}"))
+    })?;
+    let actual = encode_script(&compiled, opcode_book, build).map_err(|e| {
+        RecompileBlock::reverse_unsupported(format!("encoding structured failed: {e}"))
+    })?;
+
+    if actual != expected {
+        let (cause, message) = recompile_divergence(&original, &compiled);
+        return Err(RecompileBlock {
+            blocker: "recompile_mismatch",
+            cause: Some(cause),
+            message,
+        });
+    }
+    Ok(())
+}
+
+/// Describe the first instruction-level divergence between the original script
+/// and the structured recompile, to make `recompile_mismatch` actionable.
+/// Returns `(cause, message)`: `cause` is a low-cardinality bucket key (command
+/// names only, never operand values) for the coverage histogram; `message` is
+/// the human-readable detail for the diagnostics log.
+fn recompile_divergence(
+    original: &crate::script::CompiledScript,
+    compiled: &crate::script::CompiledScript,
+) -> (String, String) {
+    for (i, (a, b)) in original.code.iter().zip(compiled.code.iter()).enumerate() {
+        let command_differs = a.command != b.command;
+        let operand_differs = format!("{:?}", a.operand) != format!("{:?}", b.operand);
+        if command_differs || operand_differs {
+            let cause = if command_differs {
+                format!("{}->{}", a.command, b.command)
+            } else {
+                format!("{}:operand", a.command)
+            };
+            let message = format!(
+                "recompile diverges at [{i}]: original `{} {:?}` vs structured `{} {:?}`",
+                a.command, a.operand, b.command, b.operand
+            );
+            return (cause, message);
+        }
+    }
+    if original.code.len() != compiled.code.len() {
+        let cause = if original.code.len() < compiled.code.len() {
+            "length:structured_longer"
+        } else {
+            "length:structured_shorter"
+        };
+        let message = format!(
+            "recompile length mismatch: original {} instructions vs structured {}",
+            original.code.len(),
+            compiled.code.len()
+        );
+        return (cause.to_string(), message);
+    }
+    (
+        "header_or_locals".to_string(),
+        "recompile differs in header/locals/args only".to_string(),
+    )
 }
 
 fn screaming_snake(value: &str) -> String {
@@ -4916,7 +5145,14 @@ fn run_transpile_scripts(
         script_catalog_builder.add_script(packed_id_raw, data);
     }
     let script_catalog = script_catalog_builder.build();
-    let reverse_ctx = build_reverse_compile_context_from_catalog(&ctx, script_catalog.clone());
+    // The catalog is built `.without_return_types()` for speed, so its
+    // signatures read "unknown". The recompile-fidelity gate lowers through
+    // this context and would then treat every void call as int-returning,
+    // emitting a spurious pop_*_discard (the return->pop_int_discard mismatch
+    // cause). Return types are inferred lazily per referenced script into
+    // `signature_cache` below; mirror them into this context so the gate
+    // classifies calls the same way the renderer does.
+    let mut reverse_ctx = build_reverse_compile_context_from_catalog(&ctx, script_catalog.clone());
 
     let mut transpiler = Transpiler::new()
         .with_version(version.build, version.subbuild)
@@ -5002,6 +5238,14 @@ fn run_transpile_scripts(
                 &opcode_book,
                 version.build,
             );
+            // Mirror the inferred return type into the lowering context so the
+            // recompile-fidelity gate classifies this call (void vs value) the
+            // same way the renderer did.
+            if let Some(signature) = signature_cache.get(&metadata.packed_id) {
+                reverse_ctx
+                    .script_signatures
+                    .insert(metadata.packed_id, signature.clone());
+            }
         }
         ensure_transpile_script_signature(
             &mut signature_cache,
@@ -5046,6 +5290,7 @@ fn run_transpile_scripts(
                 let source = finalize_reversible_transpile_output(
                     source,
                     &reverse_ctx,
+                    &opcode_book,
                     &mut diagnostics,
                     &mut editable_structured,
                     &mut blocking_diagnostics,
@@ -5136,38 +5381,18 @@ fn run_filtered_transpile_scripts(
     )?;
 
     fs::create_dir_all(out_dir)?;
-    if !types_exist {
-        export_var_types(&ctx, out_dir)?;
-        export_varbit_types(&ctx, out_dir)?;
-        export_enum_types(&ctx, out_dir)?;
-        export_param_types(&ctx, out_dir)?;
-        export_interface_ids(&ctx, out_dir)?;
-        export_inv_types(&ctx, out_dir)?;
-        export_obj_types(&ctx, out_dir)?;
-        export_npc_types(&ctx, out_dir)?;
-        export_loc_types(&ctx, out_dir)?;
-        export_seq_types(&ctx, out_dir)?;
-        export_spot_types(&ctx, out_dir)?;
-        export_named_config_ids(&ctx, out_dir)?;
-        export_db_types(&ctx, out_dir)?;
-        export_script_signatures_from_cache(
-            cache,
-            tar_path,
-            out_dir,
-            &opcode_book,
-            version.build,
-            &script_group_names,
-        )?;
-        export_index(out_dir)?;
-    }
 
+    // Build the catalog over the selected scripts plus their call targets first,
+    // with return-type inference. The filtered run only emits this small set, so
+    // the catalog is sufficient for scripts.d.ts and lets it carry accurate
+    // signatures (group-based names + real return types) instead of the bulk
+    // `script<packed>(): unknown` declarations the cache scan produced.
     let mut script_data = BTreeMap::new();
     let mut script_catalog_builder = crate::transpile::ScriptCatalogBuilder::new(
         &script_group_names,
         &opcode_book,
         version.build,
-    )
-    .without_return_types();
+    );
     for loaded in &selected_scripts {
         script_data.insert(loaded.packed_id, loaded.data.clone());
         script_catalog_builder.add_script(loaded.packed_id, &loaded.data);
@@ -5189,6 +5414,24 @@ fn run_filtered_transpile_scripts(
     }
     let script_catalog = script_catalog_builder.build();
     let reverse_ctx = build_reverse_compile_context_from_catalog(&ctx, script_catalog.clone());
+
+    if !types_exist {
+        export_var_types(&ctx, out_dir)?;
+        export_varbit_types(&ctx, out_dir)?;
+        export_enum_types(&ctx, out_dir)?;
+        export_param_types(&ctx, out_dir)?;
+        export_interface_ids(&ctx, out_dir)?;
+        export_inv_types(&ctx, out_dir)?;
+        export_obj_types(&ctx, out_dir)?;
+        export_npc_types(&ctx, out_dir)?;
+        export_loc_types(&ctx, out_dir)?;
+        export_seq_types(&ctx, out_dir)?;
+        export_spot_types(&ctx, out_dir)?;
+        export_named_config_ids(&ctx, out_dir)?;
+        export_db_types(&ctx, out_dir)?;
+        export_script_signatures(out_dir, &script_catalog)?;
+        export_index(out_dir)?;
+    }
 
     let mut transpiler = Transpiler::new()
         .with_version(version.build, version.subbuild)
@@ -5269,6 +5512,7 @@ fn run_filtered_transpile_scripts(
                 let source = finalize_reversible_transpile_output(
                     source,
                     &reverse_ctx,
+                    &opcode_book,
                     &mut diagnostics,
                     &mut editable_structured,
                     &mut blocking_diagnostics,
@@ -5388,15 +5632,21 @@ fn load_matching_scripts_from_groups<S: std::hash::BuildHasher + Clone>(
             let Ok(script) = decode_script(&data, opcode_book, build) else {
                 continue;
             };
-            let script_id = crate::transpile::ScriptId(packed_id as i32);
             let display_name = script
                 .name
                 .as_deref()
                 .map(crate::transpile::extract_script_name_suffix)
                 .filter(|name| !name.is_empty())
                 .or_else(|| group_names.get(&group).cloned());
-            let function_name =
-                crate::transpile::script_function_name(script_id, display_name.as_deref());
+            // Match against the GROUP-based synthetic name (`script<group>`), the
+            // same name the catalog and output files use. Naming by the packed id
+            // here was the bug: group 621 became "script40697856" (unmatched)
+            // while group 9476's packed id 621215744 spuriously contained the
+            // "script621" filter substring.
+            let function_name = crate::transpile::script_function_name(
+                crate::transpile::ScriptId(group as i32),
+                display_name.as_deref(),
+            );
             if function_name.contains(filter_script)
                 || display_name
                     .as_deref()
@@ -5556,8 +5806,47 @@ fn trim_transpile_runtime_context(ctx: &mut ResolverContext) {
 #[derive(Serialize)]
 struct TranspileDiagnosticsReport {
     build: u32,
+    coverage: CoverageSummary,
     catalog: Vec<crate::transpile::Diagnostic>,
     scripts: Vec<ScriptDiagnosticsEntry>,
+}
+
+/// Aggregate structured-decompilation coverage: how many scripts produced
+/// editable structured TypeScript vs. fell back to the lossless ASM trailer,
+/// plus a histogram of the blockers that forced the fallback. This is the
+/// headline completeness metric (see docs/cs2-completeness-plan.md).
+#[derive(Serialize)]
+struct CoverageSummary {
+    total: usize,
+    editable: usize,
+    blocked: usize,
+    editable_pct: f64,
+    blockers: BTreeMap<String, usize>,
+}
+
+impl CoverageSummary {
+    fn from_scripts(scripts: &[ScriptDiagnosticsEntry]) -> Self {
+        let total = scripts.len();
+        let editable = scripts.iter().filter(|s| s.editable_structured).count();
+        let mut blockers = BTreeMap::<String, usize>::new();
+        for script in scripts {
+            for blocker in &script.blocking_diagnostics {
+                *blockers.entry(blocker.clone()).or_default() += 1;
+            }
+        }
+        let editable_pct = if total == 0 {
+            0.0
+        } else {
+            (editable as f64) * 100.0 / (total as f64)
+        };
+        Self {
+            total,
+            editable,
+            blocked: total - editable,
+            editable_pct,
+            blockers,
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -5580,8 +5869,23 @@ fn write_transpile_diagnostics_report(
     mut scripts: Vec<ScriptDiagnosticsEntry>,
 ) -> Result<()> {
     scripts.sort_by(|a, b| a.packed_id.cmp(&b.packed_id));
+    let coverage = CoverageSummary::from_scripts(&scripts);
+    // Canonical coverage event (queryable; the headline completeness metric).
+    eprintln!(
+        "{}",
+        serde_json::to_string(&serde_json::json!({
+            "event": "transpile_coverage",
+            "build": build,
+            "total": coverage.total,
+            "editable": coverage.editable,
+            "blocked": coverage.blocked,
+            "editable_pct": coverage.editable_pct,
+            "blockers": coverage.blockers,
+        }))?
+    );
     let report = TranspileDiagnosticsReport {
         build,
+        coverage,
         catalog,
         scripts,
     };
@@ -7179,7 +7483,7 @@ mod tests {
     }
 
     #[test]
-    fn index_exports_smoke_parse_as_typescript_export_list() {
+    fn index_exports_source_has_balanced_unescaped_braces() {
         let source = index_exports_source();
 
         assert!(!source.contains("{{"));

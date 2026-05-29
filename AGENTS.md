@@ -1,37 +1,27 @@
-# Repository Guidelines
+# AGENTS.md for `/Users/robert/projects/alerion/tools/rs3-cache-rs`
 
-## Project Structure & Module Organization
+## Documentation
 
-`src/main.rs` parses CLI args and delegates to `src/cli.rs`. `src/lib.rs` exports cache and decoder modules: `cache`, `js5`, `config`, `script`, `model`, `audio`, `interface`, `map`, `vfx`, `animator`, `cutscene2d`, `vars`, plus shared `constants` and `fixture`. Integration tests live in `tests/real_cache.rs`; they use external RS3 cache data and Java repo lookup files. `README.md` documents supported base revisions, CLI examples, and expected unpack output.
+**Start here:** [../../docs/workflows/cs2-cache.md](../../docs/workflows/cs2-cache.md) · **Revision model:** [../../docs/workflows/revision-model.md](../../docs/workflows/revision-model.md) · **Logging:** [../../docs/workflows/logging.md](../../docs/workflows/logging.md)
 
-Treat build `910` and build `947` as separate first-class native revisions. Both should work natively for decode, validate, assemble, transpile, and roundtrip flows. Do not describe `910` as fallback, overlay-only, or secondary to `947`; use revision-specific fixtures, metadata, and verification where relevant.
+## Runtime
 
-## Build, Test, and Development Commands
+- Build with `cargo build --release`.
+- Main entrypoint is `src/cli.rs`; keep command behavior deterministic and file-oriented.
+- Runtime build context comes from `--build`, `--subbuild`, `--cache-dir`, and `--data-dir`; log those fields on command summary events.
+- Prefer runtime overlay proof flow from [../../docs/workflows/cs2-cache.md](../../docs/workflows/cs2-cache.md) before trusting donor `947` ids.
 
-- `cargo build`: compile debug binary for local iteration.
-- `cargo build --release`: produce optimized extractor.
-- `cargo run -- --help`: show CLI commands and flags.
-- `cargo run -- unpack --out-dir /tmp/rs3-cache-rs-out --sample-models --skip-audio`: quick unpack smoke run with default paths.
-- `cargo clippy --all-targets --all-features -- -D warnings`: enforce crate lint policy.
-- `cargo fmt --all --check`: verify rustfmt output before review.
-- `cargo test`: run integration tests; cache assets must exist or env overrides must point to them.
+## Logging
 
-## Coding Style & Naming Conventions
+- Log for query, not prose grep. New operational logs must be structured events with stable field names.
+- Unit of work is command invocation or long-running command stage. Emit one canonical summary event per command, plus stage events only for expensive phases.
+- Keep `stdout` for declared command output. Keep human progress on `stderr` terse. If command becomes automation surface, add explicit `--json` mode instead of growing ad-hoc text.
+- Canonical event must answer: `event`, `command`, `outcome`, `duration_ms`, `build`, `subbuild`, `cache_dir`, `data_dir`, and exact ids such as `script_id`, `interface_group`, `archive`, or `group_id`.
+- High-cardinality ids are feature, not bug. Preserve exact script, archive, group, config, map, and build ids.
+- Do not emit one line per file or group by default on large scans. Emit counts, durations, sampled examples, and single failure summary unless user asked for trace mode.
+- Do not log full cache payloads or giant blobs. Log paths, sizes, hashes, ids, and bounded previews instead.
+- Log failure once at boundary that owns command outcome. Inner helpers return typed errors; command boundary emits canonical failure event.
 
-Use Rust 2024, 4-space indentation, and rustfmt defaults. Keep `unsafe` absent; manifest forbids `unsafe_code`. Use `anyhow::Result<T>` for CLI and cache flows. Follow Rust naming: `snake_case` functions and modules, `PascalCase` types, `UPPER_SNAKE_CASE` constants. Keep parser and decoder modules focused by cache domain; add exports in `src/lib.rs` when new module is public.
+## Git
 
-## Testing Guidelines
-
-Tests use Rust built-in harness and often return `anyhow::Result<()>`. Put cross-module tests in `tests/`; use clear behavior names like `parses_every_interface_file`. Set `RS3_CACHE_DIR`, `RS3_CACHE_TAR`, `RS3_CACHE_DIR_910`, `RS3_CACHE_TAR_910`, and `RS3_DATA_DIR` when cache assets are outside README defaults. Prefer targeted tests for new decoder behavior, plus one CLI smoke path when output shape changes.
-
-When behavior is build-sensitive, verify both `910` and `947` instead of assuming one revision proves other. Prefer revision-specific checks for opcode metadata, transpile output, and byte-perfect script roundtrip.
-
-Avoid parallel heavy runs in this repo. Full `cargo test --test ts_export`, full `cs2 --out-dir ...`, and broad `transpile-scripts` runs can compile, decode cache, and write many files at once; that can spike memory and keep background jobs alive after interrupts. Prefer one heavy command at a time, keep runs scoped, and check for leftover `cargo` or `rs3-cache-rs` processes before starting another full-cache pass.
-
-## Commit & Pull Request Guidelines
-
-Git history uses short imperative subjects, such as `Add 910 cache compatibility support` and `Remove parity artifacts`. Keep subject concise and scoped. PRs should state cache build tested, commands run, output directory or artifact touched, and linked issue when relevant. Include screenshots only for rendered assets such as interface or map image changes.
-
-## Security & Configuration Tips
-
-Do not commit cache dumps, generated unpack output, or local absolute paths. Keep large outputs under `/tmp` or ignored workspace dirs. Verify data-dir changes against `data/` in this crate (Alerion: `tools/rs3-cache-rs/data`).
+- Do not cosign commits; use global git config identity.

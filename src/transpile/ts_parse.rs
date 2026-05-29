@@ -296,10 +296,42 @@ fn parse_expression_statement(
                 value: parse_expression(&expr.right, source)?,
             })
         }
+        // `goto(N)` / `label(N)` are the linear control-flow markers (a jump and
+        // its target); parse them back to dedicated statements rather than
+        // generic calls so they round-trip and lower to branches/labels.
+        ast::Expression::CallExpression(call) => {
+            if let Some(target) = control_marker_target(call, "goto") {
+                Ok(StructuredStmt::Goto { target })
+            } else if let Some(target) = control_marker_target(call, "label") {
+                Ok(StructuredStmt::Label { target })
+            } else {
+                Ok(StructuredStmt::Expr {
+                    expr: parse_expression(&statement.expression, source)?,
+                })
+            }
+        }
         expr => Ok(StructuredStmt::Expr {
             expr: parse_expression(expr, source)?,
         }),
     }
+}
+
+/// If `call` is `name(<integer>)`, return the integer target; else `None`.
+fn control_marker_target(call: &CallExpression<'_>, name: &str) -> Option<usize> {
+    let ast::Expression::Identifier(ident) = &call.callee else {
+        return None;
+    };
+    if ident.name.as_str() != name || call.arguments.len() != 1 {
+        return None;
+    }
+    let ast::Argument::NumericLiteral(num) = &call.arguments[0] else {
+        return None;
+    };
+    let value = num.value;
+    if value < 0.0 || value.fract() != 0.0 {
+        return None;
+    }
+    Some(value as usize)
 }
 
 fn parse_assignment_target(
@@ -326,7 +358,7 @@ fn parse_assignment_target(
 fn parse_expression(expression: &ast::Expression<'_>, source: &str) -> Result<Expression> {
     match expression {
         ast::Expression::NumericLiteral(value) => Ok(Expression::NumberLiteral(NumberLiteral {
-            value: slice_span(value.span, source).parse::<i32>()?,
+            value: numeric_literal_to_i32(value, source)?,
         })),
         ast::Expression::BigIntLiteral(value) => Ok(Expression::BigIntLiteral(BigIntLiteral {
             value: slice_span(value.span, source)
@@ -458,7 +490,7 @@ fn parse_expression_elements(
             }
             ast::ArrayExpressionElement::NumericLiteral(value) => {
                 values.push(Expression::NumberLiteral(NumberLiteral {
-                    value: slice_span(value.span, source).parse::<i32>()?,
+                    value: numeric_literal_to_i32(value, source)?,
                 }));
             }
             ast::ArrayExpressionElement::BigIntLiteral(value) => {
@@ -563,7 +595,7 @@ fn parse_argument_expression(argument: &ast::Argument<'_>, source: &str) -> Resu
             value: value.value,
         })),
         ast::Argument::NumericLiteral(value) => Ok(Expression::NumberLiteral(NumberLiteral {
-            value: slice_span(value.span, source).parse::<i32>()?,
+            value: numeric_literal_to_i32(value, source)?,
         })),
         ast::Argument::BigIntLiteral(value) => Ok(Expression::BigIntLiteral(BigIntLiteral {
             value: slice_span(value.span, source)
@@ -656,4 +688,20 @@ fn type_from_span(span: oxc_span::Span, source: &str) -> String {
 
 fn slice_span(span: oxc_span::Span, source: &str) -> &str {
     &source[span.start as usize..span.end as usize]
+}
+
+/// Convert an oxc-parsed numeric literal to the i32 a CS2 int operand holds.
+/// oxc has already parsed the literal value (handling hex/binary/octal/`_`
+/// separators), so we work from that rather than re-parsing the raw span with
+/// `i32::parse` (which rejects `0xFFFFFF` colours and full-u32 bitmasks). The
+/// full unsigned range `0..=u32::MAX` is accepted and reinterpreted as i32.
+fn numeric_literal_to_i32(literal: &ast::NumericLiteral<'_>, source: &str) -> Result<i32> {
+    let value = literal.value;
+    if !value.is_finite() || value.fract() != 0.0 || value < 0.0 || value > f64::from(u32::MAX) {
+        bail!(
+            "unsupported numeric literal `{}` (expected an integer in 0..=4294967295)",
+            slice_span(literal.span, source)
+        );
+    }
+    Ok(value as u32 as i32)
 }
