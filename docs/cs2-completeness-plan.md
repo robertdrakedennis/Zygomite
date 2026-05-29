@@ -48,6 +48,25 @@ Status legend: `[ ]` todo · `[~]` in progress · `[x]` done
     reverse_unsupported 3076, residual_pop 2234.
   - Re-measure after each P1/P2 change via the `transpile_coverage` event.
 
+## Progress log
+- **P0 ✅** coverage metric + baselines (947 8.7%, 910 12.2%). Committed.
+- **P4 ✅** decompile audit (findings above) + fixed `escape_string` `\r` recompile bug. Committed.
+- **P2 ✅ (partial)** `mod`→`modulo` recovery + `pop_varbit` store fix. Committed. **Empirical
+  finding:** these correct real bugs but move coverage ~0 (8.7%→8.6%) because almost every blocked
+  script *also* carries a control-flow blocker — a script needs ALL blockers cleared to become
+  editable. The `pop_varbit` fix even slightly lowered editable% by converting ~25 *false*-editable
+  scripts (whose dropped stores would recompile wrong) into honestly-blocked ones. **Confirms the
+  lever is P1.** Remaining P2 (model `random`/`addpercent`/`setbit`/… and categorize
+  `reverse_unsupported`) needs authoritative opcode arities (derive from the client `ScriptRunner`)
+  and is gated behind P1 for coverage impact.
+- **P1 ⬜ (the lever — not yet implemented).** Start with **switch-body reconstruction** (cfg.rs:687,
+  self-contained, no relooper) then the Relooper-style if/else-join + back-edge loops. This is the
+  dedicated next effort.
+- **P3 ⬜** recompile-loop test (validate editable scripts recompile byte-identically). Note:
+  `transpile-scripts` output is not directly the reversible/assemble-able format used by
+  `assemble-script` — P3 needs a harness that drives the reversible transpile → strict-structured
+  recompile per editable script. Bounded but non-trivial; do alongside P1 as its regression net.
+
 ## P1 — Control-flow recovery (the dominant lever: ~62%+49% of corpus)
 Target `cfg.rs` (build_cfg / emit_structured) + the branch/goto handling.
 - [ ] **P1.1** Eliminate `residual_goto`: reconstruct structured loops (`while`/`do`/early-exit) and
