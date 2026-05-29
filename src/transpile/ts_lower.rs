@@ -25,6 +25,25 @@ impl ReverseCompileContext {
     pub fn has_command(&self, command: &str) -> bool {
         self.opcode_commands.contains(command)
     }
+
+    /// Invert the decompiler's generic command rendering. A CS2 command with no
+    /// dedicated lowering is decompiled as `sanitize_command(cmd)(args)`, which
+    /// strips underscores and TS-sanitizes — lossy — so recover the opcode by
+    /// matching that transform against every command name. Deterministic across
+    /// runs (`HashSet` order is not): ties break by shortest then lexicographic.
+    pub fn resolve_command(&self, sanitized: &str) -> Option<&str> {
+        let mut best: Option<&str> = None;
+        for cmd in &self.opcode_commands {
+            if super::sanitize_ts_ident(&cmd.replace('_', "")) != sanitized {
+                continue;
+            }
+            best = Some(match best {
+                Some(cur) if (cur.len(), cur) <= (cmd.len(), cmd.as_str()) => cur,
+                _ => cmd.as_str(),
+            });
+        }
+        best
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -529,6 +548,26 @@ impl<'a> StructuredLowerer<'a> {
             && object.name == "UI"
         {
             return self.emit_ui_call(&callee.property, &call.arguments);
+        }
+
+        // Generic CS2 command call: the decompiler renders any command without a
+        // dedicated form as `sanitize_command(cmd)(args)`. Invert it — push the
+        // arguments (already in source/stack order) and emit the opcode. The
+        // command's result type isn't recoverable here, so report Void: a void
+        // command used as a statement round-trips exactly, while a value-
+        // producing one needs a discard the gate will find missing and correctly
+        // block (no worse than the previous bail).
+        if let Expression::Identifier(identifier) = &*call.callee
+            && let Some(command) = self
+                .ctx
+                .resolve_command(&identifier.name)
+                .map(str::to_string)
+        {
+            for argument in &call.arguments {
+                self.emit_expr(argument)?;
+            }
+            self.emit_instruction(&command, Operand::Byte(0));
+            return Ok(ValueKind::Void);
         }
 
         bail!("unsupported call expression")
