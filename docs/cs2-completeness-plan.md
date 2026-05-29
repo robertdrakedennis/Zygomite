@@ -82,10 +82,11 @@ Status legend: `[ ]` todo · `[~]` in progress · `[x]` done
 The relooper structures the control flow; the remaining editable gain is locked behind making that
 structure recompile **byte-identically**. Gate-protected, measured via `transpile_coverage`.
 
-**Current gated baseline (full corpus): 947 = 3640/20577 = 17.69%, 910 = 2775/14313 = 19.39%**
-(up from the post-relooper 4.6%/5.9% — a 3.8x / 3.3x session gain, all byte-identity gated).
-`recompile_mismatch` remains the dominant blocker (947 6602, 910 4373). Made data-driven via the
-`recompile_mismatch_cause:*` histogram.
+**Current gated baseline (full corpus): 947 = 3678/20577 = 17.87%, 910 = 2791/14313 = 19.50%**
+(up from the post-relooper 4.6%/5.9% — a 3.9x / 3.3x session gain, all byte-identity gated).
+`recompile_mismatch` remains the dominant blocker (947 ~6600, 910 ~4400), now followed by
+`reverse_unsupported` (947 2770, 910 2123). Both are data-driven via `recompile_mismatch_cause:*`
+and `reverse_unsupported_cause:*` histograms.
 
 Done this session (each gate-verified, byte-identity preserved):
 - **✅ Rank `recompile_mismatch` by cause.** `recompile_fidelity_check` classifies the first
@@ -110,23 +111,37 @@ Done this session (each gate-verified, byte-identity preserved):
   enum/component/negated, not just NumberLiteral) through one `emit_int_constant` helper that uses
   the typed-constant opcode. Cut `push_constant_string->push_constant_int` 1173->24; **+223 (947) /
   +154 (910)**, zero regression.
+- **✅ Rank `reverse_unsupported` by cause.** `<blocker>_cause:*` histogram now covers both blockers.
+  Top: "unsupported call expression" (1701), `ui_hook` (947), `structured_parse` (567).
+- **✅ Generic CS2 command lowering.** The lowerer mapped only gosub + UI calls; every other command
+  the decompiler renders as `command(args)` bailed. Added `ReverseCompileContext::resolve_command`
+  (deterministic inverse of `sanitize_command`) and lower the call to its opcode. **+38 (947) /
+  +16 (910)**; "unsupported call expression" 1701->912. Reports `Void` (void statements round-trip;
+  value-producing commands stay gate-blocked pending result-type recovery).
 
-Next, from the current cause histogram (947) — the frontier is now **structural**:
-- [ ] **Branch-operand / if-else recovery** (`branch_equals:operand` 1792 + `branch_greater_than`/
-  `less_than`/`_or_equals` ~520 — by far the dominant remaining cause, ~2540 scripts). NOT a byte
-  cascade (branch offsets are instruction-relative: `script.rs` pass-2 `target - instr_index`) and
-  NOT simple polarity. The structurer mis-recovers if/else where **both arms diverge (return/exit)**:
-  e.g. `bool_to_int` (`if (a==1) return 1; else return 0`) recovers as an **empty-then `if` + single
-  `return`**, dropping the else path, because there is no common post-dominator join. Fixing the
-  relooper to emit if/else when both arms terminate (no ipdom join) is the next big lever and a
-  dedicated effort — the structurer's join logic assumes a fall-through merge.
-- [ ] **`return`-value recovery** (`push_int_local->return` 403, `push_var->return` 129): the
-  original pushes a value then returns it; we recover a bare `return;`, dropping the value. Likely
-  the same class as the void-call fix but on the return side.
-- [ ] **`length:structured_shorter`** (541): the structured form lowers to fewer instructions than
-  the original — a dropped/absorbed instruction. Investigate per-cause.
-- [ ] **Categorize `reverse_unsupported`** (instrument each `ts_lower` `bail!` with a tag) to rank
-  the 3744/2608 opaque count.
+### Key finding: a large slice of the residual is corpus dead code, not a tool gap
+Investigating the dominant `recompile_mismatch` causes showed many are **degenerate / dead-code
+scripts**, not fixable by better structuring:
+- `branch_equals:operand` (~2540) is overwhelmingly **no-op forward branches** (target == next
+  instruction) compiled ahead of an early `return`, leaving the rest of the script **unreachable**
+  (`bool_to_int`, `meslayer_mode1-4`, `script48`). The CFG-adjacency handling renders these as
+  empty-then `if (cond) {} else {body}`, but the original bytes contain the no-op branch + dead body
+  that clean structuring correctly omits — so byte-identity is impossible and the ASM-trailer
+  fallback is the right answer (they stay non-editable). A sampled 200: ~42% empty-no-else
+  (degenerate), ~52% empty-then-with-else (also degenerate no-op-branch), ~5% genuine.
+  An attempted skip-if-false lowering for these netted **0** (correctly) and was reverted.
+- The structurer already handles **genuine** if/else (including both-arms-return) correctly; those
+  are in the editable set. So the practical ceiling for *clean-structured + byte-exact* on this
+  corpus is much nearer the current ~18-20% than the raw cause counts imply.
+
+Next levers (genuine capability, not corpus artifacts):
+- [ ] **Recover result types for generic commands** so value-producing command calls (the ~912
+  residual "unsupported call expression") lower with the right discard/assignment type instead of
+  `Void`. Needs per-opcode push type/count in the lowerer.
+- [ ] **`ui_hook` (947)**: the SETON-hook lowering (`emit_ui_hook_call`) bails for hook variants not
+  in its table; extend it / make it data-driven like the `if_*`/`cc_*` set methods.
+- [ ] **`structured_parse` (567)**: the decompiler emits TypeScript that fails oxc re-parse — a
+  generation-correctness bug. Capture the oxc diagnostics and fix the malformed output.
 - [ ] Remove the now-dead `StructuredEmitter` from `cfg.rs` (the relooper replaced it).
 
 ## P1 — Control-flow recovery (the dominant lever: ~62%+49% of corpus)
