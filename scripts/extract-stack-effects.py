@@ -41,6 +41,9 @@ DEFAULT_OPCODES = [
     "data/opcodes-910.txt",
 ]
 
+# Handlers with a trailing compile-time variant flag (`..., boolean arg1`) are
+# deliberately excluded: their push is often conditional on the flag, so a
+# static count mis-models them (e.g. db_find). Single-state-arg handlers only.
 HANDLER_RE = re.compile(
     r"public static final void (\w+)\(ClientScriptState arg0\)\s*\{"
 )
