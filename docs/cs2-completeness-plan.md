@@ -82,8 +82,15 @@ Status legend: `[ ]` todo · `[~]` in progress · `[x]` done
 The relooper structures the control flow; the remaining editable gain is locked behind making that
 structure recompile **byte-identically**. Gate-protected, measured via `transpile_coverage`.
 
-**Current gated baseline (full corpus): 947 = 5685/20577 = 27.63%, 910 = 4513/14313 = 31.53%**
-(up from the post-relooper 4.6%/5.9% — a 6.0x / 5.3x session gain, all byte-identity gated).
+**Current gated baseline (full corpus): 947 = 6216/20577 = 30.21%, 910 = 4962/14313 = 34.67%**
+(up from the post-relooper 4.6%/5.9% — a 6.6x / 5.9x session gain, all byte-identity gated).
+
+**Foundation: client-extracted opcode stack-effect table.** Rather than hand-model opcodes one at a
+time, `scripts/extract-stack-effects.py` parses every handler in the client `ScriptRunner` into
+`data/stack-effects.txt` (1,097 commands, build independent: pops, pushes, pushed type). The recovery
+(`stack_effect`) consults it for pop/push counts after the hand-verified arms; the lowerer types
+generic command results from it. **947 +531, 910 +449; residual_pop 2314->1529 (947), ~halved (910).**
+This replaces the long tail of unmodeled opcodes with a single regenerable source of truth.
 `recompile_mismatch` is still the dominant blocker, now led by `branch:operand` (947 3003) and
 `length:structured_shorter` (1096); `residual_pop` was roughly halved and `reverse_unsupported`
 keeps shrinking. All data-driven via the `recompile_mismatch_cause:*` / `reverse_unsupported_cause:*`
