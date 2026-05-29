@@ -4313,13 +4313,14 @@ fn finalize_reversible_transpile_output(
             &mut metadata.blocking_diagnostics,
             block.blocker.to_string(),
         );
-        // A low-cardinality sub-bucket so the coverage histogram ranks *why*
-        // recompiles diverge (e.g. push_constant_int->push_constant_string)
-        // instead of collapsing them all into one opaque `recompile_mismatch`.
+        // A low-cardinality sub-bucket so the coverage histogram ranks *why* a
+        // blocker fired (recompile_mismatch_cause:push_constant_string->... or
+        // reverse_unsupported_cause:ui_method) instead of collapsing them into
+        // one opaque tag.
         if let Some(cause) = block.cause {
             push_unique_diagnostic(
                 &mut metadata.blocking_diagnostics,
-                format!("recompile_mismatch_cause:{cause}"),
+                format!("{}_cause:{cause}", block.blocker),
             );
         }
         diagnostics.warning(block.message);
@@ -4341,20 +4342,73 @@ fn finalize_reversible_transpile_output(
 /// the false-editables that would silently corrupt the script if a user edited
 /// the structured form. Returns `Err((blocker, message))` to mark non-editable.
 /// Why a structured recompile was rejected by the fidelity gate. `blocker` is
-/// the stable coverage tag; `cause` is a low-cardinality sub-bucket (only set
-/// for `recompile_mismatch`) that turns the opaque blocker into a ranked
-/// histogram; `message` is the human-readable detail.
+/// the stable coverage tag; `cause` is a low-cardinality sub-bucket that turns
+/// the opaque blocker into a ranked histogram (`<blocker>_cause:*`); `message`
+/// is the human-readable detail.
 struct RecompileBlock {
     blocker: &'static str,
     cause: Option<String>,
     message: String,
 }
 
+/// Bucket a `reverse_unsupported` failure into a low-cardinality cause so the
+/// coverage histogram ranks *which* lowering gap blocked the script (parallel
+/// to `recompile_mismatch_cause:*`). Keys are static substrings of the bail
+/// sites, never interpolated names/ids.
+fn classify_reverse_unsupported(message: &str) -> &'static str {
+    // The non-lowering phases of recompile_fidelity_check each get their own
+    // bucket; everything else is a structured-lowering bail, keyed by the bail
+    // text regardless of anyhow context position.
+    if message.starts_with("embedded ASM parse") {
+        return "asm_parse";
+    }
+    if message.starts_with("encoding original") {
+        return "encode_original";
+    }
+    if message.starts_with("structured parse") {
+        return "structured_parse";
+    }
+    if message.starts_with("encoding structured") {
+        return "encode_structured";
+    }
+    let patterns: &[(&str, &str)] = &[
+        ("goto", "goto"),
+        ("comment-only", "comment_control_flow"),
+        ("UI hook", "ui_hook"),
+        ("UI method", "ui_method"),
+        ("UI.", "ui_arity"),
+        ("callback watcher", "callback_watcher"),
+        ("callback target", "callback_target"),
+        ("callback literal", "callback_literal"),
+        ("component constant", "unknown_component"),
+        ("property access", "property_access"),
+        ("negation", "negation"),
+        ("logical not", "logical_not"),
+        ("string arrays", "string_array"),
+        ("array", "array"),
+        ("void", "void_local"),
+        ("identifier expression", "unknown_identifier"),
+        ("assignment target", "assignment_target"),
+        ("stack pseudo", "stack_pseudo"),
+        ("branch label", "missing_branch_label"),
+        ("switch label", "missing_switch_label"),
+        ("numeric suffix", "numeric_suffix"),
+        ("outside loop", "break_continue_outside_loop"),
+    ];
+    for (needle, bucket) in patterns {
+        if message.contains(needle) {
+            return bucket;
+        }
+    }
+    "other"
+}
+
 impl RecompileBlock {
     fn reverse_unsupported(message: String) -> Self {
+        let cause = classify_reverse_unsupported(&message).to_string();
         Self {
             blocker: "reverse_unsupported",
-            cause: None,
+            cause: Some(cause),
             message,
         }
     }
