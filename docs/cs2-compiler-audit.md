@@ -27,16 +27,16 @@ Status legend: `[ ]` todo · `[~]` in progress · `[x]` done · `[-]` deferred (
 - [x] **C3 — Arity-check `emit_ui_call`** — `create`/`deleteAll`/`getText` now use slice-pattern
   destructuring with `bail!` on arity mismatch (no more panic on `UI.create()`).
 
-## Batch B — Tier 2: turn silent corruption/hidden errors into hard errors
+## Batch B — Tier 2: turn silent corruption/hidden errors into hard errors ✅ DONE (commit pending)
 
-- [ ] **C4 — Replace silent zero/placeholder fallbacks with `bail!`** (3 sites):
-  - `encode_operand` catch-all `p4s(0)`/`p1(0)` for unexpected operand variant (`script.rs:767-768`).
-  - `parse_cs2_asm` unknown-command `Operand::Byte(0)` on unparseable operand (`script.rs:1244`).
-  - `parse_counts` silently dropping `=`-less / unknown keys (`script.rs:~1083`) → wrong header.
-- [ ] **C5 — `VarDomain::from_id` unknown id** (`vars.rs:36-38`). Stop mapping unknown→`Player(0)`
-  (silent byte corruption on re-encode). Preserve raw id or `bail!` on decode.
-- [ ] **C6 — `pjstr` non-Cp1252 fallback** (`packet.rs:347-354`). Stop emitting raw UTF-8 when
-  `WINDOWS_1252.encode` reports errors; `bail!` to match the strict `gjstr` decoder.
+- [x] **C4 — silent zero/placeholder fallbacks → `bail!`** (3 sites): encode_operand catch-all,
+  parse_cs2_asm unknown-command (empty still = byte 0; garbage now errors), parse_counts
+  (`=`-less + unknown keys now error).
+- [x] **C5 — `VarDomain::from_id` unknown id** now `bail!`s (0..=10 valid for 910/947) instead of
+  silently remapping to `Player(0)`.
+- [x] **C6 — `pjstr` non-Cp1252** now `bail!`s (pjstr/pjstrnull return `Result`; 3 callers `?`'d)
+  instead of emitting raw UTF-8.
+- Verified: 910 + 947 byte-perfect roundtrips still pass (100 scripts each), 118 lib tests pass.
 
 ## Batch C — Tier 3: robustness & fidelity
 

@@ -537,7 +537,7 @@ pub fn encode_script(
 
     // ── Write name at position 0 ──
     if version >= 459 {
-        writer.pjstrnull(script.name.as_deref());
+        writer.pjstrnull(script.name.as_deref())?;
     }
 
     // ── Pass 1: emit instructions. Branches and switches get placeholder i32=0. ──
@@ -670,7 +670,7 @@ fn encode_operand(
         "push_constant_string" => {
             if version < 800 {
                 match operand {
-                    Operand::Str(s) => writer.pjstr(s),
+                    Operand::Str(s) => writer.pjstr(s)?,
                     Operand::Int(v) => writer.p4s(*v),
                     _ => bail!("push_constant_string unexpected operand type for v<800"),
                 }
@@ -686,7 +686,7 @@ fn encode_operand(
                     }
                     Operand::Str(s) => {
                         writer.p1(2);
-                        writer.pjstr(s);
+                        writer.pjstr(s)?;
                     }
                     _ => bail!("push_constant_string unexpected operand type for v>=800"),
                 }
@@ -764,8 +764,13 @@ fn encode_operand(
             Operand::Byte(b) => writer.p1(*b),
             Operand::Int(v) if is_large_operand => writer.p4s(*v),
             Operand::Int(v) => writer.p1(encode_byte_operand(*v)?),
-            _ if is_large_operand => writer.p4s(0),
-            _ => writer.p1(0),
+            // Refuse to emit a silent zero placeholder for an operand variant the
+            // default encoding can't represent — that would desync every later
+            // instruction. A correctly decoded default-group command only ever
+            // carries Byte/Int here.
+            other => {
+                bail!("command `{command}` has unsupported operand {other:?} for default encoding")
+            }
         },
     }
     Ok(())
@@ -1074,14 +1079,15 @@ pub fn parse_cs2_asm(source: &str) -> Result<CompiledScript> {
 
 fn parse_counts(input: &str, int: &mut u16, obj: &mut u16, long: &mut u16) -> Result<()> {
     for part in input.split_whitespace() {
-        if let Some((key, val)) = part.split_once('=') {
-            let v = val.parse::<u16>().context("invalid count value")?;
-            match key {
-                "int" => *int = v,
-                "obj" => *obj = v,
-                "long" => *long = v,
-                _ => {}
-            }
+        let Some((key, val)) = part.split_once('=') else {
+            bail!("malformed locals count token `{part}` (expected key=value)");
+        };
+        let v = val.parse::<u16>().context("invalid count value")?;
+        match key {
+            "int" => *int = v,
+            "obj" => *obj = v,
+            "long" => *long = v,
+            other => bail!("unknown locals count key `{other}` (expected int/obj/long)"),
         }
     }
     Ok(())
@@ -1237,11 +1243,15 @@ fn parse_operand_asm(opcode_name: &str, operand_text: &str) -> Result<Operand> {
                     raw32.parse::<i32>().context("expected raw32 operand")?,
                 ));
             }
-            // Unknown command: 1-byte operand
-            if let Ok(v) = operand_text.parse::<i32>() {
+            // Unknown command: 1-byte operand. An empty operand is the no-operand
+            // case (byte 0); a non-empty token that isn't an integer is a typo we
+            // must reject rather than silently encode as 0.
+            if operand_text.is_empty() {
+                Ok(Operand::Byte(0))
+            } else if let Ok(v) = operand_text.parse::<i32>() {
                 Ok(Operand::Byte(encode_byte_operand(v)?))
             } else {
-                Ok(Operand::Byte(0))
+                bail!("unparseable operand `{operand_text}` for command `{opcode_name}`")
             }
         }
     }
