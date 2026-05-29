@@ -65,6 +65,21 @@ fn cache_dir() -> PathBuf {
     default_cache_dir()
 }
 
+/// Resolve the cache dir, returning `None` (after a skip notice) when the
+/// proprietary RS3 cache is not present — e.g. a clean CI checkout. The flat
+/// `OpenRS2` layout always has a `255/` master-index dir, so its absence means
+/// there is no cache to test against. Lets these integration tests no-op
+/// cleanly instead of hard-failing on a missing cache.
+fn require_cache_dir() -> Option<PathBuf> {
+    let dir = cache_dir();
+    if dir.join("255").is_dir() {
+        Some(dir)
+    } else {
+        eprintln!("SKIP (no cache at {})", dir.display());
+        None
+    }
+}
+
 fn tar_path() -> PathBuf {
     if let Ok(path) = std::env::var("RS3_CACHE_TAR") {
         return PathBuf::from(path);
@@ -193,7 +208,10 @@ fn parse_struct_count(
 #[test]
 fn cache_indexes_match_build947_snapshot() -> Result<()> {
     let _guard = lock_guard();
-    let cache = FlatCache::open(cache_dir())?;
+    let Some(cache_dir) = require_cache_dir() else {
+        return Ok(());
+    };
+    let cache = FlatCache::open(cache_dir)?;
     let config = cache.archive_index(ARCHIVE_CONFIG)?;
     let interfaces = cache.archive_index(ARCHIVE_INTERFACES)?;
     let scripts = cache.archive_index(ARCHIVE_CLIENTSCRIPTS)?;
@@ -221,7 +239,9 @@ fn cache_indexes_match_build947_snapshot() -> Result<()> {
 #[test]
 fn parses_every_interface_file() -> Result<()> {
     let _guard = lock_guard();
-    let cache_dir = cache_dir();
+    let Some(cache_dir) = require_cache_dir() else {
+        return Ok(());
+    };
     ensure_archive_complete(&cache_dir, &tar_path(), ARCHIVE_INTERFACES)?;
     let cache = FlatCache::open(&cache_dir)?;
     let index = cache.archive_index(ARCHIVE_INTERFACES)?;
@@ -249,7 +269,9 @@ fn parses_every_interface_file() -> Result<()> {
 #[test]
 fn interface_group_zero_model_layer_shape_matches_gold() -> Result<()> {
     let _guard = lock_guard();
-    let cache_dir = cache_dir();
+    let Some(cache_dir) = require_cache_dir() else {
+        return Ok(());
+    };
     ensure_archive_groups(&cache_dir, &tar_path(), ARCHIVE_INTERFACES, &[0])?;
     let cache = FlatCache::open(&cache_dir)?;
     let index = cache.archive_index(ARCHIVE_INTERFACES)?;
@@ -270,7 +292,9 @@ fn interface_group_zero_model_layer_shape_matches_gold() -> Result<()> {
 #[test]
 fn interface_group_569_text_rectangle_and_hook_fields_match_gold() -> Result<()> {
     let _guard = lock_guard();
-    let cache_dir = cache_dir();
+    let Some(cache_dir) = require_cache_dir() else {
+        return Ok(());
+    };
     ensure_archive_groups(&cache_dir, &tar_path(), ARCHIVE_INTERFACES, &[569])?;
     let cache = FlatCache::open(&cache_dir)?;
     let index = cache.archive_index(ARCHIVE_INTERFACES)?;
@@ -297,7 +321,9 @@ fn interface_group_569_text_rectangle_and_hook_fields_match_gold() -> Result<()>
 #[test]
 fn interface_group_1027_graphic_varc_and_opcursor_fields_match_gold() -> Result<()> {
     let _guard = lock_guard();
-    let cache_dir = cache_dir();
+    let Some(cache_dir) = require_cache_dir() else {
+        return Ok(());
+    };
     ensure_archive_groups(&cache_dir, &tar_path(), ARCHIVE_INTERFACES, &[1027])?;
     let cache = FlatCache::open(&cache_dir)?;
     let index = cache.archive_index(ARCHIVE_INTERFACES)?;
@@ -321,7 +347,9 @@ fn interface_group_1027_graphic_varc_and_opcursor_fields_match_gold() -> Result<
 #[test]
 fn decodes_all_cs2_scripts_and_opcodes() -> Result<()> {
     let _guard = lock_guard();
-    let cache_dir = cache_dir();
+    let Some(cache_dir) = require_cache_dir() else {
+        return Ok(());
+    };
     ensure_archive_complete(&cache_dir, &tar_path(), ARCHIVE_CLIENTSCRIPTS)?;
     let cache = FlatCache::open(&cache_dir)?;
     let index = cache.archive_index(ARCHIVE_CLIENTSCRIPTS)?;
@@ -354,7 +382,9 @@ fn decodes_all_cs2_scripts_and_opcodes() -> Result<()> {
 #[test]
 fn asm_encode_roundtrip_byte_perfect() -> Result<()> {
     let _guard = lock_guard();
-    let cache_dir = cache_dir();
+    let Some(cache_dir) = require_cache_dir() else {
+        return Ok(());
+    };
     ensure_archive_complete(&cache_dir, &tar_path(), ARCHIVE_CLIENTSCRIPTS)?;
     let cache = FlatCache::open(&cache_dir)?;
     let index = cache.archive_index(ARCHIVE_CLIENTSCRIPTS)?;
@@ -607,7 +637,9 @@ fn asm_encode_roundtrip_byte_perfect_910() -> Result<()> {
 #[test]
 fn parses_varps_and_varbits() -> Result<()> {
     let _guard = lock_guard();
-    let cache_dir = cache_dir();
+    let Some(cache_dir) = require_cache_dir() else {
+        return Ok(());
+    };
     ensure_archive_complete(&cache_dir, &tar_path(), ARCHIVE_CONFIG)?;
     let cache = FlatCache::open(&cache_dir)?;
     let index = cache.archive_index(ARCHIVE_CONFIG)?;
@@ -662,7 +694,9 @@ fn parses_varps_and_varbits() -> Result<()> {
 #[allow(clippy::too_many_lines)]
 fn parses_additional_config_groups() -> Result<()> {
     let _guard = lock_guard();
-    let cache_dir = cache_dir();
+    let Some(cache_dir) = require_cache_dir() else {
+        return Ok(());
+    };
     let tar = tar_path();
     ensure_archive_complete(&cache_dir, &tar, ARCHIVE_CONFIG)?;
     let has_struct_archive =
@@ -1160,7 +1194,9 @@ fn parses_additional_config_groups() -> Result<()> {
 #[test]
 fn parses_gold_model_sample_set() -> Result<()> {
     let _guard = lock_guard();
-    let cache_dir = cache_dir();
+    let Some(cache_dir) = require_cache_dir() else {
+        return Ok(());
+    };
     let sample_groups: Vec<u32> = (0..=100)
         .chain([1_000, 5_000, 10_000, 50_000, 100_000, 140_130])
         .collect();
@@ -1216,7 +1252,9 @@ fn parses_gold_model_sample_set() -> Result<()> {
 #[test]
 fn parses_animator_and_cutscene2d_samples() -> Result<()> {
     let _guard = lock_guard();
-    let cache_root = cache_dir();
+    let Some(cache_root) = require_cache_dir() else {
+        return Ok(());
+    };
     let tar = tar_path();
     ensure_archive_complete(&cache_root, &tar, ARCHIVE_ANIMATOR)?;
     ensure_archive_complete(&cache_root, &tar, ARCHIVE_CUTSCENE2D)?;
@@ -1250,7 +1288,9 @@ fn parses_animator_and_cutscene2d_samples() -> Result<()> {
 #[test]
 fn parses_vfx_samples() -> Result<()> {
     let _guard = lock_guard();
-    let cache_root = cache_dir();
+    let Some(cache_root) = require_cache_dir() else {
+        return Ok(());
+    };
     let tar = tar_path();
     ensure_archive_complete(&cache_root, &tar, ARCHIVE_VFX)?;
     let cache = FlatCache::open(&cache_root)?;
@@ -1272,7 +1312,9 @@ fn parses_vfx_samples() -> Result<()> {
 #[test]
 fn parses_mapsquare_samples() -> Result<()> {
     let _guard = lock_guard();
-    let cache_root = cache_dir();
+    let Some(cache_root) = require_cache_dir() else {
+        return Ok(());
+    };
     let tar = tar_path();
     ensure_archive_complete(&cache_root, &tar, ARCHIVE_MAPSQUARES)?;
     let cache = FlatCache::open(&cache_root)?;
@@ -1290,9 +1332,11 @@ fn parses_mapsquare_samples() -> Result<()> {
 }
 
 #[test]
-fn cli_smoke_unpack_and_audio_write_expected_artifacts() -> Result<()> {
+fn cli_unpack_writes_full_artifact_tree_and_extracts_audio() -> Result<()> {
     let _guard = lock_guard();
-    let cache_root = cache_dir();
+    let Some(cache_root) = require_cache_dir() else {
+        return Ok(());
+    };
     let tar = tar_path();
     ensure_archive_complete(&cache_root, &tar, ARCHIVE_INTERFACES)?;
 
@@ -1363,7 +1407,9 @@ fn cli_smoke_unpack_and_audio_write_expected_artifacts() -> Result<()> {
 #[test]
 fn grabs_audio_archives() -> Result<()> {
     let _guard = lock_guard();
-    let cache_dir = cache_dir();
+    let Some(cache_dir) = require_cache_dir() else {
+        return Ok(());
+    };
     let tar = tar_path();
     let mut available = Vec::new();
     for archive in [
