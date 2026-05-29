@@ -1,8 +1,8 @@
 # CS2 Compiler Audit — Fix Plan & Tracker
 
 Branch: `fix/cs2-compiler-audit`. Scope: the compile direction (TS/ASM → CS2 bytecode):
-`script.rs` (encode/assemble), `transpile/{ts_parse,ts_lower,sema,scope,structured}.rs`,
-`validate.rs` wiring, `vars.rs`, `packet.rs`.
+`script.rs` (encode/assemble), `transpile/{ts_parse,ts_lower,scope,structured}.rs`,
+`validate.rs` wiring, `vars.rs`, `packet.rs`. (`sema.rs` was removed — see C11.)
 
 Bar: the emitted bytes must decode byte-for-byte in the 910 client and execute under
 `switch(opcode.index)`. Verified-correct already: trailer layout, switch tables, operand
