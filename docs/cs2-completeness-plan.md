@@ -82,8 +82,21 @@ Status legend: `[ ]` todo · `[~]` in progress · `[x]` done
 The relooper structures the control flow; the remaining editable gain is locked behind making that
 structure recompile **byte-identically**. Gate-protected, measured via `transpile_coverage`.
 
-**Current gated baseline (full corpus): 947 = 7689/20577 = 37.37%, 910 = 5698/14313 = 39.81%**
-(up from the post-relooper 4.6%/5.9% — an 8.1x / 6.7x session gain, all byte-identity gated).
+**Current gated baseline (full corpus): 947 = 8541/20577 = 41.51%, 910 = 6198/14313 = 43.30%**
+(up from the post-relooper 4.6%/5.9% — a 9.0x / 7.3x session gain, all byte-identity gated).
+
+**goto / shared-block support (linear fallback).** Irreducible control flow (shared return/join
+blocks, jump tables) can't be nested into if/while/switch, so it stayed `residual_goto`-blocked.
+Added a linear fallback: when nested structuring leaves a goto, re-emit the whole script
+block-by-block in original order with jump targets labelled and branches as `goto`/`if (cond) goto`
+(`StructuredStmt::Label`; goto/label render + parse; lowering of goto→branch, label→mark, and a
+single conditional branch for `if(cond)goto`). Original order is preserved, so it recompiles
+byte-identically; `residual_goto` is removed as a blocker category (the gate decides). **947 +852,
+910 +500.** Caveat: `assemble-script`'s post-compile validator (`validate.rs`) has its own,
+incomplete opcode stack model, so editable scripts using commands it doesn't model (e.g.
+`map_members`) need `--no-verify` — a pre-existing validator gap, not a byte-fidelity issue
+(the recompile gate confirms identity). Wiring the client-extracted table into `validate.rs` would
+close it.
 
 **Highest-blast instruction-order fix: emit the dead-return epilogue.** The RT7 compiler appends an
 unreachable `push <default>; return` after a script's real return. The structurer walked only
