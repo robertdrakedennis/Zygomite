@@ -462,7 +462,16 @@ impl<'a> Cs2Validator<'a> {
             "push_int_local" => StackEffect::int_push(1),
 
             // ── Object (string) pushes ──
-            "push_constant_string" => StackEffect::obj_push(1),
+            // push_constant_string is a typed-constant opcode (v>=800): a tag
+            // byte selects int/long/string, decoded into the operand variant.
+            // Resolve the stack effect from that variant rather than assuming a
+            // string push, or an int-tagged constant followed by int ops would
+            // falsely underflow.
+            "push_constant_string" => match &instr.operand {
+                Operand::Int(_) => StackEffect::int_push(1),
+                Operand::Long(_) => StackEffect::long_push(1),
+                _ => StackEffect::obj_push(1),
+            },
             "push_string_local" => StackEffect::obj_push(1),
 
             // ── Long pushes ──
@@ -1752,6 +1761,64 @@ mod tests {
                 .iter()
                 .any(|error| matches!(error, ValidationError::StackUnderflow { .. })),
             "unexpected errors: {:?}",
+            report.errors
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn typed_constant_push_resolves_stack_type_from_operand() -> crate::error::Result<()> {
+        const BUILD: u32 = 910;
+        let script_id = 304_u32 << 16;
+
+        // push_constant_string is the typed-constant opcode: an int-tagged
+        // constant feeds the int stack, so the following pop_int_local must not
+        // underflow. Mirror the same for the long-tagged form.
+        let script = CompiledScript {
+            name: Some("[proc,typed_constant_push]".to_string()),
+            local_count_int: 1,
+            local_count_object: 0,
+            local_count_long: 1,
+            argument_count_int: 0,
+            argument_count_object: 0,
+            argument_count_long: 0,
+            code: vec![
+                Instruction {
+                    opcode: 0,
+                    command: "push_constant_string".to_string(),
+                    operand: Operand::Int(5),
+                },
+                Instruction {
+                    opcode: 0,
+                    command: "pop_int_local".to_string(),
+                    operand: Operand::Local(0),
+                },
+                Instruction {
+                    opcode: 0,
+                    command: "push_constant_string".to_string(),
+                    operand: Operand::Long(7),
+                },
+                Instruction {
+                    opcode: 0,
+                    command: "pop_long_local".to_string(),
+                    operand: Operand::Local(0),
+                },
+                Instruction {
+                    opcode: 0,
+                    command: "return".to_string(),
+                    operand: Operand::Byte(0),
+                },
+            ],
+        };
+
+        let ctx = build_ctx(BUILD, &[(script_id, script)])?;
+        let report = Cs2Validator::new(&ctx).validate(script_id);
+        assert!(
+            !report
+                .errors
+                .iter()
+                .any(|error| matches!(error, ValidationError::StackUnderflow { .. })),
+            "int/long-tagged typed constants should feed the matching stack: {:?}",
             report.errors
         );
         Ok(())
