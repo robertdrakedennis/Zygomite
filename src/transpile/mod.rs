@@ -10,7 +10,6 @@ pub mod structured_writer;
 pub mod structurer;
 pub mod ts_lower;
 pub mod ts_parse;
-pub mod writer;
 
 pub use ast::*;
 pub use cfg::{Block, build_cfg, detect_return_type, emit_structured};
@@ -28,7 +27,6 @@ pub use structured::{AssignmentTarget, StructuredScript, StructuredStmt, SwitchC
 pub use structured_writer::StructuredWriter;
 pub use ts_lower::{ReverseCompileContext, lower_structured_script};
 pub use ts_parse::parse_structured_typescript;
-pub use writer::Writer;
 
 use crate::cache_bail as bail;
 use crate::config::EnumEntry;
