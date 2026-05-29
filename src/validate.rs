@@ -496,8 +496,8 @@ impl<'a> Cs2Validator<'a> {
             "pop_var" => self.varp_stack_effect_for(&instr.operand, false),
             "pop_varc_int" | "pop_varc_string" => self.varp_stack_effect_for(&instr.operand, false),
 
-            // ── Integer arithmetic: pop 2, push 1 ──
-            "add" | "sub" | "multiply" | "divide" | "mod" => StackEffect::int_op(2),
+            // ── Integer arithmetic: pop 2, push 1 (opcode is `modulo`, not `mod`) ──
+            "add" | "sub" | "multiply" | "divide" | "modulo" => StackEffect::int_op(2),
 
             // ── Logical: pop 2 ints, push 1 int ──
             "and" | "or" | "compare" => StackEffect::int_op(2),

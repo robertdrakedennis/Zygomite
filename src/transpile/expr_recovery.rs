@@ -52,7 +52,6 @@ fn stack_effect(
         | "push_constant_string"
         | "push_var"
         | "push_varbit"
-        | "pop_varbit"
         | "push_int_local"
         | "push_string_local"
         | "push_long_local"
@@ -73,18 +72,17 @@ fn stack_effect(
             StackEffect { pops: 1, pushes: 2 }
         }
 
-        // Pop/discard: pops 1, pushes 0
-        "pop_int_local" | "pop_string_local" | "pop_long_local" | "pop_var" | "pop_varc_int"
-        | "pop_varc_string" | "pop_int_discard" | "pop_string_discard" | "pop_long_discard" => {
-            StackEffect { pops: 1, pushes: 0 }
-        }
+        // Pop/discard: pops 1, pushes 0 (`pop_varbit` is a store, not a push)
+        "pop_int_local" | "pop_string_local" | "pop_long_local" | "pop_var" | "pop_varbit"
+        | "pop_varc_int" | "pop_varc_string" | "pop_int_discard" | "pop_string_discard"
+        | "pop_long_discard" => StackEffect { pops: 1, pushes: 0 },
 
         // Array pop: pop value, pop index, store
         "pop_array_int" | "pop_array_string" => StackEffect { pops: 2, pushes: 0 },
         "pop_array_int_leave_value_on_stack" => StackEffect { pops: 2, pushes: 1 },
 
-        // Binary arithmetic: pops 2, pushes 1
-        "add" | "sub" | "multiply" | "divide" | "mod" => StackEffect { pops: 2, pushes: 1 },
+        // Binary arithmetic: pops 2, pushes 1 (opcode is `modulo`, not `mod`)
+        "add" | "sub" | "multiply" | "divide" | "modulo" => StackEffect { pops: 2, pushes: 1 },
 
         // Comparison/logical: pops 2, pushes 1 (result int)
         "compare" | "and" | "or" => StackEffect { pops: 2, pushes: 1 },
@@ -626,13 +624,28 @@ impl<'a, S: std::hash::BuildHasher> ExprRecovery<'a, S> {
                 }
                 None
             }
-            "push_varbit" | "pop_varbit" | "push_varclanbit" | "push_varclansettingbit" => {
+            "push_varbit" | "push_varclanbit" | "push_varclansettingbit" => {
                 if let OperandNode::VarBitRef(vbr) = op {
                     let name = vbr
                         .name
                         .clone()
                         .unwrap_or_else(|| format!("VARBITS.get({})", vbr.id));
                     self.stack.push(Expression::Identifier(Identifier { name }));
+                }
+                None
+            }
+            "pop_varbit" => {
+                if let OperandNode::VarBitRef(vbr) = op {
+                    let value = self.pop_or_unknown();
+                    let name = vbr
+                        .name
+                        .clone()
+                        .unwrap_or_else(|| format!("VARBITS.get({})", vbr.id));
+                    return Some(RecoveredStmt::Assignment {
+                        target: name,
+                        value,
+                        var_type: "number".to_string(),
+                    });
                 }
                 None
             }
@@ -775,7 +788,7 @@ impl<'a, S: std::hash::BuildHasher> ExprRecovery<'a, S> {
             }
 
             // ── Binary arithmetic: pop 2, build expression, push result ──
-            "add" | "sub" | "multiply" | "divide" | "mod" => {
+            "add" | "sub" | "multiply" | "divide" | "modulo" => {
                 let right = self.pop_or_unknown();
                 let left = self.pop_or_unknown();
                 let op = match cmd {
@@ -783,7 +796,7 @@ impl<'a, S: std::hash::BuildHasher> ExprRecovery<'a, S> {
                     "sub" => BinaryOp::Sub,
                     "multiply" => BinaryOp::Mul,
                     "divide" => BinaryOp::Div,
-                    "mod" => BinaryOp::Mod,
+                    "modulo" => BinaryOp::Mod,
                     _ => unreachable!(),
                 };
                 let expr = Expression::BinaryOperation(super::ast::BinaryOperation {
