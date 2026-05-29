@@ -82,10 +82,10 @@ Status legend: `[ ]` todo · `[~]` in progress · `[x]` done
 The relooper structures the control flow; the remaining editable gain is locked behind making that
 structure recompile **byte-identically**. Gate-protected, measured via `transpile_coverage`.
 
-**Current gated baseline (full corpus): 947 = 3678/20577 = 17.87%, 910 = 2791/14313 = 19.50%**
-(up from the post-relooper 4.6%/5.9% — a 3.9x / 3.3x session gain, all byte-identity gated).
+**Current gated baseline (full corpus): 947 = 3974/20577 = 19.31%, 910 = 3023/14313 = 21.12%**
+(up from the post-relooper 4.6%/5.9% — a 4.2x / 3.6x session gain, all byte-identity gated).
 `recompile_mismatch` remains the dominant blocker (947 ~6600, 910 ~4400), now followed by
-`reverse_unsupported` (947 2770, 910 2123). Both are data-driven via `recompile_mismatch_cause:*`
+`reverse_unsupported` (947 1436, 910 1145). Both are data-driven via `recompile_mismatch_cause:*`
 and `reverse_unsupported_cause:*` histograms.
 
 Done this session (each gate-verified, byte-identity preserved):
@@ -118,6 +118,15 @@ Done this session (each gate-verified, byte-identity preserved):
   (deterministic inverse of `sanitize_command`) and lower the call to its opcode. **+38 (947) /
   +16 (910)**; "unsupported call expression" 1701->912. Reports `Void` (void statements round-trip;
   value-producing commands stay gate-blocked pending result-type recovery).
+- **✅ Reserved-word escaping.** The `enum` opcode (and any reserved-word name) rendered as a bare
+  `enum(...)` call → invalid TS → oxc re-parse failure (`structured_parse`, 567). Escape reserved
+  words in `sanitize_ts_ident` (round-trip-safe). A correctness fix first (valid TS for ~565
+  scripts); `structured_parse` 567->2, editable +15/+14.
+- **✅ Generalize SETON-hook lowering.** `emit_ui_hook_call` hardcoded 4 hooks; the rest of the
+  `cc_seton*`/`if_seton*` family bailed (`ui_hook`, 947 — largest remaining lowering gap). Derive the
+  cc_/if_ pair from `UI.Seton<suffix>` (arg-count split) + route the hook's own constant pushes
+  (callback id, watcher ids/count) through the typed-constant `emit_int_constant`. **+281 (947) /
+  +218 (910)**; `ui_hook` 947->4.
 
 ### Key finding: a large slice of the residual is corpus dead code, not a tool gap
 Investigating the dominant `recompile_mismatch` causes showed many are **degenerate / dead-code
@@ -137,11 +146,10 @@ scripts**, not fixable by better structuring:
 Next levers (genuine capability, not corpus artifacts):
 - [ ] **Recover result types for generic commands** so value-producing command calls (the ~912
   residual "unsupported call expression") lower with the right discard/assignment type instead of
-  `Void`. Needs per-opcode push type/count in the lowerer.
-- [ ] **`ui_hook` (947)**: the SETON-hook lowering (`emit_ui_hook_call`) bails for hook variants not
-  in its table; extend it / make it data-driven like the `if_*`/`cc_*` set methods.
-- [ ] **`structured_parse` (567)**: the decompiler emits TypeScript that fails oxc re-parse — a
-  generation-correctness bug. Capture the oxc diagnostics and fix the malformed output.
+  `Void`. Needs a *typed* per-opcode effect (int/obj/long push) in the lowerer — reuse the typed
+  model in `validate.rs::stack_effect_for` rather than the count-only `expr_recovery::stack_effect`.
+- [ ] **`ui_method` (128), `callback_watcher` (104)**: smaller lowering gaps surfaced by the
+  `reverse_unsupported_cause:*` histogram.
 - [ ] Remove the now-dead `StructuredEmitter` from `cfg.rs` (the relooper replaced it).
 
 ## P1 — Control-flow recovery (the dominant lever: ~62%+49% of corpus)
