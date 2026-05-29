@@ -125,6 +125,22 @@ impl<'a> StructuredLowerer<'a> {
             self.instructions[*index].operand = Operand::Switch(resolved);
         }
 
+        // Reject any emitted command absent from the target build's opcode table
+        // before it reaches the encoder. This catches lowering that names an
+        // opcode that does not exist for this build (e.g. `sub` on 910, which
+        // has no subtraction opcode) with a source-attributed error instead of
+        // a bare "missing opcode mapping" at encode time, and makes
+        // `--strict-structured` a real guarantee.
+        for (index, instruction) in self.instructions.iter().enumerate() {
+            if !self.ctx.has_command(&instruction.command) {
+                bail!(
+                    "instruction {index} uses command `{}`, which is not available in build {}",
+                    instruction.command,
+                    self.ctx.build
+                );
+            }
+        }
+
         Ok(CompiledScript {
             name: self.metadata.raw_name.clone(),
             local_count_int: count_locals(&self.script.locals, TypeAnnotation::Number),
@@ -483,9 +499,12 @@ impl<'a> StructuredLowerer<'a> {
     fn emit_ui_call(&mut self, method: &str, arguments: &[Expression]) -> Result<ValueKind> {
         match method {
             "create" => {
-                self.emit_expr(&arguments[0])?;
-                self.emit_expr(&arguments[1])?;
-                self.emit_expr(&arguments[2])?;
+                let [parent, kind, id] = arguments else {
+                    bail!("UI.create expects 3 arguments, got {}", arguments.len());
+                };
+                self.emit_expr(parent)?;
+                self.emit_expr(kind)?;
+                self.emit_expr(id)?;
                 self.emit_instruction("cc_create", Operand::Byte(0));
                 Ok(ValueKind::Void)
             }
@@ -494,7 +513,10 @@ impl<'a> StructuredLowerer<'a> {
                 Ok(ValueKind::Void)
             }
             "deleteAll" => {
-                self.emit_expr(&arguments[0])?;
+                let [target] = arguments else {
+                    bail!("UI.deleteAll expects 1 argument, got {}", arguments.len());
+                };
+                self.emit_expr(target)?;
                 self.emit_instruction("cc_deleteall", Operand::Byte(0));
                 Ok(ValueKind::Void)
             }
@@ -511,7 +533,10 @@ impl<'a> StructuredLowerer<'a> {
                 Ok(ValueKind::Int)
             }
             "getText" => {
-                self.emit_expr(&arguments[0])?;
+                let [component] = arguments else {
+                    bail!("UI.getText expects 1 argument, got {}", arguments.len());
+                };
+                self.emit_expr(component)?;
                 self.emit_instruction("if_gettext", Operand::Byte(0));
                 Ok(ValueKind::Object)
             }
@@ -677,7 +702,7 @@ impl<'a> StructuredLowerer<'a> {
                     BinaryOp::Sub => "sub",
                     BinaryOp::Mul => "multiply",
                     BinaryOp::Div => "divide",
-                    BinaryOp::Mod => "mod",
+                    BinaryOp::Mod => "modulo",
                     _ => unreachable!(),
                 };
                 self.emit_instruction(command, Operand::Byte(0));

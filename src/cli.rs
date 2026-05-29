@@ -284,6 +284,9 @@ pub enum Command {
         /// Disable embedded ASM fallback and require structured recompilation
         #[arg(long)]
         strict_structured: bool,
+        /// Skip post-compile verification (byte round-trip + stack validation)
+        #[arg(long)]
+        no_verify: bool,
     },
     /// Dump a lossless raw-flat cache tree for JS5 repacking.
     #[command(name = "dump-raw-flat")]
@@ -924,6 +927,7 @@ pub fn run(cli: Cli) -> Result<()> {
             build,
             subbuild,
             strict_structured,
+            no_verify,
         } => run_assemble_script(
             &cache,
             &tar_path,
@@ -933,6 +937,7 @@ pub fn run(cli: Cli) -> Result<()> {
             build,
             subbuild,
             strict_structured,
+            no_verify,
             version,
         ),
         Command::DumpRawFlat { out_dir, archives } => {
@@ -3963,6 +3968,7 @@ fn run_assemble_script(
     build: Option<u32>,
     subbuild: Option<u32>,
     strict_structured: bool,
+    no_verify: bool,
     version: RuntimeVersion,
 ) -> Result<()> {
     let source =
@@ -4060,6 +4066,10 @@ fn run_assemble_script(
     let binary =
         encode_script(&script, opcode_book, effective_build).context("encoding CS2 binary")?;
 
+    if !no_verify {
+        verify_assembled_script(cache, data_dir, &ctx, &script, &binary, output)?;
+    }
+
     std::fs::write(output, &binary).with_context(|| format!("writing {}", output.display()))?;
 
     eprintln!(
@@ -4070,6 +4080,73 @@ fn run_assemble_script(
         effective_build,
         assemble_mode,
     );
+    Ok(())
+}
+
+/// Verify a freshly assembled script before writing it: (1) the emitted bytes
+/// must decode back to an identical script (encoder/operand fidelity), and (2)
+/// structural + stack-effect validation against the target build's catalog must
+/// pass (no stack underflow, dangling branch targets, or unknown references).
+/// This stops `assemble-script` from silently producing CS2 the client cannot
+/// run. Bypass with `--no-verify`.
+fn verify_assembled_script(
+    cache: &FlatCache,
+    data_dir: &Path,
+    ctx: &ResolverContext,
+    script: &CompiledScript,
+    binary: &[u8],
+    output: &Path,
+) -> Result<()> {
+    let decoded = decode_script(binary, &ctx.opcode_book, ctx.build)
+        .with_context(|| format!("verifying {}: re-decoding emitted CS2", output.display()))?;
+    // Compare command + operand + header, ignoring the numeric `opcode` field:
+    // lowering/assembly leaves it as a `0` placeholder while decode fills in the
+    // real id, but the byte fidelity we care about lives in command names and
+    // operands. A self-consistent encoder bug (e.g. a zeroed placeholder operand)
+    // still surfaces here, which a bytes-only `encode(decode(b)) == b` check misses.
+    let normalize = |source: &CompiledScript| -> Result<serde_json::Value> {
+        let mut clone = source.clone();
+        for instruction in &mut clone.code {
+            instruction.opcode = 0;
+        }
+        Ok(serde_json::to_value(&clone)?)
+    };
+    if normalize(&decoded)? != normalize(script)? {
+        bail!(
+            "post-compile verification failed for {}: re-decoded CS2 does not match the compiled \
+             script (encoder fidelity bug); pass --no-verify to override",
+            output.display()
+        );
+    }
+
+    let reverse_ctx = build_reverse_compile_context(ctx, cache, data_dir)?;
+    let script_id = script
+        .name
+        .as_deref()
+        .and_then(|name| reverse_ctx.script_catalog.resolve_export_name(name))
+        .map_or(0, |meta| meta.packed_id.0.unsigned_abs());
+    let validator = crate::validate::Cs2Validator::new(ctx);
+    let report = validator.validate_compiled(
+        script_id,
+        script,
+        &reverse_ctx.script_catalog,
+        &reverse_ctx.script_signatures,
+        script.name.clone(),
+    );
+    if !report.errors.is_empty() {
+        let detail = report
+            .errors
+            .iter()
+            .map(|error| format!("{error:?}"))
+            .collect::<Vec<_>>()
+            .join("; ");
+        bail!(
+            "post-compile validation failed for {} ({} error(s)): {detail}; pass --no-verify to \
+             override",
+            output.display(),
+            report.errors.len(),
+        );
+    }
     Ok(())
 }
 
