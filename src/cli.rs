@@ -4367,12 +4367,33 @@ fn recompile_fidelity_check(
     })?;
 
     if actual != expected {
-        return Err((
-            "recompile_mismatch",
-            "structured recompile is not byte-identical to the original".to_string(),
-        ));
+        return Err(("recompile_mismatch", recompile_divergence(&original, &compiled)));
     }
     Ok(())
+}
+
+/// Describe the first instruction-level divergence between the original script
+/// and the structured recompile, to make `recompile_mismatch` actionable.
+fn recompile_divergence(
+    original: &crate::script::CompiledScript,
+    compiled: &crate::script::CompiledScript,
+) -> String {
+    for (i, (a, b)) in original.code.iter().zip(compiled.code.iter()).enumerate() {
+        if a.command != b.command || format!("{:?}", a.operand) != format!("{:?}", b.operand) {
+            return format!(
+                "recompile diverges at [{i}]: original `{} {:?}` vs structured `{} {:?}`",
+                a.command, a.operand, b.command, b.operand
+            );
+        }
+    }
+    if original.code.len() != compiled.code.len() {
+        return format!(
+            "recompile length mismatch: original {} instructions vs structured {}",
+            original.code.len(),
+            compiled.code.len()
+        );
+    }
+    "recompile differs in header/locals/args only".to_string()
 }
 
 fn screaming_snake(value: &str) -> String {
