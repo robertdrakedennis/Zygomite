@@ -839,5 +839,30 @@ fn scan_for_returns(stmts: &[StructuredStmt], has_val: &mut bool, has_void: &mut
             }
             _ => {}
         }
+        // Statements after an unconditional terminator are unreachable — notably
+        // the compiler's dead default-return epilogue the structurer now emits
+        // for byte fidelity. Don't let them influence the inferred return type.
+        if stmt_terminates(stmt) {
+            break;
+        }
+    }
+}
+
+/// Whether a single statement unconditionally leaves its block.
+fn stmt_terminates(stmt: &StructuredStmt) -> bool {
+    match stmt {
+        StructuredStmt::Return { .. }
+        | StructuredStmt::Break
+        | StructuredStmt::Continue
+        | StructuredStmt::Goto { .. } => true,
+        StructuredStmt::If {
+            then_body,
+            else_body: Some(else_body),
+            ..
+        } => {
+            then_body.last().is_some_and(stmt_terminates)
+                && else_body.last().is_some_and(stmt_terminates)
+        }
+        _ => false,
     }
 }

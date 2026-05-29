@@ -56,7 +56,22 @@ pub fn structure(blocks: &[Block]) -> Vec<StructuredStmt> {
         loops,
         emitted: vec![false; n],
     };
-    s.emit_region(0, None, &[], 0)
+    let mut out = s.emit_region(0, None, &[], 0);
+
+    // Emit any blocks the reachable region never visited, in original order.
+    // The RT7 compiler appends an unreachable default-return epilogue
+    // (`push <default>; return`) after a script's real return; dropping it makes
+    // the recompile shorter than the original (the length:structured_shorter /
+    // branch:operand mismatch family). Re-emitting these unreachable tails keeps
+    // the structured form byte-faithful. They are genuinely dead (an editable
+    // script has no residual goto reaching them), so appending them as trailing
+    // statements changes no behaviour.
+    for b in 0..n {
+        if !s.emitted[b] {
+            out.extend(s.emit_region(b, None, &[], 0));
+        }
+    }
+    out
 }
 
 // ── Dominator analysis (Cooper-Harvey-Kennedy) ────────────────────────────
