@@ -641,6 +641,7 @@ impl<'a> StructuredLowerer<'a> {
                 self.emit_instruction(command, Operand::Byte(0));
                 Ok(ValueKind::Void)
             }
+            method if method.starts_with("Get") => self.emit_ui_getter(method, arguments),
             method if method.starts_with("Seton") => self.emit_ui_hook_call(method, arguments),
             method => {
                 // Generic inverse of the decompiler's UI naming. The decompiler
@@ -676,6 +677,36 @@ impl<'a> StructuredLowerer<'a> {
                 Ok(ValueKind::Void)
             }
         }
+    }
+
+    /// Lower a component getter (`UI.Getwidth`, `UI.Getx`, ...). These come from
+    /// the recovery's generic `UI.Get*` rendering of `cc_get*`/`if_get*`: the
+    /// current-component `cc_` form takes no argument, the interface `if_` form
+    /// takes an explicit component, so pick by arg count. Getters push a value,
+    /// so return its kind (string for `gettext`, int otherwise) — the inverse of
+    /// the recovery modelling them as value-producing.
+    fn emit_ui_getter(&mut self, method: &str, arguments: &[Expression]) -> Result<ValueKind> {
+        let lower = method.to_ascii_lowercase();
+        let cc_form = format!("cc_{lower}");
+        let if_form = format!("if_{lower}");
+        let command = if arguments.is_empty() && self.ctx.has_command(&cc_form) {
+            cc_form
+        } else if self.ctx.has_command(&if_form) {
+            if_form
+        } else if self.ctx.has_command(&cc_form) {
+            cc_form
+        } else {
+            bail!("unsupported UI getter {method}");
+        };
+        for argument in arguments {
+            self.emit_expr(argument)?;
+        }
+        self.emit_instruction(&command, Operand::Byte(0));
+        Ok(if lower == "gettext" {
+            ValueKind::Object
+        } else {
+            ValueKind::Int
+        })
     }
 
     fn emit_ui_hook_call(&mut self, method: &str, arguments: &[Expression]) -> Result<ValueKind> {
