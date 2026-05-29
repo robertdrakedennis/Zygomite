@@ -38,12 +38,15 @@ Status legend: `[ ]` todo · `[~]` in progress · `[x]` done
 
 ---
 
-## P0 — Make coverage a tracked, repeatable metric (do first)
-- [ ] **P0.1** Add a `coverage` report (or `--coverage` on `transpile-scripts`) emitting structured
-  metrics: editable %, blocker histogram, transpile-error count, per-build. Reuse the existing
-  `transpile-diagnostics.json` aggregation; emit one canonical JSON event.
-- [ ] **P0.2** Measure the same baseline on **910** (only 947 measured so far). Record both.
-- [ ] **P0.3** Commit baseline numbers here and re-measure after each P1/P2 change to show movement.
+## P0 — Make coverage a tracked, repeatable metric (do first) ✅ DONE
+- [x] **P0.1** `transpile-scripts` now emits a canonical `transpile_coverage` event (editable %,
+  blocker histogram, totals) and a `coverage` block in `transpile-diagnostics.json`.
+- [x] **P0.2 / P0.3** Baselines (full corpus, `--all-scripts`):
+  - **947: 1800/20577 = 8.7% editable** — blockers: residual_goto 12773, commented_branch 10068,
+    reverse_unsupported 5270, residual_pop 3699.
+  - **910: 1750/14313 = 12.2% editable** — blockers: residual_goto 9070, commented_branch 7292,
+    reverse_unsupported 3076, residual_pop 2234.
+  - Re-measure after each P1/P2 change via the `transpile_coverage` event.
 
 ## P1 — Control-flow recovery (the dominant lever: ~62%+49% of corpus)
 Target `cfg.rs` (build_cfg / emit_structured) + the branch/goto handling.

@@ -5622,8 +5622,47 @@ fn trim_transpile_runtime_context(ctx: &mut ResolverContext) {
 #[derive(Serialize)]
 struct TranspileDiagnosticsReport {
     build: u32,
+    coverage: CoverageSummary,
     catalog: Vec<crate::transpile::Diagnostic>,
     scripts: Vec<ScriptDiagnosticsEntry>,
+}
+
+/// Aggregate structured-decompilation coverage: how many scripts produced
+/// editable structured TypeScript vs. fell back to the lossless ASM trailer,
+/// plus a histogram of the blockers that forced the fallback. This is the
+/// headline completeness metric (see docs/cs2-completeness-plan.md).
+#[derive(Serialize)]
+struct CoverageSummary {
+    total: usize,
+    editable: usize,
+    blocked: usize,
+    editable_pct: f64,
+    blockers: BTreeMap<String, usize>,
+}
+
+impl CoverageSummary {
+    fn from_scripts(scripts: &[ScriptDiagnosticsEntry]) -> Self {
+        let total = scripts.len();
+        let editable = scripts.iter().filter(|s| s.editable_structured).count();
+        let mut blockers = BTreeMap::<String, usize>::new();
+        for script in scripts {
+            for blocker in &script.blocking_diagnostics {
+                *blockers.entry(blocker.clone()).or_default() += 1;
+            }
+        }
+        let editable_pct = if total == 0 {
+            0.0
+        } else {
+            (editable as f64) * 100.0 / (total as f64)
+        };
+        Self {
+            total,
+            editable,
+            blocked: total - editable,
+            editable_pct,
+            blockers,
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -5646,8 +5685,23 @@ fn write_transpile_diagnostics_report(
     mut scripts: Vec<ScriptDiagnosticsEntry>,
 ) -> Result<()> {
     scripts.sort_by(|a, b| a.packed_id.cmp(&b.packed_id));
+    let coverage = CoverageSummary::from_scripts(&scripts);
+    // Canonical coverage event (queryable; the headline completeness metric).
+    eprintln!(
+        "{}",
+        serde_json::to_string(&serde_json::json!({
+            "event": "transpile_coverage",
+            "build": build,
+            "total": coverage.total,
+            "editable": coverage.editable,
+            "blocked": coverage.blocked,
+            "editable_pct": coverage.editable_pct,
+            "blockers": coverage.blockers,
+        }))?
+    );
     let report = TranspileDiagnosticsReport {
         build,
+        coverage,
         catalog,
         scripts,
     };
