@@ -679,18 +679,26 @@ impl<'a> StructuredLowerer<'a> {
     }
 
     fn emit_ui_hook_call(&mut self, method: &str, arguments: &[Expression]) -> Result<ValueKind> {
-        let (command_cc, command_if) = match method {
-            "Setonclick" => ("cc_setonclick", "if_setonclick"),
-            "Setonvartransmit" => ("cc_setonvartransmit", "if_setonvartransmit"),
-            "Setonstocktransmit" => ("cc_setonstocktransmit", "if_setonstocktransmit"),
-            "Setoninvtransmit" => ("cc_setoninvtransmit", "if_setoninvtransmit"),
-            _ => bail!("unsupported UI hook method {method}"),
-        };
+        // The decompiler renders every `cc_seton*`/`if_seton*` hook as
+        // `UI.Seton<suffix>` (sanitize_camel). Derive the opcode pair generically
+        // instead of a hardcoded list so the whole hook family round-trips: the
+        // component-context form takes just the callback, the interface form an
+        // extra explicit component (same arg-count split as the cc_/if_ set
+        // methods).
+        let suffix = method
+            .strip_prefix("Seton")
+            .unwrap_or(method)
+            .to_ascii_lowercase();
+        let command_cc = format!("cc_seton{suffix}");
+        let command_if = format!("if_seton{suffix}");
         let (callback_expr, component_expr, command) = match arguments {
-            [callback] => (callback, None, command_cc),
-            [callback, component] => (callback, Some(component), command_if),
+            [callback] => (callback, None, command_cc.as_str()),
+            [callback, component] => (callback, Some(component), command_if.as_str()),
             _ => bail!("UI hook methods expect callback and optional component"),
         };
+        if !self.ctx.has_command(command) {
+            bail!("unsupported UI hook method {method}");
+        }
         let Expression::CallbackLiteral(callback) = callback_expr else {
             bail!("UI hook first argument must be callback literal");
         };
@@ -708,7 +716,7 @@ impl<'a> StructuredLowerer<'a> {
         } else {
             bail!("unknown callback target {}", callback.script);
         };
-        self.emit_instruction("push_constant_int", Operand::Int(raw_id));
+        self.emit_int_constant(raw_id);
         for argument in &callback.arguments {
             self.emit_expr(argument)?;
         }
@@ -716,10 +724,7 @@ impl<'a> StructuredLowerer<'a> {
             for watcher in &callback.watchers {
                 self.emit_callback_watcher(watcher)?;
             }
-            self.emit_instruction(
-                "push_constant_int",
-                Operand::Int(callback.watchers.len() as i32),
-            );
+            self.emit_int_constant(callback.watchers.len() as i32);
         }
         self.emit_instruction(
             "push_constant_string",
@@ -733,29 +738,23 @@ impl<'a> StructuredLowerer<'a> {
     }
 
     fn emit_callback_watcher(&mut self, watcher: &str) -> Result<()> {
+        // Watcher trigger ids are int constants, encoded the same typed-constant
+        // way as every other int constant in the corpus (see emit_int_constant).
         if let Some(var_ref) = self.ctx.var_refs_by_name.get(watcher) {
-            self.emit_instruction("push_constant_int", Operand::Int(i32::from(var_ref.id)));
+            let id = i32::from(var_ref.id);
+            self.emit_int_constant(id);
             return Ok(());
         }
         if let Some(varbit_ref) = self.ctx.varbit_refs_by_name.get(watcher) {
-            self.emit_instruction("push_constant_int", Operand::Int(i32::from(varbit_ref.id)));
+            let id = i32::from(varbit_ref.id);
+            self.emit_int_constant(id);
             return Ok(());
         }
-        if let Some(id) = watcher.strip_prefix("inv_") {
-            self.emit_instruction("push_constant_int", Operand::Int(id.parse::<i32>()?));
-            return Ok(());
-        }
-        if let Some(id) = watcher.strip_prefix("stat_") {
-            self.emit_instruction("push_constant_int", Operand::Int(id.parse::<i32>()?));
-            return Ok(());
-        }
-        if let Some(id) = watcher.strip_prefix("varc_") {
-            self.emit_instruction("push_constant_int", Operand::Int(id.parse::<i32>()?));
-            return Ok(());
-        }
-        if let Some(id) = watcher.strip_prefix("varcstr_") {
-            self.emit_instruction("push_constant_int", Operand::Int(id.parse::<i32>()?));
-            return Ok(());
+        for prefix in ["inv_", "stat_", "varc_", "varcstr_"] {
+            if let Some(id) = watcher.strip_prefix(prefix) {
+                self.emit_int_constant(id.parse::<i32>()?);
+                return Ok(());
+            }
         }
         bail!("unsupported callback watcher {watcher}")
     }
