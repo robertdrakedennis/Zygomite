@@ -3568,9 +3568,7 @@ fn export_script_signatures_from_cache(
     let index = cache2.archive_index(ARCHIVE_CLIENTSCRIPTS)?;
     for group in &index.group_id {
         let files = cache2.group_files_with_index(&index, ARCHIVE_CLIENTSCRIPTS, *group)?;
-        for (file, data) in files {
-            let script_id_raw = (group << 16) | file;
-            let script_id = crate::transpile::ScriptId(script_id_raw as i32);
+        for (_file, data) in files {
             let Ok(script) = decode_script(&data, opcode_book, build) else {
                 continue;
             };
@@ -3580,8 +3578,12 @@ fn export_script_signatures_from_cache(
                 .map(crate::transpile::extract_script_name_suffix)
                 .filter(|name| !name.is_empty())
                 .or_else(|| group_names.get(group).cloned());
-            let function_name =
-                crate::transpile::script_function_name(script_id, display_name.as_deref());
+            // Name by group (`script<group>`), matching the catalog and the
+            // transpiled output files — not the packed id.
+            let function_name = crate::transpile::script_function_name(
+                crate::transpile::ScriptId(*group as i32),
+                display_name.as_deref(),
+            );
             let mut arg_types: Vec<&str> = Vec::new();
             arg_types.extend(std::iter::repeat_n(
                 "number",
@@ -5196,38 +5198,18 @@ fn run_filtered_transpile_scripts(
     )?;
 
     fs::create_dir_all(out_dir)?;
-    if !types_exist {
-        export_var_types(&ctx, out_dir)?;
-        export_varbit_types(&ctx, out_dir)?;
-        export_enum_types(&ctx, out_dir)?;
-        export_param_types(&ctx, out_dir)?;
-        export_interface_ids(&ctx, out_dir)?;
-        export_inv_types(&ctx, out_dir)?;
-        export_obj_types(&ctx, out_dir)?;
-        export_npc_types(&ctx, out_dir)?;
-        export_loc_types(&ctx, out_dir)?;
-        export_seq_types(&ctx, out_dir)?;
-        export_spot_types(&ctx, out_dir)?;
-        export_named_config_ids(&ctx, out_dir)?;
-        export_db_types(&ctx, out_dir)?;
-        export_script_signatures_from_cache(
-            cache,
-            tar_path,
-            out_dir,
-            &opcode_book,
-            version.build,
-            &script_group_names,
-        )?;
-        export_index(out_dir)?;
-    }
 
+    // Build the catalog over the selected scripts plus their call targets first,
+    // with return-type inference. The filtered run only emits this small set, so
+    // the catalog is sufficient for scripts.d.ts and lets it carry accurate
+    // signatures (group-based names + real return types) instead of the bulk
+    // `script<packed>(): unknown` declarations the cache scan produced.
     let mut script_data = BTreeMap::new();
     let mut script_catalog_builder = crate::transpile::ScriptCatalogBuilder::new(
         &script_group_names,
         &opcode_book,
         version.build,
-    )
-    .without_return_types();
+    );
     for loaded in &selected_scripts {
         script_data.insert(loaded.packed_id, loaded.data.clone());
         script_catalog_builder.add_script(loaded.packed_id, &loaded.data);
@@ -5249,6 +5231,24 @@ fn run_filtered_transpile_scripts(
     }
     let script_catalog = script_catalog_builder.build();
     let reverse_ctx = build_reverse_compile_context_from_catalog(&ctx, script_catalog.clone());
+
+    if !types_exist {
+        export_var_types(&ctx, out_dir)?;
+        export_varbit_types(&ctx, out_dir)?;
+        export_enum_types(&ctx, out_dir)?;
+        export_param_types(&ctx, out_dir)?;
+        export_interface_ids(&ctx, out_dir)?;
+        export_inv_types(&ctx, out_dir)?;
+        export_obj_types(&ctx, out_dir)?;
+        export_npc_types(&ctx, out_dir)?;
+        export_loc_types(&ctx, out_dir)?;
+        export_seq_types(&ctx, out_dir)?;
+        export_spot_types(&ctx, out_dir)?;
+        export_named_config_ids(&ctx, out_dir)?;
+        export_db_types(&ctx, out_dir)?;
+        export_script_signatures(out_dir, &script_catalog)?;
+        export_index(out_dir)?;
+    }
 
     let mut transpiler = Transpiler::new()
         .with_version(version.build, version.subbuild)
@@ -5448,15 +5448,21 @@ fn load_matching_scripts_from_groups<S: std::hash::BuildHasher + Clone>(
             let Ok(script) = decode_script(&data, opcode_book, build) else {
                 continue;
             };
-            let script_id = crate::transpile::ScriptId(packed_id as i32);
             let display_name = script
                 .name
                 .as_deref()
                 .map(crate::transpile::extract_script_name_suffix)
                 .filter(|name| !name.is_empty())
                 .or_else(|| group_names.get(&group).cloned());
-            let function_name =
-                crate::transpile::script_function_name(script_id, display_name.as_deref());
+            // Match against the GROUP-based synthetic name (`script<group>`), the
+            // same name the catalog and output files use. Naming by the packed id
+            // here was the bug: group 621 became "script40697856" (unmatched)
+            // while group 9476's packed id 621215744 spuriously contained the
+            // "script621" filter substring.
+            let function_name = crate::transpile::script_function_name(
+                crate::transpile::ScriptId(group as i32),
+                display_name.as_deref(),
+            );
             if function_name.contains(filter_script)
                 || display_name
                     .as_deref()
