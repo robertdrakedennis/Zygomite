@@ -326,7 +326,7 @@ fn parse_assignment_target(
 fn parse_expression(expression: &ast::Expression<'_>, source: &str) -> Result<Expression> {
     match expression {
         ast::Expression::NumericLiteral(value) => Ok(Expression::NumberLiteral(NumberLiteral {
-            value: slice_span(value.span, source).parse::<i32>()?,
+            value: numeric_literal_to_i32(value, source)?,
         })),
         ast::Expression::BigIntLiteral(value) => Ok(Expression::BigIntLiteral(BigIntLiteral {
             value: slice_span(value.span, source)
@@ -458,7 +458,7 @@ fn parse_expression_elements(
             }
             ast::ArrayExpressionElement::NumericLiteral(value) => {
                 values.push(Expression::NumberLiteral(NumberLiteral {
-                    value: slice_span(value.span, source).parse::<i32>()?,
+                    value: numeric_literal_to_i32(value, source)?,
                 }));
             }
             ast::ArrayExpressionElement::BigIntLiteral(value) => {
@@ -563,7 +563,7 @@ fn parse_argument_expression(argument: &ast::Argument<'_>, source: &str) -> Resu
             value: value.value,
         })),
         ast::Argument::NumericLiteral(value) => Ok(Expression::NumberLiteral(NumberLiteral {
-            value: slice_span(value.span, source).parse::<i32>()?,
+            value: numeric_literal_to_i32(value, source)?,
         })),
         ast::Argument::BigIntLiteral(value) => Ok(Expression::BigIntLiteral(BigIntLiteral {
             value: slice_span(value.span, source)
@@ -656,4 +656,20 @@ fn type_from_span(span: oxc_span::Span, source: &str) -> String {
 
 fn slice_span(span: oxc_span::Span, source: &str) -> &str {
     &source[span.start as usize..span.end as usize]
+}
+
+/// Convert an oxc-parsed numeric literal to the i32 a CS2 int operand holds.
+/// oxc has already parsed the literal value (handling hex/binary/octal/`_`
+/// separators), so we work from that rather than re-parsing the raw span with
+/// `i32::parse` (which rejects `0xFFFFFF` colours and full-u32 bitmasks). The
+/// full unsigned range `0..=u32::MAX` is accepted and reinterpreted as i32.
+fn numeric_literal_to_i32(literal: &ast::NumericLiteral<'_>, source: &str) -> Result<i32> {
+    let value = literal.value;
+    if !value.is_finite() || value.fract() != 0.0 || value < 0.0 || value > f64::from(u32::MAX) {
+        bail!(
+            "unsupported numeric literal `{}` (expected an integer in 0..=4294967295)",
+            slice_span(literal.span, source)
+        );
+    }
+    Ok(value as u32 as i32)
 }

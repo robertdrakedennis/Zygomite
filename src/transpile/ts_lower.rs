@@ -293,11 +293,15 @@ impl<'a> StructuredLowerer<'a> {
                     bail!("unsupported array target {array}");
                 };
                 let array_id = array_id.parse::<i32>()?;
-                let command = match value_kind {
-                    ValueKind::Object => "pop_array_string",
-                    _ => "pop_array_int",
-                };
-                self.emit_instruction(command, Operand::Array(array_id));
+                // Only integer arrays exist in the CS2 opcode set; there is no
+                // pop_array_string. Reject string-array assignment cleanly rather
+                // than emitting a phantom command.
+                if value_kind == ValueKind::Object {
+                    bail!(
+                        "string arrays are not supported (no pop_array_string opcode): {array}[..]"
+                    );
+                }
+                self.emit_instruction("pop_array_int", Operand::Array(array_id));
                 Ok(())
             }
             AssignmentTarget::Opaque(target) => {
@@ -469,20 +473,21 @@ impl<'a> StructuredLowerer<'a> {
                 .script_catalog
                 .resolve_export_name(&identifier.name)
         {
+            let mut arg_kinds = Vec::with_capacity(call.arguments.len());
             for argument in &call.arguments {
-                self.emit_expr(argument)?;
+                arg_kinds.push(self.emit_expr(argument)?);
+            }
+            let signature = self.ctx.script_signatures.get(&script_metadata.packed_id);
+            if let Some(signature) = signature {
+                check_call_arity(&identifier.name, signature, &arg_kinds)?;
             }
             self.emit_instruction(
                 "gosub_with_params",
                 Operand::Script(script_metadata.group_id.0),
             );
-            let return_kind = self
-                .ctx
-                .script_signatures
-                .get(&script_metadata.packed_id)
-                .map_or(ValueKind::Unknown, |signature| {
-                    kind_from_return_type(&signature.return_type)
-                });
+            let return_kind = signature.map_or(ValueKind::Unknown, |signature| {
+                kind_from_return_type(&signature.return_type)
+            });
             return Ok(return_kind);
         }
 
@@ -783,6 +788,53 @@ impl<'a> StructuredLowerer<'a> {
         self.next_label += 1;
         label
     }
+}
+
+/// Validate a `gosub_with_params` call against the callee's signature. A wrong
+/// argument count (or per-type shape) silently corrupts the tri-typed stack at
+/// runtime, so reject it at compile time. The per-type check only runs when
+/// every argument has a concrete kind; an `Unknown`/`Void` argument falls back
+/// to the total-count check to avoid false positives.
+fn check_call_arity(
+    callee: &str,
+    signature: &ScriptSignature,
+    arg_kinds: &[ValueKind],
+) -> Result<()> {
+    if arg_kinds.len() != signature.total_args() {
+        bail!(
+            "call to `{callee}` expects {} argument(s), got {}",
+            signature.total_args(),
+            arg_kinds.len()
+        );
+    }
+    if arg_kinds
+        .iter()
+        .all(|kind| matches!(kind, ValueKind::Int | ValueKind::Long | ValueKind::Object))
+    {
+        let mut got_int = 0_usize;
+        let mut got_obj = 0_usize;
+        let mut got_long = 0_usize;
+        for kind in arg_kinds {
+            match kind {
+                ValueKind::Int => got_int += 1,
+                ValueKind::Object => got_obj += 1,
+                ValueKind::Long => got_long += 1,
+                _ => {}
+            }
+        }
+        if got_int != signature.arg_count_int as usize
+            || got_obj != signature.arg_count_obj as usize
+            || got_long != signature.arg_count_long as usize
+        {
+            bail!(
+                "call to `{callee}` expects (int={}, obj={}, long={}) arguments, got (int={got_int}, obj={got_obj}, long={got_long})",
+                signature.arg_count_int,
+                signature.arg_count_obj,
+                signature.arg_count_long
+            );
+        }
+    }
+    Ok(())
 }
 
 fn value_kind_for_type(annotation: TypeAnnotation) -> ValueKind {

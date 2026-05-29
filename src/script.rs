@@ -378,6 +378,18 @@ pub fn decode_script(
     })
 }
 
+/// Decode the trailing 1-byte var/varbit secondary ("transmog") flag, which the
+/// client reads as a boolean (`== 1`). Reject any other value rather than
+/// silently collapsing it to `false` and re-encoding it as `0` — that would be
+/// a silent byte change the structural round-trip cannot detect.
+fn decode_transmog_flag(packet: &mut Packet<'_>) -> Result<bool> {
+    match packet.g1()? {
+        0 => Ok(false),
+        1 => Ok(true),
+        other => bail!("unexpected var secondary flag {other} (expected 0 or 1)"),
+    }
+}
+
 fn decode_operand(
     command: &str,
     is_large_operand: bool,
@@ -415,7 +427,7 @@ fn decode_operand(
             } else {
                 let domain = VarDomain::from_id(packet.g1()?)?;
                 let id = packet.g2()?;
-                let transmog = packet.g1()? == 1;
+                let transmog = decode_transmog_flag(packet)?;
                 Ok(Operand::VarRef(VarRef {
                     domain,
                     id,
@@ -432,7 +444,7 @@ fn decode_operand(
                 }))
             } else {
                 let id = packet.g2()?;
-                let transmog = packet.g1()? == 1;
+                let transmog = decode_transmog_flag(packet)?;
                 Ok(Operand::VarBitRef(VarBitRef { id, transmog }))
             }
         }

@@ -38,16 +38,20 @@ Status legend: `[ ]` todo · `[~]` in progress · `[x]` done · `[-]` deferred (
   instead of emitting raw UTF-8.
 - Verified: 910 + 947 byte-perfect roundtrips still pass (100 scripts each), 118 lib tests pass.
 
-## Batch C — Tier 3: robustness & fidelity
+## Batch C — Tier 3: robustness & fidelity ✅ DONE (commit pending)
 
-- [ ] **C7 — Validate gosub arg count/type vs callee signature** (`ts_lower.rs:449` `emit_call`).
-  Signature is in hand; `bail!` on arity/`ValueKind` mismatch with a precise message.
-- [ ] **C8 — Robust numeric-literal parsing** (`ts_parse.rs:329` +dupes). Accept hex/binary/octal/
-  `_` separators and full-u32-as-i32 (colours/bitmasks). Parse the value, not the raw span.
-- [ ] **C9 — Preserve `secondary` operand byte** (`script.rs:418/707`). Currently `bool`-collapsed;
-  a byte ≠0/1 normalizes to 0. Store raw `u8` (or assert ≤1 on decode).
-- [ ] **C10 — Resolve/reject string-array path** (`ts_lower.rs:281`). `pop_array_string`/
-  `push_array_string` exist in no opcode table; either wire correct opcodes or `bail!` cleanly.
+- [x] **C7 — Validate gosub arg count/type vs callee signature** — `check_call_arity` bails on a
+  total-count mismatch always, and on a per-type (int/obj/long) mismatch when all arg kinds are
+  concrete (skips when any is `Unknown`/`Void` to avoid false positives). Verified on real
+  910/947 gosub calls (reversible_ts 5/5).
+- [x] **C8 — Robust numeric-literal parsing** — use oxc's already-parsed value via
+  `numeric_literal_to_i32` (hex/binary/octal/`_` for free), accepting `0..=u32::MAX` reinterpreted
+  as i32; applied to all 3 literal sites.
+- [x] **C9 — `secondary` operand byte** — `decode_transmog_flag` bails on a byte other than 0/1
+  instead of silently collapsing to `false`→`0` on re-encode (chose bail over a wide
+  `bool`→`u8` ripple across ~63 sites; canonical scripts only use 0/1, both roundtrips pass).
+- [x] **C10 — String-array path** — `array_N[..] = <string>` now bails cleanly (no
+  `pop_array_string` opcode exists); also covered defensively by C2's `finish()` book check.
 
 ## Batch D — Tier 4: quality / dead code / coverage / diagnostics
 
