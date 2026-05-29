@@ -120,9 +120,13 @@ fn clean_script(raw_name: &str, value: i32) -> CompiledScript {
         argument_count_object: 0,
         argument_count_long: 0,
         code: vec![
+            // An int literal lowers to the typed-constant push_constant_string
+            // (int tag), the RT7 corpus's universal encoding, so the fixture
+            // uses the same opcode for the structured round-trip to be
+            // byte-identical.
             Instruction {
                 opcode: 0,
-                command: "push_constant_int".to_string(),
+                command: "push_constant_string".to_string(),
                 operand: Operand::Int(value),
             },
             Instruction {

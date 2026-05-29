@@ -395,16 +395,17 @@ impl<'a> StructuredLowerer<'a> {
     fn emit_expr(&mut self, expr: &Expression) -> Result<ValueKind> {
         match expr {
             Expression::NumberLiteral(value) => {
-                // Int constants have two CS2 encodings: push_constant_int and
-                // push_constant_string with an int discriminator. The corpus
-                // predominantly uses the latter (measured +81 editable by the
-                // byte gate), but the stack-effect validator (validate.rs) models
-                // push_constant_string as a string push, so emitting it here
-                // makes assemble-script's verifier flag a false StackUnderflow —
-                // i.e. byte-gate and validator disagree. Stay on
-                // push_constant_int until the validator models the int
-                // discriminator (a prerequisite of the byte-fidelity work).
-                self.emit_instruction("push_constant_int", Operand::Int(value.value));
+                // Int constants have two CS2 encodings: the legacy
+                // push_constant_int (4-byte int) and the typed-constant
+                // push_constant_string with an int tag (1-byte tag + 4-byte
+                // int). The RT7 corpus (910/947) emits the typed form
+                // universally — push_constant_int as an int-constant origin is
+                // essentially absent — so lowering to it is the byte-faithful
+                // default and the largest single recompile_mismatch cause
+                // (2527 on 947). The recompile-fidelity gate is the backstop:
+                // any script whose original genuinely used push_constant_int
+                // recompiles non-identically and is correctly marked blocked.
+                self.emit_instruction("push_constant_string", Operand::Int(value.value));
                 Ok(ValueKind::Int)
             }
             Expression::BigIntLiteral(value) => {
