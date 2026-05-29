@@ -637,6 +637,20 @@ pub fn encode_script(
     Ok(writer.data)
 }
 
+/// Narrow an `i32` operand into a single byte slot without silent truncation.
+///
+/// A 1-byte operand round-trips through `g1`/`p1` (u8), so any value the byte
+/// slot can hold losslessly fits the signed-or-unsigned range `-128..=255`.
+/// Anything outside that would be silently truncated on repack and produce
+/// byte-wrong CS2, so reject it instead.
+fn encode_byte_operand(value: i32) -> Result<u8> {
+    if (-128..=255).contains(&value) {
+        Ok(value as u8)
+    } else {
+        bail!("operand {value} does not fit in a 1-byte slot (expected -128..=255)");
+    }
+}
+
 fn encode_operand(
     operand: &Operand,
     command: &str,
@@ -749,7 +763,7 @@ fn encode_operand(
             Operand::Byte(b) if is_large_operand => writer.p4s(i32::from(*b)),
             Operand::Byte(b) => writer.p1(*b),
             Operand::Int(v) if is_large_operand => writer.p4s(*v),
-            Operand::Int(v) => writer.p1(*v as u8),
+            Operand::Int(v) => writer.p1(encode_byte_operand(*v)?),
             _ if is_large_operand => writer.p4s(0),
             _ => writer.p1(0),
         },
@@ -1225,7 +1239,7 @@ fn parse_operand_asm(opcode_name: &str, operand_text: &str) -> Result<Operand> {
             }
             // Unknown command: 1-byte operand
             if let Ok(v) = operand_text.parse::<i32>() {
-                Ok(Operand::Byte(v as u8))
+                Ok(Operand::Byte(encode_byte_operand(v)?))
             } else {
                 Ok(Operand::Byte(0))
             }
