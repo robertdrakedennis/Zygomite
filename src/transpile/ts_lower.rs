@@ -405,7 +405,7 @@ impl<'a> StructuredLowerer<'a> {
                 // (2527 on 947). The recompile-fidelity gate is the backstop:
                 // any script whose original genuinely used push_constant_int
                 // recompiles non-identically and is correctly marked blocked.
-                self.emit_instruction("push_constant_string", Operand::Int(value.value));
+                self.emit_int_constant(value.value);
                 Ok(ValueKind::Int)
             }
             Expression::BigIntLiteral(value) => {
@@ -417,7 +417,7 @@ impl<'a> StructuredLowerer<'a> {
                 Ok(ValueKind::Object)
             }
             Expression::BooleanLiteral(value) => {
-                self.emit_instruction("push_constant_int", Operand::Int(i32::from(value.value)));
+                self.emit_int_constant(i32::from(value.value));
                 Ok(ValueKind::Int)
             }
             Expression::Identifier(identifier) => self.emit_identifier(&identifier.name),
@@ -435,6 +435,15 @@ impl<'a> StructuredLowerer<'a> {
                 bail!("stack pseudo-operations are not reversible")
             }
         }
+    }
+
+    /// Emit an int constant using the typed-constant `push_constant_string`
+    /// (int tag), the RT7 corpus's universal int-constant encoding (see the
+    /// `NumberLiteral` lowering). Centralizes the choice so every plain int
+    /// constant — literals, booleans, ids, enum/component constants — recompiles
+    /// to the same opcode the original used. The recompile gate is the backstop.
+    fn emit_int_constant(&mut self, value: i32) {
+        self.emit_instruction("push_constant_string", Operand::Int(value));
     }
 
     fn emit_identifier(&mut self, name: &str) -> Result<ValueKind> {
@@ -475,7 +484,7 @@ impl<'a> StructuredLowerer<'a> {
         if let Expression::Identifier(object) = &*access.object {
             let qualified = format!("{}.{}", object.name, access.property);
             if let Some(value) = self.ctx.enum_values_by_name.get(&qualified) {
-                self.emit_instruction("push_constant_string", Operand::Int(*value));
+                self.emit_int_constant(*value);
                 return Ok(ValueKind::Int);
             }
             if object.name == "ComponentId" {
@@ -483,7 +492,7 @@ impl<'a> StructuredLowerer<'a> {
                 let Some(value) = self.ctx.component_ids_by_name.get(&key).copied() else {
                     bail!("unknown component constant {key}");
                 };
-                self.emit_instruction("push_constant_int", Operand::Int(value));
+                self.emit_int_constant(value);
                 return Ok(ValueKind::Int);
             }
         }
@@ -738,7 +747,7 @@ impl<'a> StructuredLowerer<'a> {
         match unary.op {
             UnaryOp::Neg => match &*unary.operand {
                 Expression::NumberLiteral(value) => {
-                    self.emit_instruction("push_constant_int", Operand::Int(-value.value));
+                    self.emit_int_constant(-value.value);
                     Ok(ValueKind::Int)
                 }
                 Expression::BigIntLiteral(value) => {
