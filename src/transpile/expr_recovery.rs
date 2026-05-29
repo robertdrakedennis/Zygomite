@@ -421,6 +421,36 @@ fn stack_effect(
         "enum_getreverseindex" => StackEffect { pops: 5, pushes: 1 },
         "enum_getreverseindex_string" => StackEffect { pops: 4, pushes: 1 },
 
+        // ── Component getters and value ops (effects extracted from the client
+        // ScriptRunner; counts are int+string-stack totals since recovery uses a
+        // single unified expression stack). These push a value the default
+        // CC/IF categorisation modelled as a void pop, stranding the result and
+        // forcing a residual pop(). Only single-push getters are listed; the
+        // few that push two values (dimensions/invcount/getop/getopbase/
+        // nextsubid) need multi-value recovery and are intentionally left to the
+        // default until that lands. ──
+        // cc_* getters operate on the current component (no argument).
+        "cc_get2dangle" | "cc_getcolour" | "cc_getfontgraphic" | "cc_getfontmetrics"
+        | "cc_getgraphic" | "cc_getheight" | "cc_gethide" | "cc_getid" | "cc_getinvobject"
+        | "cc_getlayer" | "cc_getmodel" | "cc_getmodelangle_x" | "cc_getmodelangle_y"
+        | "cc_getmodelangle_z" | "cc_getmodelxof" | "cc_getmodelyof" | "cc_getmodelzoom"
+        | "cc_getparentlayer" | "cc_getscrollheight" | "cc_getscrollwidth" | "cc_getscrollx"
+        | "cc_getscrolly" | "cc_gettargetmask" | "cc_gettext" | "cc_gettrans" | "cc_getwidth"
+        | "cc_getx" | "cc_gety" | "if_gettop" | "clientclock" => StackEffect { pops: 0, pushes: 1 },
+        // if_* getters take an explicit component id.
+        "if_get2dangle" | "if_getcolour" | "if_getfontgraphic" | "if_getfontmetrics"
+        | "if_getgraphic" | "if_getheight" | "if_gethide" | "if_getinvobject" | "if_getlayer"
+        | "if_getmodel" | "if_getmodelangle_x" | "if_getmodelangle_y" | "if_getmodelangle_z"
+        | "if_getmodelxof" | "if_getmodelyof" | "if_getmodelzoom" | "if_getparentlayer"
+        | "if_getscrollheight" | "if_getscrollwidth" | "if_getscrollx" | "if_getscrolly"
+        | "if_gettargetmask" | "if_gettrans" | "if_getwidth" | "if_getx" | "if_gety"
+        | "tostring" | "oc_name" | "string_length" => StackEffect { pops: 1, pushes: 1 },
+        "max" | "min" | "testbit" | "append" | "tostring_localised" => {
+            StackEffect { pops: 2, pushes: 1 }
+        }
+        "scale" => StackEffect { pops: 3, pushes: 1 },
+        "movecoord" => StackEffect { pops: 4, pushes: 1 },
+
         _ => match categorize(cmd) {
             OpcodeCategory::Push => StackEffect { pops: 0, pushes: 1 },
             OpcodeCategory::Pop
@@ -1367,12 +1397,21 @@ impl<'a, S: std::hash::BuildHasher> ExprRecovery<'a, S> {
                         let mut args: Vec<Expression> =
                             (0..effect.pops).map(|_| self.pop_or_unknown()).collect();
                         args.reverse();
-                        return Some(RecoveredStmt::Expression(Expression::Call(CallExpr {
+                        let call = Expression::Call(CallExpr {
                             callee: Box::new(Expression::Identifier(Identifier {
                                 name: format!("UI.{}", sanitize_camel(&cmd[3..])),
                             })),
                             arguments: args,
-                        })));
+                        });
+                        // A getter (cc_getwidth, if_gettext, ...) produces a
+                        // value: push it so a downstream consumer or assignment
+                        // picks it up, instead of stranding the operands. A void
+                        // UI setter (pushes == 0) stays a statement.
+                        if effect.pushes > 0 {
+                            self.stack.push(call);
+                            return None;
+                        }
+                        return Some(RecoveredStmt::Expression(call));
                     }
                     OpcodeCategory::Push => {
                         self.stack.push(operand_expr(op));
