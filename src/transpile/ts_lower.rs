@@ -172,8 +172,22 @@ impl<'a> StructuredLowerer<'a> {
             StructuredStmt::Assignment { target, value } => self.lower_assignment(target, value),
             StructuredStmt::Expr { expr } => {
                 let kind = self.emit_expr(expr)?;
-                if kind != ValueKind::Void {
-                    bail!("expression statement leaves value on stack: {:?}", expr);
+                // A value-producing call used as a bare statement discards its
+                // result, which in CS2 is an explicit pop_*_discard after the
+                // call. Emit it so such statements round-trip (the recompile gate
+                // confirms byte-identity).
+                match kind {
+                    ValueKind::Void => {}
+                    ValueKind::Int => self.emit_instruction("pop_int_discard", Operand::Byte(0)),
+                    ValueKind::Object => {
+                        self.emit_instruction("pop_string_discard", Operand::Byte(0));
+                    }
+                    ValueKind::Long => self.emit_instruction("pop_long_discard", Operand::Byte(0)),
+                    ValueKind::Unknown => {
+                        bail!(
+                            "expression statement leaves value of unknown type on stack: {expr:?}"
+                        )
+                    }
                 }
                 Ok(())
             }
@@ -571,45 +585,27 @@ impl<'a> StructuredLowerer<'a> {
             }
             method if method.starts_with("Seton") => self.emit_ui_hook_call(method, arguments),
             method => {
-                let command = match method {
-                    "setText" => "cc_settext",
-                    "setGraphic" => "cc_setgraphic",
-                    "setHide" => "cc_sethide",
-                    "setColour" => "cc_setcolour",
-                    "setFill" => "cc_setfill",
-                    "setTrans" => "cc_settrans",
-                    "setLineWid" => "cc_setlinewid",
-                    "setModel" => "cc_setmodel",
-                    "setScrollPos" => "cc_setscrollpos",
-                    "setScrollSize" => "cc_setscrollsize",
-                    "setAspect" => "cc_setaspect",
-                    "setPosition" => "cc_setposition",
-                    "setSize" => "cc_setsize",
-                    "setModelOrigin" => "cc_setmodelorigin",
-                    "setModelAngle" => "cc_setmodelangle",
-                    "setModelZoom" => "cc_setmodelzoom",
-                    "setModelOrthog" => "cc_setmodelorthog",
-                    "setModelTint" => "cc_setmodeltint",
-                    "setModelLighting" => "cc_setmodellighting",
-                    "resetModelLighting" => "cc_resetmodellighting",
-                    "setTextFont" => "cc_settextfont",
-                    "setTextAlign" => "cc_settextalign",
-                    "setTextShadow" => "cc_settextshadow",
-                    "setTextAntiMacro" => "cc_settextantimacro",
-                    "setOutline" => "cc_setoutline",
-                    "setGraphicShadow" => "cc_setgraphicshadow",
-                    "setClickMask" => "cc_setclickmask",
-                    "setHeld" => "cc_setheld",
-                    "setFontMono" => "cc_setfontmono",
-                    "setParam" => "cc_setparam",
-                    "setParamInt" => "cc_setparam_int",
-                    "setParamString" => "cc_setparam_string",
-                    _ => bail!("unsupported UI method {method}"),
+                // Generic inverse of the decompiler's `UI.<CamelCase(cc-suffix)>`
+                // naming: map back to `cc_<lowercase>` when that opcode exists
+                // for the build. Covers every single-word set-method (both the
+                // decompiler's `Sethide`/`Settext` and hand-written `setHide`)
+                // without a hardcoded list. Underscore-bearing opcodes keep
+                // explicit mappings since the camelCase form is lossy.
+                let generic = format!("cc_{}", method.to_ascii_lowercase());
+                let command: String = if self.ctx.has_command(&generic) {
+                    generic
+                } else {
+                    match method {
+                        "setParam" => "cc_setparam".to_string(),
+                        "setParamInt" => "cc_setparam_int".to_string(),
+                        "setParamString" => "cc_setparam_string".to_string(),
+                        _ => bail!("unsupported UI method {method}"),
+                    }
                 };
                 for argument in arguments {
                     self.emit_expr(argument)?;
                 }
-                self.emit_instruction(command, Operand::Byte(0));
+                self.emit_instruction(&command, Operand::Byte(0));
                 Ok(ValueKind::Void)
             }
         }
