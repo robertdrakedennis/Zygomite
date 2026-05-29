@@ -215,7 +215,14 @@ impl LoopInfo {
             let mut exits = std::collections::HashSet::new();
             for &b in set {
                 for &s in &succ[b] {
-                    if !set.contains(&s) {
+                    // A terminal successor (no successors of its own — a `return`
+                    // / function-end block) reached from inside the loop is an
+                    // inline return, not a loop exit needing an (inexpressible)
+                    // labelled break. Excluding it lets search loops like
+                    // `while(true){ if(done) return; ...; if(found) return; i++ }`
+                    // — whose only out-edges are returns — structure as `while`
+                    // with inline returns instead of falling back to goto.
+                    if !set.contains(&s) && !succ[s].is_empty() {
                         exits.insert(s);
                     }
                 }
