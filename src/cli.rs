@@ -4283,6 +4283,14 @@ fn build_reverse_compile_context_from_catalog(
     }
 }
 
+/// Append `diagnostic` to `diagnostics` only if not already present, keeping the
+/// blocker list free of duplicates across re-checks.
+fn push_unique_diagnostic(diagnostics: &mut Vec<String>, diagnostic: String) {
+    if !diagnostics.iter().any(|existing| existing == &diagnostic) {
+        diagnostics.push(diagnostic);
+    }
+}
+
 fn finalize_reversible_transpile_output(
     source: String,
     reverse_ctx: &ReverseCompileContext,
@@ -4298,18 +4306,23 @@ fn finalize_reversible_transpile_output(
     let parsed = parse_reversible_source(&source)?;
     let mut metadata = parsed.metadata.clone();
     if metadata.editable_structured
-        && let Err((blocker, message)) =
-            recompile_fidelity_check(&parsed, &metadata, reverse_ctx, opcode_book)
+        && let Err(block) = recompile_fidelity_check(&parsed, &metadata, reverse_ctx, opcode_book)
     {
         metadata.editable_structured = false;
-        if !metadata
-            .blocking_diagnostics
-            .iter()
-            .any(|existing| existing == blocker)
-        {
-            metadata.blocking_diagnostics.push(blocker.to_string());
+        push_unique_diagnostic(
+            &mut metadata.blocking_diagnostics,
+            block.blocker.to_string(),
+        );
+        // A low-cardinality sub-bucket so the coverage histogram ranks *why*
+        // recompiles diverge (e.g. push_constant_int->push_constant_string)
+        // instead of collapsing them all into one opaque `recompile_mismatch`.
+        if let Some(cause) = block.cause {
+            push_unique_diagnostic(
+                &mut metadata.blocking_diagnostics,
+                format!("recompile_mismatch_cause:{cause}"),
+            );
         }
-        diagnostics.warning(message);
+        diagnostics.warning(block.message);
     }
 
     *editable_structured = metadata.editable_structured;
@@ -4327,76 +4340,103 @@ fn finalize_reversible_transpile_output(
 /// Comparing them gates out scripts that lower cleanly but to different bytes —
 /// the false-editables that would silently corrupt the script if a user edited
 /// the structured form. Returns `Err((blocker, message))` to mark non-editable.
+/// Why a structured recompile was rejected by the fidelity gate. `blocker` is
+/// the stable coverage tag; `cause` is a low-cardinality sub-bucket (only set
+/// for `recompile_mismatch`) that turns the opaque blocker into a ranked
+/// histogram; `message` is the human-readable detail.
+struct RecompileBlock {
+    blocker: &'static str,
+    cause: Option<String>,
+    message: String,
+}
+
+impl RecompileBlock {
+    fn reverse_unsupported(message: String) -> Self {
+        Self {
+            blocker: "reverse_unsupported",
+            cause: None,
+            message,
+        }
+    }
+}
+
 fn recompile_fidelity_check(
     parsed: &crate::transpile::ParsedReversibleSource,
     metadata: &crate::transpile::ReversibleMetadata,
     reverse_ctx: &ReverseCompileContext,
     opcode_book: &OpcodeBook,
-) -> std::result::Result<(), (&'static str, String)> {
+) -> std::result::Result<(), RecompileBlock> {
     let build = metadata.build;
     let original = parse_cs2_asm(&parsed.asm_trailer).map_err(|e| {
-        (
-            "reverse_unsupported",
-            format!("embedded ASM parse failed: {e}"),
-        )
+        RecompileBlock::reverse_unsupported(format!("embedded ASM parse failed: {e}"))
     })?;
     let expected = encode_script(&original, opcode_book, build).map_err(|e| {
-        (
-            "reverse_unsupported",
-            format!("encoding original failed: {e}"),
-        )
+        RecompileBlock::reverse_unsupported(format!("encoding original failed: {e}"))
     })?;
 
     let structured = parse_structured_typescript(&parsed.structured_source).map_err(|e| {
-        (
-            "reverse_unsupported",
-            format!("structured parse failed: {e}"),
-        )
+        RecompileBlock::reverse_unsupported(format!("structured parse failed: {e}"))
     })?;
     let compiled = lower_structured_script(&structured, metadata, reverse_ctx).map_err(|e| {
-        (
-            "reverse_unsupported",
-            format!("structured lowering failed: {e}"),
-        )
+        RecompileBlock::reverse_unsupported(format!("structured lowering failed: {e}"))
     })?;
     let actual = encode_script(&compiled, opcode_book, build).map_err(|e| {
-        (
-            "reverse_unsupported",
-            format!("encoding structured failed: {e}"),
-        )
+        RecompileBlock::reverse_unsupported(format!("encoding structured failed: {e}"))
     })?;
 
     if actual != expected {
-        return Err((
-            "recompile_mismatch",
-            recompile_divergence(&original, &compiled),
-        ));
+        let (cause, message) = recompile_divergence(&original, &compiled);
+        return Err(RecompileBlock {
+            blocker: "recompile_mismatch",
+            cause: Some(cause),
+            message,
+        });
     }
     Ok(())
 }
 
 /// Describe the first instruction-level divergence between the original script
 /// and the structured recompile, to make `recompile_mismatch` actionable.
+/// Returns `(cause, message)`: `cause` is a low-cardinality bucket key (command
+/// names only, never operand values) for the coverage histogram; `message` is
+/// the human-readable detail for the diagnostics log.
 fn recompile_divergence(
     original: &crate::script::CompiledScript,
     compiled: &crate::script::CompiledScript,
-) -> String {
+) -> (String, String) {
     for (i, (a, b)) in original.code.iter().zip(compiled.code.iter()).enumerate() {
-        if a.command != b.command || format!("{:?}", a.operand) != format!("{:?}", b.operand) {
-            return format!(
+        let command_differs = a.command != b.command;
+        let operand_differs = format!("{:?}", a.operand) != format!("{:?}", b.operand);
+        if command_differs || operand_differs {
+            let cause = if command_differs {
+                format!("{}->{}", a.command, b.command)
+            } else {
+                format!("{}:operand", a.command)
+            };
+            let message = format!(
                 "recompile diverges at [{i}]: original `{} {:?}` vs structured `{} {:?}`",
                 a.command, a.operand, b.command, b.operand
             );
+            return (cause, message);
         }
     }
     if original.code.len() != compiled.code.len() {
-        return format!(
+        let cause = if original.code.len() < compiled.code.len() {
+            "length:structured_longer"
+        } else {
+            "length:structured_shorter"
+        };
+        let message = format!(
             "recompile length mismatch: original {} instructions vs structured {}",
             original.code.len(),
             compiled.code.len()
         );
+        return (cause.to_string(), message);
     }
-    "recompile differs in header/locals/args only".to_string()
+    (
+        "header_or_locals".to_string(),
+        "recompile differs in header/locals/args only".to_string(),
+    )
 }
 
 fn screaming_snake(value: &str) -> String {
