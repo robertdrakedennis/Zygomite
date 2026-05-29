@@ -20,8 +20,7 @@ pub fn init_global_rayon() -> Result<usize> {
         }
         Err(std::env::VarError::NotPresent) => std::thread::available_parallelism()
             .map(usize::from)
-            .unwrap_or(1)
-            .min(4),
+            .unwrap_or(1),
         Err(err) => bail!("reading RS3_CACHE_RS_THREADS: {err}"),
     };
 

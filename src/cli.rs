@@ -1753,7 +1753,6 @@ fn run_cs2(
     let opcode_book = OpcodeBook::load(data_dir, version.build, version.subbuild)?;
     let index = cache.archive_index(ARCHIVE_CLIENTSCRIPTS)?;
     let keep_decoded = out_file.is_some();
-    let write_source = out_dir.is_some();
     let script_group_names = load_script_group_names(&index, data_dir)?;
 
     if let Some(path) = out_dir {
@@ -1765,10 +1764,23 @@ fn run_cs2(
     let mut opcode_names = HashMap::<String, usize>::new();
     let mut decoded_all = Vec::new();
 
-    if write_source {
-        for group in &index.group_id {
+    struct GroupCs2Result {
+        scripts: usize,
+        instructions: usize,
+        opcode_counts: HashMap<String, usize>,
+        decoded: Vec<CompiledScript>,
+    }
+
+    let group_results = index
+        .group_id
+        .par_iter()
+        .map(|group| -> Result<GroupCs2Result> {
             let files = cache.group_files_with_index(&index, ARCHIVE_CLIENTSCRIPTS, *group)?;
             let single_file_group = files.len() == 1;
+            let mut scripts = 0_usize;
+            let mut instructions = 0_usize;
+            let mut opcode_counts = HashMap::<String, usize>::new();
+            let mut decoded = Vec::new();
 
             for (file, bytes) in files {
                 let script = match decode_script(&bytes, &opcode_book, version.build) {
@@ -1784,10 +1796,9 @@ fn run_cs2(
                 scripts += 1;
                 instructions += script.code.len();
                 for instruction in &script.code {
-                    *opcode_names.entry(instruction.command.clone()).or_insert(0) += 1;
-                }
-                if keep_decoded {
-                    decoded_all.push(script.clone());
+                    *opcode_counts
+                        .entry(instruction.command.clone())
+                        .or_insert(0) += 1;
                 }
 
                 if let Some(dir) = out_dir {
@@ -1805,67 +1816,30 @@ fn run_cs2(
                     let path = dir.join(file_name);
                     write_text(&path, &format_script_source(*group, file, &script))?;
                 }
-            }
-        }
-    } else {
-        struct GroupCs2Result {
-            scripts: usize,
-            instructions: usize,
-            opcode_counts: HashMap<String, usize>,
-            decoded: Vec<CompiledScript>,
-        }
 
-        let group_results = index
-            .group_id
-            .par_iter()
-            .map(|group| -> Result<GroupCs2Result> {
-                let files = cache.group_files_with_index(&index, ARCHIVE_CLIENTSCRIPTS, *group)?;
-                let mut scripts = 0_usize;
-                let mut instructions = 0_usize;
-                let mut opcode_counts = HashMap::<String, usize>::new();
-                let mut decoded = Vec::new();
-
-                for (_, bytes) in files {
-                    let script = match decode_script(&bytes, &opcode_book, version.build) {
-                        Ok(s) => s,
-                        Err(e) => {
-                            if version.build < MIN_SCRIPT_BUILD {
-                                continue;
-                            }
-                            return Err(e.into());
-                        }
-                    };
-                    for instruction in &script.code {
-                        *opcode_counts
-                            .entry(instruction.command.clone())
-                            .or_insert(0) += 1;
-                    }
-                    instructions += script.code.len();
-                    scripts += 1;
-                    if keep_decoded {
-                        decoded.push(script);
-                    }
+                if keep_decoded {
+                    decoded.push(script);
                 }
+            }
 
-                Ok(GroupCs2Result {
-                    scripts,
-                    instructions,
-                    opcode_counts,
-                    decoded,
-                })
+            Ok(GroupCs2Result {
+                scripts,
+                instructions,
+                opcode_counts,
+                decoded,
             })
-            .collect::<Vec<_>>();
+        })
+        .collect::<Vec<_>>();
 
-        for result in group_results {
-            let result = result?;
-            scripts += result.scripts;
-            instructions += result.instructions;
-            for (opcode, count) in result.opcode_counts {
-                *opcode_names.entry(opcode).or_insert(0) += count;
-            }
-            if keep_decoded {
-                decoded_all.extend(result.decoded);
-            }
+    for result in group_results {
+        let result = result?;
+        scripts += result.scripts;
+        instructions += result.instructions;
+        for (opcode, count) in result.opcode_counts {
+            *opcode_names.entry(opcode).or_insert(0) += count;
+        }
+        if keep_decoded {
+            decoded_all.extend(result.decoded);
         }
     }
 
@@ -1908,37 +1882,6 @@ fn run_models(
 
     if let Some(path) = out_dir {
         fs::create_dir_all(path).with_context(|| format!("failed creating {}", path.display()))?;
-        let mut parsed = Vec::new();
-        let mut parsed_count = 0_usize;
-        let mut parse_errors = 0_usize;
-
-        for group in &groups {
-            let files = cache.group_files_with_index(&index, ARCHIVE_MODELS_RT7, *group)?;
-            let Some(bytes) = files.get(&0) else {
-                continue;
-            };
-            match Model::decode(bytes, build) {
-                Ok(model) => {
-                    parsed_count += 1;
-                    let model_path = path.join(format!("model_{group}.json"));
-                    write_json(&model_path, &model)?;
-                    if out_file.is_some() {
-                        parsed.push((*group, model));
-                    }
-                }
-                Err(_) => {
-                    parse_errors += 1;
-                }
-            }
-        }
-
-        if let Some(path) = out_file {
-            write_json(path, &parsed)?;
-        }
-        return print_json(&ModelsSummary {
-            groups_parsed: parsed_count,
-            parse_errors,
-        });
     }
 
     struct ModelGroupResult {
@@ -1960,11 +1903,17 @@ fn run_models(
                 });
             };
             match Model::decode(bytes, build) {
-                Ok(model) => Ok(ModelGroupResult {
-                    parsed_count: 1,
-                    parse_errors: 0,
-                    parsed_model: keep_models.then_some((*group, model)),
-                }),
+                Ok(model) => {
+                    if let Some(dir) = out_dir {
+                        let model_path = dir.join(format!("model_{group}.json"));
+                        write_json(&model_path, &model)?;
+                    }
+                    Ok(ModelGroupResult {
+                        parsed_count: 1,
+                        parse_errors: 0,
+                        parsed_model: keep_models.then_some((*group, model)),
+                    })
+                }
                 Err(_) => Ok(ModelGroupResult {
                     parsed_count: 0,
                     parse_errors: 1,
@@ -7179,7 +7128,7 @@ mod tests {
     }
 
     #[test]
-    fn index_exports_smoke_parse_as_typescript_export_list() {
+    fn index_exports_source_has_balanced_unescaped_braces() {
         let source = index_exports_source();
 
         assert!(!source.contains("{{"));
