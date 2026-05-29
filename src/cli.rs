@@ -4286,6 +4286,7 @@ fn build_reverse_compile_context_from_catalog(
 fn finalize_reversible_transpile_output(
     source: String,
     reverse_ctx: &ReverseCompileContext,
+    opcode_book: &OpcodeBook,
     diagnostics: &mut crate::transpile::Diagnostics,
     editable_structured: &mut bool,
     blocking_diagnostics: &mut Vec<String>,
@@ -4295,26 +4296,20 @@ fn finalize_reversible_transpile_output(
     }
 
     let parsed = parse_reversible_source(&source)?;
-    let mut metadata = parsed.metadata;
-    if metadata.editable_structured {
-        match parse_structured_typescript(&parsed.structured_source).and_then(|structured| {
-            lower_structured_script(&structured, &metadata, reverse_ctx).map(|_| ())
-        }) {
-            Ok(()) => {}
-            Err(err) => {
-                metadata.editable_structured = false;
-                if !metadata
-                    .blocking_diagnostics
-                    .iter()
-                    .any(|blocker| blocker == "reverse_unsupported")
-                {
-                    metadata
-                        .blocking_diagnostics
-                        .push("reverse_unsupported".to_string());
-                }
-                diagnostics.warning(format!("reverse compile unsupported: {err}"));
-            }
+    let mut metadata = parsed.metadata.clone();
+    if metadata.editable_structured
+        && let Err((blocker, message)) =
+            recompile_fidelity_check(&parsed, &metadata, reverse_ctx, opcode_book)
+    {
+        metadata.editable_structured = false;
+        if !metadata
+            .blocking_diagnostics
+            .iter()
+            .any(|existing| existing == blocker)
+        {
+            metadata.blocking_diagnostics.push(blocker.to_string());
         }
+        diagnostics.warning(message);
     }
 
     *editable_structured = metadata.editable_structured;
@@ -4324,6 +4319,60 @@ fn finalize_reversible_transpile_output(
         &metadata,
         &parsed.asm_trailer,
     )?)
+}
+
+/// A script is only truly `editable_structured` if its structured TS recompiles
+/// to the **same bytes** as the original. The original is the embedded ASM
+/// trailer (canonical); the candidate is the structured body lowered + encoded.
+/// Comparing them gates out scripts that lower cleanly but to different bytes —
+/// the false-editables that would silently corrupt the script if a user edited
+/// the structured form. Returns `Err((blocker, message))` to mark non-editable.
+fn recompile_fidelity_check(
+    parsed: &crate::transpile::ParsedReversibleSource,
+    metadata: &crate::transpile::ReversibleMetadata,
+    reverse_ctx: &ReverseCompileContext,
+    opcode_book: &OpcodeBook,
+) -> std::result::Result<(), (&'static str, String)> {
+    let build = metadata.build;
+    let original = parse_cs2_asm(&parsed.asm_trailer).map_err(|e| {
+        (
+            "reverse_unsupported",
+            format!("embedded ASM parse failed: {e}"),
+        )
+    })?;
+    let expected = encode_script(&original, opcode_book, build).map_err(|e| {
+        (
+            "reverse_unsupported",
+            format!("encoding original failed: {e}"),
+        )
+    })?;
+
+    let structured = parse_structured_typescript(&parsed.structured_source).map_err(|e| {
+        (
+            "reverse_unsupported",
+            format!("structured parse failed: {e}"),
+        )
+    })?;
+    let compiled = lower_structured_script(&structured, metadata, reverse_ctx).map_err(|e| {
+        (
+            "reverse_unsupported",
+            format!("structured lowering failed: {e}"),
+        )
+    })?;
+    let actual = encode_script(&compiled, opcode_book, build).map_err(|e| {
+        (
+            "reverse_unsupported",
+            format!("encoding structured failed: {e}"),
+        )
+    })?;
+
+    if actual != expected {
+        return Err((
+            "recompile_mismatch",
+            "structured recompile is not byte-identical to the original".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 fn screaming_snake(value: &str) -> String {
@@ -5108,6 +5157,7 @@ fn run_transpile_scripts(
                 let source = finalize_reversible_transpile_output(
                     source,
                     &reverse_ctx,
+                    &opcode_book,
                     &mut diagnostics,
                     &mut editable_structured,
                     &mut blocking_diagnostics,
@@ -5329,6 +5379,7 @@ fn run_filtered_transpile_scripts(
                 let source = finalize_reversible_transpile_output(
                     source,
                     &reverse_ctx,
+                    &opcode_book,
                     &mut diagnostics,
                     &mut editable_structured,
                     &mut blocking_diagnostics,
