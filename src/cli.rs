@@ -5091,7 +5091,14 @@ fn run_transpile_scripts(
         script_catalog_builder.add_script(packed_id_raw, data);
     }
     let script_catalog = script_catalog_builder.build();
-    let reverse_ctx = build_reverse_compile_context_from_catalog(&ctx, script_catalog.clone());
+    // The catalog is built `.without_return_types()` for speed, so its
+    // signatures read "unknown". The recompile-fidelity gate lowers through
+    // this context and would then treat every void call as int-returning,
+    // emitting a spurious pop_*_discard (the return->pop_int_discard mismatch
+    // cause). Return types are inferred lazily per referenced script into
+    // `signature_cache` below; mirror them into this context so the gate
+    // classifies calls the same way the renderer does.
+    let mut reverse_ctx = build_reverse_compile_context_from_catalog(&ctx, script_catalog.clone());
 
     let mut transpiler = Transpiler::new()
         .with_version(version.build, version.subbuild)
@@ -5177,6 +5184,14 @@ fn run_transpile_scripts(
                 &opcode_book,
                 version.build,
             );
+            // Mirror the inferred return type into the lowering context so the
+            // recompile-fidelity gate classifies this call (void vs value) the
+            // same way the renderer did.
+            if let Some(signature) = signature_cache.get(&metadata.packed_id) {
+                reverse_ctx
+                    .script_signatures
+                    .insert(metadata.packed_id, signature.clone());
+            }
         }
         ensure_transpile_script_signature(
             &mut signature_cache,
