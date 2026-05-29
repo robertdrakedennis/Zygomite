@@ -473,14 +473,18 @@ fn stack_effect(
     }
 }
 
-/// Stack effect of an opcode: `(pops, pushes, pushed_type)`. `pushed_type` is
-/// the stack the produced value lands on — used by the lowerer to recover a
-/// generic command call's result kind.
+/// Per-stack pop/push counts of an opcode, extracted from the client.
+///
+/// Used by the recovery (total counts), the lowerer (result kind via
+/// [`OpcodeStackEffect::pushed_type`]) and the validator (typed stack model).
 #[derive(Clone, Copy)]
 pub struct OpcodeStackEffect {
-    pub pops: usize,
-    pub pushes: usize,
-    pub pushed_type: PushedType,
+    pub int_pops: usize,
+    pub obj_pops: usize,
+    pub long_pops: usize,
+    pub int_pushes: usize,
+    pub obj_pushes: usize,
+    pub long_pushes: usize,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -490,6 +494,32 @@ pub enum PushedType {
     Long,
     None,
     Multi,
+}
+
+impl OpcodeStackEffect {
+    pub fn total_pops(&self) -> usize {
+        self.int_pops + self.obj_pops + self.long_pops
+    }
+
+    pub fn total_pushes(&self) -> usize {
+        self.int_pushes + self.obj_pushes + self.long_pushes
+    }
+
+    /// The stack a single pushed value lands on, for result-kind recovery;
+    /// `Multi` when more than one stack is pushed.
+    pub fn pushed_type(&self) -> PushedType {
+        match (
+            self.int_pushes > 0,
+            self.obj_pushes > 0,
+            self.long_pushes > 0,
+        ) {
+            (false, false, false) => PushedType::None,
+            (true, false, false) => PushedType::Int,
+            (false, true, false) => PushedType::Obj,
+            (false, false, true) => PushedType::Long,
+            _ => PushedType::Multi,
+        }
+    }
 }
 
 /// The client-extracted opcode stack-effect table (see
@@ -505,7 +535,7 @@ fn opcode_stack_effects() -> &'static std::collections::HashMap<&'static str, (u
     COUNTS.get_or_init(|| {
         opcode_stack_effect_full()
             .iter()
-            .map(|(&name, e)| (name, (e.pops, e.pushes)))
+            .map(|(&name, e)| (name, (e.total_pops(), e.total_pushes())))
             .collect()
     })
 }
@@ -522,27 +552,30 @@ fn opcode_stack_effect_full() -> &'static std::collections::HashMap<&'static str
                 continue;
             }
             let mut fields = line.split_whitespace();
-            let (Some(name), Some(pops), Some(pushes), Some(kind)) =
-                (fields.next(), fields.next(), fields.next(), fields.next())
+            let Some(name) = fields.next() else {
+                continue;
+            };
+            let counts: Vec<usize> = fields.filter_map(|f| f.parse().ok()).collect();
+            let [
+                int_pops,
+                obj_pops,
+                long_pops,
+                int_pushes,
+                obj_pushes,
+                long_pushes,
+            ] = counts[..]
             else {
                 continue;
-            };
-            let (Ok(pops), Ok(pushes)) = (pops.parse::<usize>(), pushes.parse::<usize>()) else {
-                continue;
-            };
-            let pushed_type = match kind {
-                "int" => PushedType::Int,
-                "obj" => PushedType::Obj,
-                "long" => PushedType::Long,
-                "multi" => PushedType::Multi,
-                _ => PushedType::None,
             };
             map.insert(
                 name,
                 OpcodeStackEffect {
-                    pops,
-                    pushes,
-                    pushed_type,
+                    int_pops,
+                    obj_pops,
+                    long_pops,
+                    int_pushes,
+                    obj_pushes,
+                    long_pushes,
                 },
             );
         }

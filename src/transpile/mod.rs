@@ -17,6 +17,7 @@ pub use cfg::{Block, build_cfg, detect_return_type, emit_structured};
 pub use codegen::{CodeGen, generate_program};
 pub use diagnostics::{Diagnostic, Diagnostics, Severity, Span};
 pub use expr_recovery::detect_return_type_from_recovered;
+pub use expr_recovery::opcode_stack_effect;
 pub use reversible_format::{
     ParsedReversibleSource, REVERSIBLE_FORMAT_VERSION, ReversibleMetadata,
     append_reversible_footer, blocking_diagnostics, editable_structured, is_reversible_source,

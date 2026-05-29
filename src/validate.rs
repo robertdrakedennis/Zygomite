@@ -1146,7 +1146,21 @@ impl<'a> Cs2Validator<'a> {
                 pops_long: 1,
                 ..StackEffect::none()
             },
-            _ => StackEffect::none(),
+            // Unmodelled command: use the client-extracted opcode stack-effect
+            // table so the validator's typed stacks track getters/config lookups/
+            // value ops (e.g. map_members, oc_name) instead of treating them as
+            // no-ops and falsely reporting StackUnderflow.
+            _ => crate::transpile::opcode_stack_effect(cmd).map_or_else(StackEffect::none, |e| {
+                StackEffect {
+                    pops_int: e.int_pops,
+                    pops_obj: e.obj_pops,
+                    pops_long: e.long_pops,
+                    pushes_int: e.int_pushes,
+                    pushes_obj: e.obj_pushes,
+                    pushes_long: e.long_pushes,
+                    pushes_unknown: 0,
+                }
+            }),
         }
     }
 

@@ -61,7 +61,7 @@ enum ValueKind {
 /// and the gate will block any genuine value use it can't represent.
 fn command_result_kind(command: &str) -> ValueKind {
     use super::expr_recovery::PushedType;
-    match super::expr_recovery::opcode_stack_effect(command).map(|e| e.pushed_type) {
+    match super::expr_recovery::opcode_stack_effect(command).map(|e| e.pushed_type()) {
         Some(PushedType::Int) => ValueKind::Int,
         Some(PushedType::Obj) => ValueKind::Object,
         Some(PushedType::Long) => ValueKind::Long,
