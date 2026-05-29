@@ -82,8 +82,8 @@ Status legend: `[ ]` todo · `[~]` in progress · `[x]` done
 The relooper structures the control flow; the remaining editable gain is locked behind making that
 structure recompile **byte-identically**. Gate-protected, measured via `transpile_coverage`.
 
-**Current gated baseline (full corpus): 947 = 3974/20577 = 19.31%, 910 = 3023/14313 = 21.12%**
-(up from the post-relooper 4.6%/5.9% — a 4.2x / 3.6x session gain, all byte-identity gated).
+**Current gated baseline (full corpus): 947 = 4735/20577 = 23.01%, 910 = 3739/14313 = 26.12%**
+(up from the post-relooper 4.6%/5.9% — a 5.0x / 4.4x session gain, all byte-identity gated).
 `recompile_mismatch` remains the dominant blocker (947 ~6600, 910 ~4400), now followed by
 `reverse_unsupported` (947 1436, 910 1145). Both are data-driven via `recompile_mismatch_cause:*`
 and `reverse_unsupported_cause:*` histograms.
@@ -128,20 +128,22 @@ Done this session (each gate-verified, byte-identity preserved):
   (callback id, watcher ids/count) through the typed-constant `emit_int_constant`. **+281 (947) /
   +218 (910)**; `ui_hook` 947->4.
 
-### Key finding: a large slice of the residual is corpus dead code, not a tool gap
-Investigating the dominant `recompile_mismatch` causes showed many are **degenerate / dead-code
-scripts**, not fixable by better structuring:
-- `branch_equals:operand` (~2540) is overwhelmingly **no-op forward branches** (target == next
-  instruction) compiled ahead of an early `return`, leaving the rest of the script **unreachable**
-  (`bool_to_int`, `meslayer_mode1-4`, `script48`). The CFG-adjacency handling renders these as
-  empty-then `if (cond) {} else {body}`, but the original bytes contain the no-op branch + dead body
-  that clean structuring correctly omits — so byte-identity is impossible and the ASM-trailer
-  fallback is the right answer (they stay non-editable). A sampled 200: ~42% empty-no-else
-  (degenerate), ~52% empty-then-with-else (also degenerate no-op-branch), ~5% genuine.
-  An attempted skip-if-false lowering for these netted **0** (correctly) and was reverted.
-- The structurer already handles **genuine** if/else (including both-arms-return) correctly; those
-  are in the editable set. So the practical ceiling for *clean-structured + byte-exact* on this
-  corpus is much nearer the current ~18-20% than the raw cause counts imply.
+- **✅ Branch/switch jump-target off-by-one (the big one).** `decode_operand` computed branch
+  targets as `index + offset`, but the client jumps to `index + offset + 1` (ScriptRunner does
+  `pc += operand` then the dispatch loop pre-increments `instructions[++pc]`; switch is the same) —
+  verified three ways against the client source. The bug was invisible to byte round-trip (decode
+  and encode shared the wrong convention) but shifted every CFG branch target one instruction early,
+  so genuine forward branches looked like no-ops and live guard-clause bodies looked like unreachable
+  dead code. Fixed with +1 in decode / -1 in encode for branches and switches. **+761 (947) / +716
+  (910) editable** — the largest single fix, and it corrects the decompiled control flow for every
+  branching script (readability), not just the gated ones.
+
+### Correction to an earlier "dead code" claim
+A prior pass concluded the dominant `branch_equals:operand` residual was corpus dead code (no-op
+branches + unreachable bodies in `bool_to_int`/`meslayer_mode1-4`/`script48`). **That was wrong** —
+it was the symptom of the off-by-one above. Those are genuine guard clauses (`if (cond) return;
+<body>`); with the corrected targets they structure correctly and recompile byte-identically. Lesson:
+byte round-trip alone cannot validate control-flow interpretation — cross-check the client VM.
 
 Next levers (genuine capability, not corpus artifacts):
 - [ ] **Recover result types for generic commands** so value-producing command calls (the ~912
