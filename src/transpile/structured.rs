@@ -356,10 +356,16 @@ fn format_unary_op(op: UnaryOp) -> &'static str {
 }
 
 fn escape_string(value: &str) -> String {
+    // Escape every char that would break a double-quoted TS string literal on
+    // re-parse (oxc) during recompile. A CS2 string constant containing a raw
+    // CR previously emitted a literal CR inside the quotes → unterminated-string
+    // parse error in assemble-script.
     value
         .replace('\\', "\\\\")
         .replace('"', "\\\"")
         .replace('\n', "\\n")
+        .replace('\r', "\\r")
+        .replace('\t', "\\t")
 }
 
 pub fn parse_type_annotation(value: &str) -> TypeAnnotation {

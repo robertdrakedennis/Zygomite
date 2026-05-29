@@ -75,10 +75,25 @@ Target `expr_recovery.rs` + `ts_lower.rs`.
 - [ ] **P3.2** Run it over the full editable set on both builds; fix any structured-recompile
   mismatch. As P1/P2 raise the editable set, this gate grows with it.
 
-## P4 — Adversarial audit of the decompile direction (unaudited half)
-- [ ] **P4.1** Apply the same multi-dimension audit used on the compiler to `expr_recovery.rs`,
-  `cfg.rs`, `codegen.rs`, `writer.rs`, `structured_writer.rs`: panics/`unreachable!`/`unwrap` on
-  real input, silent fallbacks, fidelity gaps, and the `reverse_unsupported`/comment escape hatches.
+## P4 — Adversarial audit of the decompile direction ✅ DONE (findings below)
+Audited `cfg.rs`, `expr_recovery.rs`, `codegen.rs`, `writer.rs`, `structured_writer.rs`,
+`structured.rs`. Key findings (drive P1/P2):
+- **cfg.rs structurer** recognizes only a single forward if/else diamond + single back-edge while;
+  no post-dominator/join analysis, **switch cases emitted with EMPTY bodies** (cfg.rs:687 → targets
+  strand as goto), multi-exit loops unhandled. Targeted wins: **switch-body reconstruction** (cheap,
+  big), **flush-unvisited-blocks guard** (fixes a *silent block-drop* miscompile). Full fix = a
+  Relooper-style pass (post-dominator if/else join + back-edge loops) — larger follow-up.
+- **expr_recovery.rs** `residual_pop` dominated by **unmodeled arithmetic/bit opcodes** (`random`,
+  `randominc`, `interpolate`, `addpercent`, `setbit`/`clearbit`/`testbit`, `pow`, `invpow`) → 0/0
+  stack effect strands operands; **`mod` vs `modulo`** name mismatch; **`pop_varbit` decoded as a
+  push** (store value stranded + lost). `reverse_unsupported` is an opaque catch-all — the real
+  error is captured then discarded; categorize it.
+- **codegen/writers**: `writer.rs` (whole `Writer`) + `codegen.rs::{generate_program,
+  format_instruction,format_operand_raw,format_command_name,sanitize_ts_ident,escape_ts_string}` are
+  **dead**; live path is `structured.rs::render`. `structured.rs::escape_string` **omits `\r`** (and
+  `\t`/U+2028-9) → a CS2 string constant with CR breaks oxc re-parse on recompile (correctness bug).
+- Panic surface low across all (the `unreachable!`s are guarded; convert to soft fallbacks as
+  defense-in-depth since this runs over untrusted cache bytes).
 
 ## P5 — Full-corpus & cross-build byte fidelity (lossless guarantee)
 - [ ] **P5.1** Run the byte-perfect roundtrip with `RS3_ROUNDTRIP_LIMIT=0` on the full 20,577 scripts
