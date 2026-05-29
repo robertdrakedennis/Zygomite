@@ -5,7 +5,6 @@ pub mod diagnostics;
 pub mod expr_recovery;
 pub mod reversible_format;
 pub mod scope;
-pub mod sema;
 pub mod structured;
 pub mod structured_writer;
 pub mod ts_lower;
@@ -23,7 +22,6 @@ pub use reversible_format::{
     parse_reversible_source, render_reversible_source, structured_digest,
 };
 pub use scope::{LocalType, Scope, Scopes, Symbol, SymbolKind, SymbolTable};
-pub use sema::Sema;
 pub use structured::{AssignmentTarget, StructuredScript, StructuredStmt, SwitchCaseStmt};
 pub use structured_writer::StructuredWriter;
 pub use ts_lower::{ReverseCompileContext, lower_structured_script};

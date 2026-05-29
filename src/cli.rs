@@ -265,6 +265,9 @@ pub enum Command {
         script_id: u32,
         #[arg(long)]
         out_file: Option<PathBuf>,
+        /// Emit the validation report as JSON to stdout
+        #[arg(long)]
+        json: bool,
     },
     /// Assemble reversible or pragma-annotated CS2 TypeScript back to CS2 binary.
     #[command(name = "assemble-script")]
@@ -287,6 +290,9 @@ pub enum Command {
         /// Skip post-compile verification (byte round-trip + stack validation)
         #[arg(long)]
         no_verify: bool,
+        /// Emit a structured JSON completion event to stdout
+        #[arg(long)]
+        json: bool,
     },
     /// Dump a lossless raw-flat cache tree for JS5 repacking.
     #[command(name = "dump-raw-flat")]
@@ -913,12 +919,14 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::ValidateScript {
             script_id,
             out_file,
+            json,
         } => run_validate_script(
             &cache,
             &tar_path,
             &cli.data_dir,
             script_id,
             out_file.as_deref(),
+            json,
             version,
         ),
         Command::AssembleScript {
@@ -928,6 +936,7 @@ pub fn run(cli: Cli) -> Result<()> {
             subbuild,
             strict_structured,
             no_verify,
+            json,
         } => run_assemble_script(
             &cache,
             &tar_path,
@@ -938,6 +947,7 @@ pub fn run(cli: Cli) -> Result<()> {
             subbuild,
             strict_structured,
             no_verify,
+            json,
             version,
         ),
         Command::DumpRawFlat { out_dir, archives } => {
@@ -3880,11 +3890,17 @@ fn run_validate_script(
     data_dir: &Path,
     script_id: u32,
     out_file: Option<&Path>,
+    emit_json: bool,
     version: RuntimeVersion,
 ) -> Result<()> {
     let ctx = ResolverContext::load(cache, tar_path, data_dir, version.build, version.subbuild)?;
     let validator = crate::validate::Cs2Validator::new(&ctx);
     let report = validator.validate(script_id);
+
+    if emit_json {
+        println!("{}", serde_json::to_string(&report)?);
+        return Ok(());
+    }
 
     if let Some(path) = out_file {
         let json = serde_json::to_string_pretty(&report)?;
@@ -3969,8 +3985,10 @@ fn run_assemble_script(
     subbuild: Option<u32>,
     strict_structured: bool,
     no_verify: bool,
+    emit_json: bool,
     version: RuntimeVersion,
 ) -> Result<()> {
+    let started = Instant::now();
     let source =
         std::fs::read_to_string(input).with_context(|| format!("reading {}", input.display()))?;
     let reversible = if is_reversible_source(&source) {
@@ -4072,14 +4090,30 @@ fn run_assemble_script(
 
     std::fs::write(output, &binary).with_context(|| format!("writing {}", output.display()))?;
 
-    eprintln!(
-        "Assembled {} instructions → {} ({} bytes, build {}, mode {})",
-        script.code.len(),
-        output.display(),
-        binary.len(),
-        effective_build,
-        assemble_mode,
-    );
+    if emit_json {
+        let event = serde_json::json!({
+            "event": "assemble_script",
+            "outcome": "ok",
+            "build": effective_build,
+            "subbuild": effective_subbuild,
+            "mode": assemble_mode,
+            "instruction_count": script.code.len(),
+            "bytes": binary.len(),
+            "verified": !no_verify,
+            "output": output.display().to_string(),
+            "duration_ms": started.elapsed().as_millis() as u64,
+        });
+        println!("{}", serde_json::to_string(&event)?);
+    } else {
+        eprintln!(
+            "Assembled {} instructions → {} ({} bytes, build {}, mode {})",
+            script.code.len(),
+            output.display(),
+            binary.len(),
+            effective_build,
+            assemble_mode,
+        );
+    }
     Ok(())
 }
 

@@ -981,7 +981,8 @@ pub fn parse_cs2_asm(source: &str) -> Result<CompiledScript> {
     let mut pending_switch_cases: Vec<SwitchCase> = Vec::new();
     let mut pending_switch_open = false;
 
-    for raw_line in source.lines() {
+    for (line_idx, raw_line) in source.lines().enumerate() {
+        let line_no = line_idx + 1;
         let line = raw_line.trim();
 
         // Only process @cs2 pragma lines
@@ -1016,7 +1017,8 @@ pub fn parse_cs2_asm(source: &str) -> Result<CompiledScript> {
                 &mut local_count_int,
                 &mut local_count_object,
                 &mut local_count_long,
-            )?;
+            )
+            .with_context(|| format!("line {line_no}: {line}"))?;
             continue;
         }
 
@@ -1026,7 +1028,8 @@ pub fn parse_cs2_asm(source: &str) -> Result<CompiledScript> {
                 &mut argument_count_int,
                 &mut argument_count_object,
                 &mut argument_count_long,
-            )?;
+            )
+            .with_context(|| format!("line {line_no}: {line}"))?;
             continue;
         }
 
@@ -1034,8 +1037,12 @@ pub fn parse_cs2_asm(source: &str) -> Result<CompiledScript> {
         if let Some(case_str) = cs2_content.strip_prefix("case ") {
             let parts: Vec<&str> = case_str.split_whitespace().collect();
             if parts.len() >= 2 {
-                let value = parts[0].parse::<i32>().context("invalid case value")?;
-                let target = parts[1].parse::<i32>().context("invalid case target")?;
+                let value = parts[0]
+                    .parse::<i32>()
+                    .with_context(|| format!("line {line_no}: invalid case value in `{line}`"))?;
+                let target = parts[1]
+                    .parse::<i32>()
+                    .with_context(|| format!("line {line_no}: invalid case target in `{line}`"))?;
                 pending_switch_cases.push(SwitchCase { value, target });
             }
             pending_switch_open = true;
@@ -1067,7 +1074,8 @@ pub fn parse_cs2_asm(source: &str) -> Result<CompiledScript> {
         instructions.push(Instruction {
             opcode: 0,
             command: opcode_name.to_string(),
-            operand: parse_operand_asm(opcode_name, operand_text)?,
+            operand: parse_operand_asm(opcode_name, operand_text)
+                .with_context(|| format!("line {line_no}: {line}"))?,
         });
     }
 

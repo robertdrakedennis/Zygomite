@@ -53,18 +53,30 @@ Status legend: `[ ]` todo · `[~]` in progress · `[x]` done · `[-]` deferred (
 - [x] **C10 — String-array path** — `array_N[..] = <string>` now bails cleanly (no
   `pop_array_string` opcode exists); also covered defensively by C2's `finish()` book check.
 
-## Batch D — Tier 4: quality / dead code / coverage / diagnostics
+## Batch D — Tier 4: quality / dead code / coverage / diagnostics ✅ DONE (commit pending)
 
-- [ ] **C11 — Dead `sema.rs`** — `Sema::new` has zero call sites; all diagnostics are
-  warning/note with no spans (can never block). Remove the dead module (+ scope.rs machinery only
-  it uses) to end the false "semantic checking exists" signal. (Real checks land via C7.)
-- [ ] **C12 — Close the roundtrip test gap** (`tests/real_cache.rs`). Assert
-  `encode_script(parse_cs2_asm(asm)) == original_bytes` on the ASM path so symmetric encode/decode
-  bugs (C5, C9) are caught.
-- [ ] **C13 — Structured/`--json` diagnostics for `assemble-script`/`validate-script`** — one
-  canonical event (`event/outcome/duration_ms/build/subbuild/script_id/errors`).
-- [ ] **C14 — Line numbers in ASM parse errors** (`parse_cs2_asm`). Thread a 1-based line index
-  and wrap operand errors with `line N: <text>` context.
+- [x] **C11 — Removed dead `sema.rs`** (+ its `mod.rs` re-exports). Kept `scope.rs` — it is NOT
+  dead (the decompile `codegen.rs` uses `SymbolTable`). The audit's "scope serves only sema" was
+  wrong.
+- [x] **C12 — True byte-identity roundtrip** — both 910 and 947 byte-perfect tests now assert
+  `encode_script(decoded) == data` AND `encode_script(parse_cs2_asm(asm)) == data` against the
+  original cache bytes (100 scripts each, passing). The "byte-identical" claim is now actually
+  proven, not just structural.
+- [x] **C13 — `--json`** on `assemble-script` (canonical completion event: event/outcome/build/
+  subbuild/mode/instruction_count/bytes/verified/duration_ms) and `validate-script` (report JSON
+  to stdout).
+- [x] **C14 — ASM parse errors carry `line N: <text>`** — loop enumerated; parse_counts, switch
+  case, and operand parses wrapped with line context.
+
+## Verification (final)
+- `cargo clippy --all-targets` (pedantic+nursery+cargo): clean. `cargo fmt --check`: clean.
+- `cargo test --lib`: 118 passed.
+- `reversible_ts`: 5/5 (real 910 + 947 assemble). `real_cache` byte-perfect roundtrip: 910 + 947
+  100 scripts each, byte-identical.
+- `ts_export`: 8/9. The 1 failure (`transpile_script621_947_uses_group_name_and_signature`) is
+  **pre-existing** — it fails identically at base commit 2f0d6a1 (before any audit change). Cause:
+  `--filter-script script621 --subbuild 0` doesn't resolve to group 621 (real 947 data is
+  subbuild 1); a test/data issue, not a compiler bug. Flagged for separate follow-up.
 
 ---
 

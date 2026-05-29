@@ -434,6 +434,19 @@ fn asm_encode_roundtrip_byte_perfect() -> Result<()> {
             // Roundtrip 2: binary encode (decode → encode → decode → compare)
             let encoded = encode_script(&original, &opcode_book, BUILD)?;
             let re_decoded = decode_script(&encoded, &opcode_book, BUILD)?;
+
+            // Roundtrip 3: true byte-identity against the original cache bytes,
+            // for both the decoded script and the ASM-parsed script. This catches
+            // symmetric encode/decode bugs the structural comparisons above miss.
+            assert_eq!(
+                encoded, data,
+                "binary re-encode not byte-identical for {context}"
+            );
+            let asm_encoded = encode_script(&from_asm, &opcode_book, BUILD)?;
+            assert_eq!(
+                asm_encoded, data,
+                "ASM re-encode not byte-identical for {context}"
+            );
             assert_eq!(original.name, re_decoded.name, "name mismatch via binary");
             assert_eq!(original.local_count_int, re_decoded.local_count_int);
             assert_eq!(original.local_count_object, re_decoded.local_count_object);
@@ -603,6 +616,17 @@ fn asm_encode_roundtrip_byte_perfect_910() -> Result<()> {
             // Binary roundtrip
             let encoded = encode_script(&original, &opcode_book, BUILD_910)?;
             let re_decoded = decode_script(&encoded, &opcode_book, BUILD_910)?;
+
+            // True byte-identity against the original cache bytes (decoded + ASM).
+            assert_eq!(
+                encoded, data,
+                "910 binary re-encode not byte-identical for {context}"
+            );
+            let asm_encoded = encode_script(&from_asm, &opcode_book, BUILD_910)?;
+            assert_eq!(
+                asm_encoded, data,
+                "910 ASM re-encode not byte-identical for {context}"
+            );
             assert_eq!(
                 original.name, re_decoded.name,
                 "910 name mismatch via binary for {context}"
