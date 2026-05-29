@@ -66,16 +66,29 @@ Status legend: `[ ]` todo · `[~]` in progress · `[x]` done
   5.9% (849/14313)** vs the previously-claimed 8.7% / 12.2%. Editable is now provably-recompilable
   by construction; a dev harness (`/tmp/p1validate.sh`: assemble default-vs-`--strict-structured`,
   compare) confirmed 79/79 editable scripts recompile, 0 mismatch. Committed.
-- **P1 ⬜ (foundation done; structuring next).** The recompile gate is the P1 *foundation*: it
-  de-risks all structuring work — any improvement that doesn't recompile correctly simply won't
-  count (no false-editables). The structuring algorithms still need building, gate-protected:
-  1. **Switch-body reconstruction** (cfg.rs:683 emits empty case bodies; CFG already has the case
-     edges + `instr_to_block`). Needs join (immediate post-dominator) detection. CS2 is switch-heavy
-     — likely the biggest single bucket.
-  2. **Relooper-style if/else-join + back-edge loops** to kill `residual_goto`/`commented_branch`.
-  3. **Flush-unvisited-blocks guard** (correctness: the structurer can silently drop unreached blocks).
-  Honest gated blockers (947): residual_goto 12773, commented_branch 10068, reverse_unsupported
-  5281, residual_pop 3776, recompile_mismatch 1155.
+- **P1 ✅ (relooper landed; structural blockers solved).** Replaced the ad-hoc emitter with a
+  dominator/immediate-post-dominator **region structurer** (`structurer.rs`): if/else joined at the
+  ipdom, natural-loop `while`+break/continue, switch case-body regions, conservative goto fallback,
+  depth-guarded. Gate-protected. Results:
+  - 947 gated editable **3.0% → 4.6%** (620 → 949, +53%); 910 flat at 5.9% (no regression).
+  - Original dominant blockers collapsed on both: `commented_branch` 10068/7292 **→ 0**;
+    `residual_goto` 12773 **→ 3816** (947), 9070 **→ 2626** (910).
+  - **The bottleneck moved downstream** to round-trip byte fidelity: blockers now dominated by
+    `reverse_unsupported` (947 8444 / 910 5788 — ts_lower can't re-lower some structured forms) and
+    `recompile_mismatch` (947 4436 / 910 3030 — structurer output recompiles to slightly-different
+    bytes, e.g. branch polarity / empty-else layout). These gate-block the now-structured scripts.
+
+## P1b — round-trip byte fidelity (the new frontier; gated, safe)
+The relooper structures the control flow; the remaining editable gain is locked behind making that
+structure recompile **byte-identically**. Next, gate-protected, measured via `transpile_coverage`:
+- [ ] **Categorize `reverse_unsupported`** (instrument each `ts_lower` `bail!` with a tag) to turn
+  the 8444/5788 opaque count into ranked buckets.
+- [ ] **Branch-fidelity**: align the structurer's if/else (and `ts_lower`'s `emit_condition`) with
+  the original branch polarity (skip-if-false `branch_not` vs `branch`+`branch_not`), the dominant
+  `recompile_mismatch` cause.
+- [ ] **Switch/loop byte-layout fidelity**: ensure reconstructed switch/while lower to the exact
+  original instruction layout.
+- [ ] Remove the now-dead `StructuredEmitter` from `cfg.rs` (the relooper replaced it).
 
 ## P1 — Control-flow recovery (the dominant lever: ~62%+49% of corpus)
 Target `cfg.rs` (build_cfg / emit_structured) + the branch/goto handling.
