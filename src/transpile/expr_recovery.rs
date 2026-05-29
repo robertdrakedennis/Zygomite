@@ -421,35 +421,13 @@ fn stack_effect(
         "enum_getreverseindex" => StackEffect { pops: 5, pushes: 1 },
         "enum_getreverseindex_string" => StackEffect { pops: 4, pushes: 1 },
 
-        // ── Component getters and value ops (effects extracted from the client
-        // ScriptRunner; counts are int+string-stack totals since recovery uses a
-        // single unified expression stack). These push a value the default
-        // CC/IF categorisation modelled as a void pop, stranding the result and
-        // forcing a residual pop(). Only single-push getters are listed; the
-        // few that push two values (dimensions/invcount/getop/getopbase/
-        // nextsubid) need multi-value recovery and are intentionally left to the
-        // default until that lands. ──
-        // cc_* getters operate on the current component (no argument).
-        "cc_get2dangle" | "cc_getcolour" | "cc_getfontgraphic" | "cc_getfontmetrics"
-        | "cc_getgraphic" | "cc_getheight" | "cc_gethide" | "cc_getid" | "cc_getinvobject"
-        | "cc_getlayer" | "cc_getmodel" | "cc_getmodelangle_x" | "cc_getmodelangle_y"
-        | "cc_getmodelangle_z" | "cc_getmodelxof" | "cc_getmodelyof" | "cc_getmodelzoom"
-        | "cc_getparentlayer" | "cc_getscrollheight" | "cc_getscrollwidth" | "cc_getscrollx"
-        | "cc_getscrolly" | "cc_gettargetmask" | "cc_gettext" | "cc_gettrans" | "cc_getwidth"
-        | "cc_getx" | "cc_gety" | "if_gettop" | "clientclock" => StackEffect { pops: 0, pushes: 1 },
-        // if_* getters take an explicit component id.
-        "if_get2dangle" | "if_getcolour" | "if_getfontgraphic" | "if_getfontmetrics"
-        | "if_getgraphic" | "if_getheight" | "if_gethide" | "if_getinvobject" | "if_getlayer"
-        | "if_getmodel" | "if_getmodelangle_x" | "if_getmodelangle_y" | "if_getmodelangle_z"
-        | "if_getmodelxof" | "if_getmodelyof" | "if_getmodelzoom" | "if_getparentlayer"
-        | "if_getscrollheight" | "if_getscrollwidth" | "if_getscrollx" | "if_getscrolly"
-        | "if_gettargetmask" | "if_gettrans" | "if_getwidth" | "if_getx" | "if_gety"
-        | "tostring" | "oc_name" | "string_length" => StackEffect { pops: 1, pushes: 1 },
-        "max" | "min" | "testbit" | "append" | "tostring_localised" => {
-            StackEffect { pops: 2, pushes: 1 }
-        }
-        "scale" => StackEffect { pops: 3, pushes: 1 },
-        "movecoord" => StackEffect { pops: 4, pushes: 1 },
+        // Component getters and value ops (cc_get*/if_get*, tostring, max, min,
+        // oc_name, scale, testbit, append, movecoord, ...) are now supplied by
+        // the client-extracted opcode table consulted in the default arm. Only
+        // `string_length` keeps an explicit entry: its handler's null-check
+        // branch makes the static extractor double-count the push (1->2), so the
+        // hand value overrides the table.
+        "string_length" => StackEffect { pops: 1, pushes: 1 },
 
         // The explicit arms above are hand-verified and win; for everything else
         // consult the client-extracted opcode table (the long tail of getters,
@@ -457,8 +435,11 @@ fn stack_effect(
         // default. A wrong table effect only leaves its scripts gate-blocked,
         // never miscompiles.
         _ => {
-            if let Some(&(pops, pushes)) = opcode_stack_effects().get(cmd) {
-                StackEffect { pops, pushes }
+            if let Some(effect) = opcode_stack_effect_full().get(cmd) {
+                StackEffect {
+                    pops: effect.total_pops(),
+                    pushes: effect.total_pushes(),
+                }
             } else {
                 match categorize(cmd) {
                     OpcodeCategory::Push => StackEffect { pops: 0, pushes: 1 },
@@ -527,17 +508,6 @@ impl OpcodeStackEffect {
 /// command name; build independent.
 pub fn opcode_stack_effect(command: &str) -> Option<OpcodeStackEffect> {
     opcode_stack_effect_full().get(command).copied()
-}
-
-fn opcode_stack_effects() -> &'static std::collections::HashMap<&'static str, (usize, usize)> {
-    static COUNTS: std::sync::OnceLock<std::collections::HashMap<&'static str, (usize, usize)>> =
-        std::sync::OnceLock::new();
-    COUNTS.get_or_init(|| {
-        opcode_stack_effect_full()
-            .iter()
-            .map(|(&name, e)| (name, (e.total_pops(), e.total_pushes())))
-            .collect()
-    })
 }
 
 fn opcode_stack_effect_full() -> &'static std::collections::HashMap<&'static str, OpcodeStackEffect>

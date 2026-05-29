@@ -55,6 +55,29 @@ pub struct SwitchCaseStmt {
     pub body: Vec<StructuredStmt>,
 }
 
+/// Whether a statement unconditionally leaves its block — it returns, breaks,
+/// continues, gotos, or is an `if` whose arms all do.
+pub fn stmt_terminates(stmt: &StructuredStmt) -> bool {
+    match stmt {
+        StructuredStmt::Return { .. }
+        | StructuredStmt::Break
+        | StructuredStmt::Continue
+        | StructuredStmt::Goto { .. } => true,
+        StructuredStmt::If {
+            then_body,
+            else_body: Some(else_body),
+            ..
+        } => stmts_terminate(then_body) && stmts_terminate(else_body),
+        _ => false,
+    }
+}
+
+/// Whether a statement sequence unconditionally leaves its block (its last
+/// statement does).
+pub fn stmts_terminate(stmts: &[StructuredStmt]) -> bool {
+    stmts.last().is_some_and(stmt_terminates)
+}
+
 #[derive(Debug, Clone)]
 pub struct StructuredScript {
     pub script_id: ScriptId,

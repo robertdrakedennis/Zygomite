@@ -1,7 +1,7 @@
 use super::ast::{BinaryOp, Expression, ScriptId, TypeAnnotation, UnaryOp};
 use super::reversible_format::ReversibleMetadata;
 use super::structured::{
-    AssignmentTarget, StructuredScript, StructuredStmt, parse_type_annotation,
+    AssignmentTarget, StructuredScript, StructuredStmt, parse_type_annotation, stmts_terminate,
 };
 use super::{ScriptCatalog, ScriptSignature};
 use crate::cache_bail as bail;
@@ -72,27 +72,6 @@ fn command_result_kind(command: &str) -> ValueKind {
 /// Lowering label for a `goto`/`label` target (an instruction-start index).
 fn block_label(target: usize) -> String {
     format!("block_{target}")
-}
-
-/// Whether a statement sequence unconditionally leaves its block — its last
-/// statement returns, breaks, continues, gotos, or is an if/else whose arms all
-/// do. Used to decide whether a fall-through jump after a block is reachable
-/// (and thus whether the original compiler would have emitted it).
-fn stmts_terminate(stmts: &[StructuredStmt]) -> bool {
-    match stmts.last() {
-        Some(
-            StructuredStmt::Return { .. }
-            | StructuredStmt::Break
-            | StructuredStmt::Continue
-            | StructuredStmt::Goto { .. },
-        ) => true,
-        Some(StructuredStmt::If {
-            then_body,
-            else_body: Some(else_body),
-            ..
-        }) => stmts_terminate(then_body) && stmts_terminate(else_body),
-        _ => false,
-    }
 }
 
 pub fn lower_structured_script(
