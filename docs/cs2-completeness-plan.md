@@ -80,14 +80,41 @@ Status legend: `[ ]` todo · `[~]` in progress · `[x]` done
 
 ## P1b — round-trip byte fidelity (the new frontier; gated, safe)
 The relooper structures the control flow; the remaining editable gain is locked behind making that
-structure recompile **byte-identically**. Next, gate-protected, measured via `transpile_coverage`:
-- [ ] **Categorize `reverse_unsupported`** (instrument each `ts_lower` `bail!` with a tag) to turn
-  the 8444/5788 opaque count into ranked buckets.
-- [ ] **Branch-fidelity**: align the structurer's if/else (and `ts_lower`'s `emit_condition`) with
-  the original branch polarity (skip-if-false `branch_not` vs `branch`+`branch_not`), the dominant
-  `recompile_mismatch` cause.
-- [ ] **Switch/loop byte-layout fidelity**: ensure reconstructed switch/while lower to the exact
-  original instruction layout.
+structure recompile **byte-identically**. Gate-protected, measured via `transpile_coverage`.
+
+**Current gated baseline (full corpus): 947 = 2707/20577 = 13.16%, 910 = 2029/14313 = 14.18%**
+(up from the post-relooper 4.6%/5.9%). `recompile_mismatch` is now the dominant blocker
+(947 7378, 910 5030). Made data-driven via the `recompile_mismatch_cause:*` histogram.
+
+Done this session (each gate-verified, byte-identity preserved):
+- **✅ Rank `recompile_mismatch` by cause.** `recompile_fidelity_check` classifies the first
+  divergence into a low-cardinality `recompile_mismatch_cause:<orig>-><emitted>` bucket. Turned the
+  opaque blocker into a ranked histogram — every fix below was chosen from it.
+- **✅ Typed-constant int encoding.** The RT7 corpus encodes int constants as the typed-constant
+  `push_constant_string` (int tag), not `push_constant_int`. Switched the `NumberLiteral` lowering;
+  fixed `validate.rs` to resolve the typed-constant stack effect from its operand tag (was a latent
+  false `StackUnderflow`). Cleared the #1 cause (2527 on 947). +81/+77 editable.
+- **✅ Void-call return-type inference in the gate.** The bulk `--all-scripts` path built its catalog
+  `.without_return_types()`, so the gate's reverse context treated every void sub-proc call as
+  int-returning and emitted a spurious `pop_*_discard` (the #2 cause, return->pop_int_discard, 1532).
+  Now mirrors the renderer's lazily-inferred signatures into the reverse context. **+1673 (947) /
+  +1101 (910) editable** — by far the largest win; the spurious discard also cascaded into length
+  mismatches, so fixing it unblocked more than its first-divergence count.
+
+Next, from the current cause histogram (947):
+- [ ] **Branch-operand fidelity** (`branch_equals:operand` 1699, `branch_greater_than`/`less_than`
+  ~190 each — now the dominant cause). The structurer/`emit_condition` reconstructs a branch whose
+  instruction-relative target differs from the original (polarity or region split). NB branch
+  offsets are instruction-relative (`script.rs` pass-2 `target - instr_index`), **not** byte-relative
+  — so this is a structural/polarity mismatch, not a byte cascade.
+- [ ] **UI method aliasing** (`if_sethide->cc_sethide` 493, `if_setgraphic->cc_setgraphic`, …):
+  the lowering emits the component-context `cc_*` opcode where the original used the
+  interface-context `if_*` form. Pick the opcode the original used (likely keyed on whether the
+  target is an explicit component id).
+- [ ] **`length:structured_shorter`** (525): the structured form lowers to fewer instructions than
+  the original — a dropped/absorbed instruction. Investigate per-cause.
+- [ ] **Categorize `reverse_unsupported`** (instrument each `ts_lower` `bail!` with a tag) to rank
+  the 3744/2608 opaque count.
 - [ ] Remove the now-dead `StructuredEmitter` from `cfg.rs` (the relooper replaced it).
 
 ## P1 — Control-flow recovery (the dominant lever: ~62%+49% of corpus)
