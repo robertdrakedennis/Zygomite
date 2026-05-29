@@ -595,15 +595,24 @@ impl<'a> StructuredLowerer<'a> {
             }
             method if method.starts_with("Seton") => self.emit_ui_hook_call(method, arguments),
             method => {
-                // Generic inverse of the decompiler's `UI.<CamelCase(cc-suffix)>`
-                // naming: map back to `cc_<lowercase>` when that opcode exists
-                // for the build. Covers every single-word set-method (both the
-                // decompiler's `Sethide`/`Settext` and hand-written `setHide`)
-                // without a hardcoded list. Underscore-bearing opcodes keep
-                // explicit mappings since the camelCase form is lossy.
-                let generic = format!("cc_{}", method.to_ascii_lowercase());
-                let command: String = if self.ctx.has_command(&generic) {
-                    generic
+                // Generic inverse of the decompiler's UI naming. The decompiler
+                // renders generic `if_*`/`cc_*` set-methods via `sanitize_camel`
+                // (capital first letter, e.g. `if_sethide` -> `UI.Sethide`),
+                // while explicit `cc_*` cases keep lowercase-first camelCase
+                // (`cc_sethide` -> `UI.setHide`). So a capital-first method
+                // backed by an `if_*` opcode is the interface-targeted form and
+                // must lower to `if_<lower>`, not the current-component
+                // `cc_<lower>` (the if_sethide->cc_sethide mismatch). Otherwise
+                // fall back to `cc_<lower>`. The recompile gate is the backstop
+                // for the rare opcodes that decompile to a colliding name.
+                let lower = method.to_ascii_lowercase();
+                let starts_upper = method.starts_with(|c: char| c.is_ascii_uppercase());
+                let if_form = format!("if_{lower}");
+                let cc_form = format!("cc_{lower}");
+                let command: String = if starts_upper && self.ctx.has_command(&if_form) {
+                    if_form
+                } else if self.ctx.has_command(&cc_form) {
+                    cc_form
                 } else {
                     match method {
                         "setParam" => "cc_setparam".to_string(),
