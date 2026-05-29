@@ -385,10 +385,18 @@ impl Structurer<'_> {
             let join = self.ipdom_of(cur);
             let then_body = self.emit_arm(true_target, join, loops, depth);
             let else_body = self.emit_arm(false_target, join, loops, depth);
+            // An empty else arm must be `None`, not `Some(vec![])`: a simple
+            // `if (cond) { then }` in the original has no else branch, and
+            // `Some(empty)` makes lower_if emit a spurious `branch end` + else
+            // label, breaking byte-identity.
             let stmt = StructuredStmt::If {
                 condition,
                 then_body,
-                else_body: Some(else_body),
+                else_body: if else_body.is_empty() {
+                    None
+                } else {
+                    Some(else_body)
+                },
             };
             return (vec![stmt], join);
         }
