@@ -456,6 +456,7 @@ impl<'a> Cs2Validator<'a> {
         >,
     ) -> StackEffect {
         let cmd = &instr.command;
+        let source_effect = crate::transpile::opcode_stack_effect_for_build(cmd, self.ctx.build);
         match cmd.as_str() {
             // ── Integer pushes ──
             "push_constant_int" => StackEffect::int_push(1),
@@ -540,8 +541,9 @@ impl<'a> Cs2Validator<'a> {
 
             // ── Control flow: no stack effect ──
             "branch" => StackEffect::none(),
-            "branch_not" | "branch_if_true" | "branch_if_false" => StackEffect::int_pop(1),
-            "branch_equals"
+            "branch_if_true" | "branch_if_false" => StackEffect::int_pop(1),
+            "branch_not"
+            | "branch_equals"
             | "branch_less_than"
             | "branch_greater_than"
             | "branch_less_than_or_equals"
@@ -549,7 +551,8 @@ impl<'a> Cs2Validator<'a> {
                 pops_int: 2,
                 ..StackEffect::none()
             },
-            "long_branch_equals"
+            "long_branch_not"
+            | "long_branch_equals"
             | "long_branch_less_than"
             | "long_branch_greater_than"
             | "long_branch_less_than_or_equals"
@@ -564,7 +567,8 @@ impl<'a> Cs2Validator<'a> {
             }
 
             // ── Array ops ──
-            "define_array" => StackEffect::none(),
+            "define_array" => StackEffect::int_pop(1),
+            "array_sort" => StackEffect::int_pop(3),
             "push_array_int" => StackEffect {
                 pops_int: 1,
                 pushes_int: 1,
@@ -597,6 +601,15 @@ impl<'a> Cs2Validator<'a> {
             // ── Varbit: pops int for bit index, pushes int value ──
             "push_varbit" => StackEffect::int_push(1),
             "pop_varbit" => StackEffect::int_pop(1),
+            "activeclanchannel_find_affined" | "activeclansettings_find_affined"
+                if self.ctx.build >= 938 =>
+            {
+                StackEffect {
+                    pops_int: 1,
+                    pushes_int: 1,
+                    ..StackEffect::none()
+                }
+            }
             "player_group_find"
             | "player_group_member_count"
             | "player_group_banned_count"
@@ -916,8 +929,17 @@ impl<'a> Cs2Validator<'a> {
                 pushes_int: 1,
                 ..StackEffect::none()
             },
+            "db_find" if self.ctx.build >= 919 => StackEffect {
+                pops_int: 3,
+                ..StackEffect::none()
+            },
             "db_find" => StackEffect {
                 pops_int: 2,
+                ..StackEffect::none()
+            },
+            "db_find_with_count" | "db_find_refine" if self.ctx.build >= 919 => StackEffect {
+                pops_int: 3,
+                pushes_int: 1,
                 ..StackEffect::none()
             },
             "db_find_with_count" | "db_getfieldcount" | "db_find_refine" => StackEffect {
@@ -938,6 +960,62 @@ impl<'a> Cs2Validator<'a> {
                 pushes_int: 1,
                 ..StackEffect::none()
             },
+            "db_filter_value" => StackEffect {
+                pops_int: 4,
+                pushes_int: 1,
+                ..StackEffect::none()
+            },
+            "db_filter_find" => StackEffect {
+                pops_int: 5,
+                pushes_int: 1,
+                ..StackEffect::none()
+            },
+            "db_filter_unknown" => StackEffect {
+                pops_int: 1,
+                pushes_int: 1,
+                ..StackEffect::none()
+            },
+            "db_filter_combine" => StackEffect {
+                pops_int: 2,
+                pushes_int: 1,
+                ..StackEffect::none()
+            },
+            "db_filter_substring" => StackEffect {
+                pops_int: 2,
+                pops_obj: 1,
+                pushes_int: 1,
+                ..StackEffect::none()
+            },
+            "db_filter_column" => StackEffect {
+                pops_int: 3,
+                pushes_int: 1,
+                ..StackEffect::none()
+            },
+            "cam2_setlookatmode" | "cam2_setpositionmode" => StackEffect::int_pop(1),
+            "cam2_setpositionentity_npc" | "cam2_setpositionentity_player"
+                if self.ctx.build >= 919 =>
+            {
+                StackEffect {
+                    pops_int: 8,
+                    ..StackEffect::none()
+                }
+            }
+            "cam2_setpositionentity_npc" | "cam2_setpositionentity_player" => StackEffect {
+                pops_int: 7,
+                ..StackEffect::none()
+            },
+            "error" => StackEffect {
+                pops_obj: 1,
+                ..StackEffect::none()
+            },
+            "store_lookup" => StackEffect {
+                pops_int: 1,
+                pops_obj: 1,
+                pushes_int: 10,
+                pushes_long: 3,
+                ..StackEffect::none()
+            },
+            "field6563" => StackEffect::int_push(1),
             "notifications_sendlocal" => StackEffect {
                 pops_int: 2,
                 pops_obj: 2,
@@ -958,6 +1036,14 @@ impl<'a> Cs2Validator<'a> {
 
             "cc_create" => StackEffect {
                 pops_int: 3,
+                ..StackEffect::none()
+            },
+            "cc_createchild" => StackEffect {
+                pops_int: 3,
+                ..StackEffect::none()
+            },
+            "if_createchild" => StackEffect {
+                pops_int: 4,
                 ..StackEffect::none()
             },
             "cc_delete"
@@ -1008,6 +1094,10 @@ impl<'a> Cs2Validator<'a> {
             | "cc_setfontmono"
             | "cc_setnoclickthrough"
             | "cc_setstylesheet" => StackEffect::int_pop(1),
+            "cc_npc_setcustombodymodel"
+            | "cc_npc_setcustomheadmodel"
+            | "cc_npc_setcustomrecol"
+            | "cc_npc_setcustomretex" => StackEffect::int_pop(2),
             "if_setgraphic"
             | "if_sethide"
             | "if_setcolour"
@@ -1034,11 +1124,25 @@ impl<'a> Cs2Validator<'a> {
                 pops_int: 2,
                 ..StackEffect::none()
             },
+            "if_npc_setcustombodymodel"
+            | "if_npc_setcustomheadmodel"
+            | "if_npc_setcustomrecol"
+            | "if_npc_setcustomretex" => StackEffect::int_pop(3),
             "cc_setscrollpos" | "cc_setscrollsize" | "cc_setaspect" | "cc_setmodelorigin"
             | "cc_setparam" | "cc_setparam_int" => StackEffect {
                 pops_int: 2,
                 ..StackEffect::none()
             },
+            "cc_setcustombodyretex"
+            | "cc_setcustombodyrecol"
+            | "cc_setcustomheadretex"
+            | "cc_setcustomheadrecol" => StackEffect::int_pop(4),
+            "if_setcustombodyretex"
+            | "if_setcustombodyrecol"
+            | "if_setcustomheadretex"
+            | "if_setcustomheadrecol" => StackEffect::int_pop(5),
+            "cc_npc_setcustombodymodel_transformed" => StackEffect::int_pop(10),
+            "if_npc_setcustombodymodel_transformed" => StackEffect::int_pop(11),
             "if_setscrollpos" | "if_setscrollsize" | "if_setaspect" | "if_setmodelorigin"
             | "if_setparam_int" => StackEffect {
                 pops_int: 3,
@@ -1132,6 +1236,23 @@ impl<'a> Cs2Validator<'a> {
             },
             "quickchat_dynamic_command_add" => StackEffect::int_op(2),
 
+            // Unmodelled command: use the client-extracted opcode stack-effect
+            // table so the validator's typed stacks track getters/config lookups/
+            // value ops (e.g. map_members, oc_name) instead of treating them as
+            // no-ops and falsely reporting StackUnderflow.
+            _ if source_effect.is_some() => {
+                let e = source_effect.expect("checked above");
+                StackEffect {
+                    pops_int: e.int_pops,
+                    pops_obj: e.obj_pops,
+                    pops_long: e.long_pops,
+                    pushes_int: e.int_pushes,
+                    pushes_obj: e.obj_pushes,
+                    pushes_long: e.long_pushes,
+                    pushes_unknown: 0,
+                }
+            }
+
             // ── Engine commands (cc_*, if_*): conservatively assume int args ──
             _ if cmd.starts_with("cc_") || cmd.starts_with("if_") => StackEffect {
                 pops_int: 2,
@@ -1146,21 +1267,7 @@ impl<'a> Cs2Validator<'a> {
                 pops_long: 1,
                 ..StackEffect::none()
             },
-            // Unmodelled command: use the client-extracted opcode stack-effect
-            // table so the validator's typed stacks track getters/config lookups/
-            // value ops (e.g. map_members, oc_name) instead of treating them as
-            // no-ops and falsely reporting StackUnderflow.
-            _ => crate::transpile::opcode_stack_effect(cmd).map_or_else(StackEffect::none, |e| {
-                StackEffect {
-                    pops_int: e.int_pops,
-                    pops_obj: e.obj_pops,
-                    pops_long: e.long_pops,
-                    pushes_int: e.int_pushes,
-                    pushes_obj: e.obj_pushes,
-                    pushes_long: e.long_pushes,
-                    pushes_unknown: 0,
-                }
-            }),
+            _ => StackEffect::none(),
         }
     }
 
@@ -1219,9 +1326,30 @@ impl<'a> Cs2Validator<'a> {
             pops_int: usize::from(signature.arg_count_int),
             pops_obj: usize::from(signature.arg_count_obj),
             pops_long: usize::from(signature.arg_count_long),
-            pushes_int: usize::from(signature.return_type != "void"),
-            pushes_obj: 0,
-            pushes_long: 0,
+            pushes_int: usize::from(signature.return_count_int)
+                + usize::from(
+                    signature.total_returns() == 0
+                        && signature
+                            .return_type
+                            .split('|')
+                            .any(|part| matches!(part.trim(), "number" | "boolean" | "unknown")),
+                ),
+            pushes_obj: usize::from(signature.return_count_obj)
+                + usize::from(
+                    signature.total_returns() == 0
+                        && signature
+                            .return_type
+                            .split('|')
+                            .any(|part| part.trim() == "string"),
+                ),
+            pushes_long: usize::from(signature.return_count_long)
+                + usize::from(
+                    signature.total_returns() == 0
+                        && signature
+                            .return_type
+                            .split('|')
+                            .any(|part| part.trim() == "bigint"),
+                ),
             pushes_unknown: 0,
         }
     }

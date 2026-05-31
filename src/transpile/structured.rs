@@ -24,6 +24,7 @@ pub enum StructuredStmt {
     Switch {
         expr: Expression,
         cases: Vec<SwitchCaseStmt>,
+        default_body: Option<Vec<Self>>,
     },
     Assignment {
         target: AssignmentTarget,
@@ -34,6 +35,10 @@ pub enum StructuredStmt {
     },
     Goto {
         target: usize,
+    },
+    StackGoto {
+        target: usize,
+        values: Vec<Expression>,
     },
     /// A jump target for `goto`, at the instruction index `target` (a block
     /// start). Emitted only by the linear fallback for irreducible control flow;
@@ -53,6 +58,8 @@ pub enum StructuredStmt {
 pub struct SwitchCaseStmt {
     pub value: i32,
     pub body: Vec<StructuredStmt>,
+    pub fallthrough: bool,
+    pub break_after: bool,
 }
 
 /// Whether a statement unconditionally leaves its block — it returns, breaks,
@@ -62,7 +69,8 @@ pub fn stmt_terminates(stmt: &StructuredStmt) -> bool {
         StructuredStmt::Return { .. }
         | StructuredStmt::Break
         | StructuredStmt::Continue
-        | StructuredStmt::Goto { .. } => true,
+        | StructuredStmt::Goto { .. }
+        | StructuredStmt::StackGoto { .. } => true,
         StructuredStmt::If {
             then_body,
             else_body: Some(else_body),
@@ -208,7 +216,11 @@ impl StructuredRenderer {
                 self.write_indent(out);
                 out.push_str("}\n");
             }
-            StructuredStmt::Switch { expr, cases } => {
+            StructuredStmt::Switch {
+                expr,
+                cases,
+                default_body,
+            } => {
                 self.write_indent(out);
                 out.push_str("switch (");
                 out.push_str(&format_expression(expr));
@@ -219,6 +231,17 @@ impl StructuredRenderer {
                     let _ = writeln!(out, "case {}:", case_.value);
                     self.indent += 1;
                     self.write_stmts(&case_.body, out);
+                    if case_.break_after {
+                        self.write_indent(out);
+                        out.push_str("break;\n");
+                    }
+                    self.indent -= 1;
+                }
+                if let Some(default_body) = default_body {
+                    self.write_indent(out);
+                    out.push_str("default:\n");
+                    self.indent += 1;
+                    self.write_stmts(default_body, out);
                     self.write_indent(out);
                     out.push_str("break;\n");
                     self.indent -= 1;
@@ -242,6 +265,15 @@ impl StructuredRenderer {
             StructuredStmt::Goto { target } => {
                 self.write_indent(out);
                 let _ = writeln!(out, "goto({target});");
+            }
+            StructuredStmt::StackGoto { target, values } => {
+                self.write_indent(out);
+                out.push_str("stackpush_then(");
+                for value in values {
+                    out.push_str(&format_expression(value));
+                    out.push_str(", ");
+                }
+                let _ = writeln!(out, "goto({target}));");
             }
             StructuredStmt::Label { target } => {
                 self.write_indent(out);

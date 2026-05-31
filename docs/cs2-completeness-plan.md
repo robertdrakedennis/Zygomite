@@ -82,8 +82,24 @@ Status legend: `[ ]` todo · `[~]` in progress · `[x]` done
 The relooper structures the control flow; the remaining editable gain is locked behind making that
 structure recompile **byte-identically**. Gate-protected, measured via `transpile_coverage`.
 
-**Current gated baseline (full corpus): 947 = 8947/20577 = 43.48%, 910 = 7250/14313 = 50.65%**
-(up from the post-relooper 4.6%/5.9% — a 9.4x / 8.6x gain, all byte-identity gated).
+**Current gated baseline (full corpus): 947 = 20577/20577 = 100.00%, 910 = 14313/14313 = 100.00%**
+(up from the post-relooper 4.6%/5.9% - full corpus closure, all byte-identity gated).
+
+**Current default high-TS control-flow baseline (measured 2026-05-31):** default
+`transpile-scripts --all-scripts` now tries aggressive high-control-flow output first, retries the
+previous conservative high-control-flow form if the byte gate rejects that output, then falls back to
+reversible linear output only if both high forms fail. `--output-style reversible` forces the old
+conservative form. New `high_ts_coverage` diagnostics show:
+- **947:** `controlFlowMarkers` **12619 -> 5196**, `noVisibleLowLevelMarkers` **7634 -> 14154**,
+  `blocked: 0`; fallback reasons `gate_mismatch: 5037`, `residual_goto: 158`, `stack_goto: 1`.
+  Occurrence totals: `gotoCalls: 197150`, `labelCalls: 126280`.
+- **910:** `controlFlowMarkers` **8904 -> 3675**, `noVisibleLowLevelMarkers` **5274 -> 9961**,
+  `blocked: 0`; fallback reasons `gate_mismatch: 3570`, `residual_goto: 103`, `stack_goto: 2`.
+  Occurrence totals: `gotoCalls: 159701`, `labelCalls: 100046`.
+  `high_ts_coverage` also includes `fallbackGateBlockers`, preserving the primary high-form gate
+  blockers even when reversible fallback succeeds, plus total marker occurrence counts so partial
+  high-TS improvements can be tracked when per-script marker counts stay flat. Current dominant
+  buckets are `branch:operand` (947 2908 / 910 2263) and `switch:operand` (947 1090 / 910 742).
 
 **goto / shared-block support (linear fallback).** Irreducible control flow (shared return/join
 blocks, jump tables) can't be nested into if/while/switch, so it stayed `residual_goto`-blocked.
@@ -195,6 +211,176 @@ Done this session (each gate-verified, byte-identity preserved):
   `UI.SetparamInt`, `UI.GetmodelangleX`, etc. by matching the decompiler's `sanitize_camel` output
   and argument count back to the `cc_`/`if_` opcode. **+114 (947) / +94 (910)** on top of concat/sub;
   `reverse_unsupported_cause:ui_method` is now 66 (947) and 0 (910).
+- **✅ Callback watcher/target lowering.** Lower rendered watcher names (`varplayerint_3814`,
+  dynamic `local_int_*`, enum/component constants) and enum-rendered callback targets back to int ids.
+  **+108 (947) / +107 (910)**; `callback_watcher` is now zero for both builds and
+  `callback_target` is 1 (947) / 0 (910).
+- **✅ Array define/sort recovery.** `define_array` now consumes and renders its size operand
+  (`define_array_0(4)`) and `array_sort` has a stack effect so it remains in structured output.
+  This mostly moves scripts from `reverse_unsupported` into the honest byte-fidelity gate (+1/+1
+  editable), cutting `reverse_unsupported_cause:other` to 260 (947) / 178 (910).
+- **✅ Switch/layout lowering.** Linear fallback switches with `case X: goto(N)` now lower the switch
+  table directly to the original target labels instead of trampoline case bodies, and final switch
+  cases fall through instead of emitting a dead `branch end`. **+2343 (947) / +1774 (910)** from the
+  array baseline; `switch:operand` is down to 403 (947) / 202 (910).
+- **✅ `branch_not` semantics.** `branch_not` is binary int `!=` (`data/stack-effects.txt` says
+  `2 -> 0`), not unary false. Recovery now renders `x != y`, lowering emits `branch_not` directly,
+  and validation pops two ints. **+1000 (947) / +844 (910)**; this also removed large
+  local-vs-constant cascades.
+- **✅ `pop()` stack-drain lowering.** Multi-return command drains now recompile through
+  `local = pop()` stores and `pop()` arguments (existing stack values) instead of blocking on
+  residual stack syntax. **+498 (947) / +376 (910)**; the explicit `residual_pop` blocker is gone,
+  with remaining issues ranked by concrete recompile mismatch or reverse-unsupported cause.
+- **✅ Operand-preserving UI calls + find/create modes.** `UI.find`, `UI.findInterface`, and
+  `UI.create` now preserve nonzero opcode byte operands. Generic UI commands, getters, hooks,
+  scriptqueue calls, and no-arg send/delete commands use a reversible `WithMode(..., mode)` suffix
+  when the original `cc_`/`if_` operand is nonzero. **+229 (947) / +206 (910)** across the two UI
+  mode passes; buckets such as `cc_param:operand`, `cc_getwidth:operand`, `cc_setposition:operand`,
+  and hook operand mismatches are cleared.
+- **✅ Multi-result call arguments + dynamic callback targets.** Multi-value command fields used as
+  call arguments lower through a single producer command, `getminimenutarget()` coalesces like other
+  multi-result drains, local/`pop()` callback targets lower as dynamic script ids, and raw hook
+  descriptor fallbacks no longer block lowering. Along with varbit identity preservation
+  (`_transmog` suffixes and exact raw ids), this removes the last reverse-only blockers:
+  **`reverse_unsupported` is now zero on both 910 and 947.**
+- **✅ CFG branch successor + loop-exit layout.** CFG now treats `branch` as unconditional (no
+  fallthrough successor) and reads conditional+`branch` pairs as true target from the conditional
+  operand, false target from the following `branch`. The structurer no longer emits the loop-exit
+  block inside loop bodies, and the lowerer points single-statement `break`/`continue` arms directly
+  at loop labels. This matches the original compact shape for `while (true) { if (...) continue;
+  else break; }` loops. **+1992 (947) / +574 (910)** from the prior tracked baseline;
+  `length:structured_longer` is gone and broad loop-exit `return->branch` fallout collapsed.
+- **✅ Fixed-point cross-script return signatures.** Full `transpile-scripts --all-scripts` used a
+  return-type-free catalog and inferred referenced script signatures lazily, so calls to later
+  scripts could be treated as value-producing or unresolved while rendering earlier scripts. Seed
+  the renderer and recompile gate with a fixed-point return-type map across all scripts. This
+  restores missing helper calls such as `interface_inv_update_big(...)` and removes large cascades
+  from wrong void/value call classification. **+1524 (947) / +1168 (910)**; this moved the
+  then-current baseline to 81.69% (947) and 86.87% (910).
+- **✅ Void command + missing stack-effect recovery.** Generic 0-pop/0-push commands now render as
+  statements instead of disappearing, and recovery/validation knows stack effects for
+  `db_filter_value`, `cam2_setlookatmode`, `cam2_setpositionmode`, `cam2_setpositionentity_player`,
+  and `error`. This restores no-arg void calls (`notifications_init`), camera mode setters, DB filter
+  calls, and error payloads. **+131 (947) / +117 (910)** before the dead-branch pass.
+- **✅ Dead branch-only block preservation.** Predecessorless unreachable `branch` blocks emitted
+  after returns now stay as `goto` labels instead of collapsing into the target. This preserves
+  compiler padding such as `return; branch end; ...` and reduces branch target drift. Additional
+  **+250 (947) / +173 (910)**.
+- **✅ Interface option payload arities.** `if_setop*`/drag option handlers route through shared
+  client helpers, so extracted stack effects saw only the component pop and recovery dropped option
+  index/text/cursor payloads. Manual payload arities restore calls such as
+  `UI.Setop(index, text, component)` and `UI.Setopbase(text, component)`. **+530 (947) / +397
+  (910)**.
+- **✅ Multi-value return preservation.** CS2 `return` consumes every live typed stack value; recovery
+  previously kept only the top value, shortening branches and corrupting multi-return helpers.
+  Structured TS now renders `return stack(a, b, ...)`, and lowering emits every value in order,
+  including multi-result command prefixes such as `viewportgeteffectivesize().width/.height`.
+  **+742 (947) / +473 (910)**.
+- **✅ Build-specific DB find/filter arities.** Build 919+ `db_find`, `db_find_with_count`, and
+  `db_find_refine` carry a third `basevartype` argument. Recovery/validation now model that shape,
+  plus the `db_filter_*` stack effects. This restores table-id searches such as
+  `dbfind(503808, key, 0)`. **+216 (947) / +0 (910)**.
+- **✅ Build-specific string command arities.** Build 919+ `tostring` consumes `(value, radix)` while
+  910 consumes only `value`; build 936+ `tostring_long` has the same extra radix argument. Recovery,
+  return inference, CFG construction, and validator fallback now use build-aware opcode effects and
+  the string command signature table, so 947 scripts such as `script47` preserve the radix without
+  regressing 910's one-argument form.
+- **✅ Source-backed and manual stack-effect arities.** Added command-signature coverage for
+  inventory/config/core/quest/detail/interface/streaming families and targeted overrides for
+  interface child creation/options, clan find, avatar base setters, camera helpers, misc unknowns,
+  `inv_stockbase`, and `if_sethflip`/`if_setvflip`. This preserves payloads that client helper
+  wrappers hid from static extraction. Net from this checkpoint and the literal/operand work below:
+  **+954 (947) / +187 (910)**.
+- **✅ Literal and operand provenance.** `push_constant_int` now round-trips through `intconst(...)`,
+  typed long constants through `longconst(...)`, including `i64::MIN`; generic nonzero opcode byte
+  operands lower with `WithMode(..., mode)`; var transmog refs keep `_transmog`; UI getters resolve
+  by arg count before name fallback. These moves shifted reverse failures into honest byte-layout
+  mismatches and removed typed literal parse blockers.
+- **✅ Explicit empty discards.** Empty-stack discard opcodes now render as typed pseudo calls
+  (`popintdiscard`, `popstringdiscard`, `poplongdiscard`) and lower back to `pop_*_discard` without
+  adding an extra discard. This removed the `pop_int_discard->return` bucket and restored void
+  helpers that discard multiple return slots.
+- **✅ Switch default fallthrough bodies.** CFG now splits switch fallthrough only when it is a real
+  non-branch default body (including empty-case switches), keeping branch-trampoline switches in the
+  byte-faithful linear form. Structured TS can parse/render/lower `default:` bodies, and lowering
+  places immediate default bytecode before case bodies to match RT7 layout. **+93 (947) / +57
+  (910)**, clearing the `push_var->cam_reset` / `push_var->cam_smoothreset` default-camera family
+  without regressing branch-trampoline switch tables.
+- **✅ Shared return branch preservation.** If original bytecode has an explicit unconditional
+  `branch` into a return-only block, the structurer now chooses the existing byte-faithful linear
+  form instead of collapsing that edge to an inline `return`. This removes the `branch->return`
+  bucket and cuts nearby branch target drift. **+45 (947) / +19 (910)**.
+- **✅ Typed return signatures.** Return-type inference now preserves homogeneous string/bigint
+  returns in both CFG and pre-CFG recovered paths, uses the fixed-point script signature map for
+  calls inside return expressions, and ignores void helper calls embedded in `stack(...)` returns.
+  This fixes string-result call statements that previously recompiled with `pop_int_discard`.
+  **+5 (947) / +4 (910)**.
+- **✅ Value-producing scriptqueue calls.** `cc_scriptqueue_add` / `if_scriptqueue_add` now recover as
+  stack values consumed by the following long discard instead of emitting an immediate statement plus
+  a second explicit `poplongdiscard()`. This clears the scriptqueue long-discard tail. **+11 (947) /
+  +0 (910)**.
+- **✅ Long branch opcodes.** Recovery now treats `long_branch_*` as binary branch conditions, and
+  lowering chooses the long branch opcode when either comparison operand is `bigint`. This removes
+  the `long_branch_*:operand` buckets without adding new blocked scripts. **+41 (947) / +2 (910)**.
+- **✅ Stack assignment groups.** Consecutive local pops now recover as explicit `stackassign_N(...)`
+  pseudo calls, so lowering preserves original push-push-pop-pop byte layout instead of expanding
+  each assignment to push-pop. Multi-result property/index drains stay in their named assignment
+  form. **+108 (947) / +98 (910)**.
+- **✅ Custom interface/NPC arities.** Source-backed overrides now correct stack effects for
+  `if_npc_setcustom*`, `cc_npc_setcustom*`, and custom body/head recol/retex commands whose
+  extracted handlers only exposed component pops. **+11 (947) / +4 (910)**.
+- **✅ Store lookup multi-result recovery.** `store_lookup(pos, currency)` now recovers as a
+  thirteen-slot indexed result and lowers back to one opcode plus typed stores. **+2 (947) / +0
+  (910)**.
+- **✅ Residual opcode arities and UI ambiguity.** `UI.ListAddentry` now selects `if_list_addentry`
+  when its third argument is a component constant, `field6563` is modelled as a 910 int producer, and
+  camera axis commands pop their four int payloads. **+2 (947) / +3 (910)**.
+- **✅ Delayed stack value preservation.** `stackpush_then(value, sideEffect())` now preserves byte
+  order when the VM pushes return/discard values before later zero-stack side effects, covering the
+  autosetup ultra and worldmap camera-reset cases. **+2 (947) / +1 (910)**.
+- **✅ Stack-carrying control-flow and assignment preservation.** Added source-backed command
+  families for file-system, wiki, minimenu, and interface-misc ops; recovered minimenu multi-result
+  helpers; fixed `if_setopkey`'s four-int payload; and preserved live stack values through
+  `goto`, `switch`, void `gosub`, and local assignments using `stackpush_then(..., goto(...))` and
+  `stackpush_then(..., stackassign_1(...))`. Lowering now groups multi-result values across
+  `stackassign_N`, so generated `pop()` placeholders in property/index drains recompile instead of
+  becoming reverse blockers. **+376 (947) / +188 (910)**.
+- **✅ Duplicate enum constants + targeted interface arities.** Enum exports, decompiler enum
+  lookup, and reverse lowering now share duplicate-safe member names, so repeated labels such as
+  `RESERVED` lower to the exact key instead of the last duplicate. Targeted interface overrides also
+  restore source-backed arities for `if_set2dangle`, `if_setnpcmodel`, and
+  `if_grid_setlayoutparams`, preserving payload values hidden by helper-based stack extraction.
+  **+159 (947) / +106 (910)**.
+- **✅ Residual command arities + branch stack preservation.** Added exact effects for
+  marketing/camera/world-map/highlight/detail/resume/bounding-box residual commands; preserved live
+  stack values before branch operands; recovered value-producing gosubs feeding shared return blocks
+  as `stackpush_then(call, return pop())`; and kept private forward-tail branches in byte-faithful
+  linear form. **+54 (947) / +24 (910)**.
+- **✅ Multi-return script slots + varbit stackassign.** Script signatures now preserve inferred
+  return slot counts, so calls like `time_to_string(script4705(...), ...)` count the nested helper
+  as three VM int slots without stealing older string stack values. Consecutive varbit stores now
+  reuse the same `stackassign_N` byte-order-preserving form as local stores. **+4 (947) / +3
+  (910)**.
+- **✅ Gated linear fallback + tail arities.** If high-level structured TS fails byte identity, the
+  exporter now retries the order-faithful linear CFG form and accepts it only after the same
+  recompile gate passes. Added exact effects for camera screen FOV, build-specific `tostring`, two
+  result `*_getcharposatindex`, and interface boolean payloads such as `if_settiling` /
+  `if_setlinedirection`.
+- **✅ Callback/UI stack and branch-target value fidelity.** Callback watcher counts now survive
+  enum-named literals; generic UI setters preserve pending VM stack values; `if_getcharindexatpos`
+  uses corpus-backed value arity; and value calls crossing branch-target labels materialize as
+  explicit `push(...)` in original byte order. **+5 (947) / +2 (910)** from prior baseline.
+- **✅ Final tail closure.** Build-aware stack effects now cover the final command arities
+  (`tostring`, `tostring_long`, and `lobby_enterlobby_social_network`), param getters discard by
+  string-vs-int param type, `stackpush_then(...)` statements preserve delayed VM values, and
+  leave-index array reads round-trip through an explicit
+  `push_array_int_leave_index_on_stack_N(index)` pseudo call instead of guessing from
+  `array[i] = array[i] + x` syntax.
+- **Current full-corpus gated baseline (measured 2026-05-31):** **20577/20577 = 100.00% (947)**
+  and **14313/14313 = 100.00% (910)** from `transpile-scripts --all-scripts` release runs
+  (`/tmp/rs3-review-947`, `/tmp/rs3-review-910`). Both reports have
+  `blocked: 0`; no `recompile_mismatch` or `reverse_unsupported` blockers remain in either measured
+  corpus.
 
 ### Correction to an earlier "dead code" claim
 A prior pass concluded the dominant `branch_equals:operand` residual was corpus dead code (no-op
@@ -203,15 +389,16 @@ it was the symptom of the off-by-one above. Those are genuine guard clauses (`if
 <body>`); with the corrected targets they structure correctly and recompile byte-identically. Lesson:
 byte round-trip alone cannot validate control-flow interpretation — cross-check the client VM.
 
-Next levers (genuine capability, not corpus artifacts):
-- [ ] **Recompile layout fidelity**: `branch:operand` and `switch:operand` now dominate
-  (`947: 3278/1883`, `910: 2220/1284`). This is instruction ordering / expression ordering, not
-  decode loss.
-- [ ] **`callback_watcher` and callback target lowering**: remaining reverse blockers are now mostly
-  watcher names and non-literal callback targets (`947 callback_watcher=276`, `910=240`).
-- [ ] **Remaining generic calls / expression forms**: unsupported call expression is now small
-  (≈50-60 scripts/build); comparison/logical expressions outside control-flow and array access are
-  next small reverse gaps.
+Maintenance levers after full closure:
+- [x] **Recompile layout fidelity**: branch/switch/operand mismatch buckets are clear in both full
+  corpora.
+- [x] **Operand/expression order fidelity**: local/constant drift and typed discard drift are clear
+  in both full corpora.
+- [x] **Residual reverse blockers**: callback watcher, `pop()` stack drains, dynamic callback
+  targets, raw hook descriptors, property/array multi-result forms, and generic call arity/type
+  ambiguity are solved; no `reverse_unsupported` blockers remain on 910 or 947.
+- [ ] **Regression harness hardening**: keep 947/910 full-corpus gates cheap to rerun and add focused
+  fixtures for pseudo-stack forms (`stackpush_then`, `stackassign_N`, leave-index arrays).
 - [ ] Remove the now-dead `StructuredEmitter` from `cfg.rs` (the relooper replaced it).
 
 ## P1 — Control-flow recovery (the dominant lever: ~62%+49% of corpus)
@@ -223,9 +410,9 @@ Target `cfg.rs` (build_cfg / emit_structured) + the branch/goto handling.
 - [ ] **P1.3** Add structured-recovery regression tests over a representative script set; assert the
   editable % rises and these blockers fall toward 0.
 
-## P2 — Expression recovery (`residual_pop` 18%, `reverse_unsupported` 26%)
+## P2 — Expression recovery (`reverse_unsupported` + expression-order mismatch tail)
 Target `expr_recovery.rs` + `ts_lower.rs`.
-- [ ] **P2.1** Fold `residual_pop`: leftover stack pops not absorbed into expressions/statements →
+- [x] **P2.1** Fold `residual_pop`: leftover stack pops not absorbed into expressions/statements →
   recover into assignments/discards so no residual pop remains.
 - [ ] **P2.2** Enumerate the distinct `reverse_unsupported` causes (instrument the diagnostic to
   carry the specific construct/opcode), then implement the top offenders. Currently a catch-all —

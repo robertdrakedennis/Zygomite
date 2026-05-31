@@ -148,9 +148,15 @@ impl SymbolTable {
     }
 
     pub fn with_varbits(mut self, varbits: &HashMap<u32, crate::vars::VarBitEntry>) -> Self {
+        let mut name_counts = HashMap::<String, usize>::new();
+        for varbit in varbits.values() {
+            *name_counts.entry(varbit.varbit_name.clone()).or_default() += 1;
+        }
         for (&id, varbit) in varbits {
-            self.varbit_map
-                .insert(id as u16, varbit.varbit_name.clone());
+            if name_counts.get(&varbit.varbit_name) == Some(&1) {
+                self.varbit_map
+                    .insert(id as u16, varbit.varbit_name.clone());
+            }
         }
         self
     }

@@ -229,25 +229,33 @@ fn parse_statement(statement: &Statement<'_>, source: &str) -> Result<Structured
         }
         Statement::SwitchStatement(stmt) => {
             let mut cases = Vec::new();
+            let mut default_body = None;
             for case in &stmt.cases {
-                let Some(test) = &case.test else {
-                    bail!("default switch cases are not supported");
-                };
-                let Expression::NumberLiteral(value) = parse_expression(test, source)? else {
-                    bail!("switch case values must be numeric literals");
-                };
                 let mut body = parse_statement_list(&case.consequent, source)?;
-                if matches!(body.last(), Some(StructuredStmt::Break)) {
+                let has_trailing_break = matches!(body.last(), Some(StructuredStmt::Break));
+                if has_trailing_break {
                     body.pop();
                 }
-                cases.push(SwitchCaseStmt {
-                    value: value.value,
-                    body,
-                });
+                if let Some(test) = &case.test {
+                    let value = parse_switch_case_value(parse_expression(test, source)?)?;
+                    let fallthrough = !has_trailing_break && body.is_empty();
+                    cases.push(SwitchCaseStmt {
+                        value,
+                        body,
+                        fallthrough,
+                        break_after: has_trailing_break,
+                    });
+                } else {
+                    if default_body.is_some() {
+                        bail!("duplicate default switch case");
+                    }
+                    default_body = Some(body);
+                }
             }
             Ok(StructuredStmt::Switch {
                 expr: parse_expression(&stmt.discriminant, source)?,
                 cases,
+                default_body,
             })
         }
         Statement::ReturnStatement(stmt) => Ok(StructuredStmt::Return {
@@ -304,6 +312,8 @@ fn parse_expression_statement(
                 Ok(StructuredStmt::Goto { target })
             } else if let Some(target) = control_marker_target(call, "label") {
                 Ok(StructuredStmt::Label { target })
+            } else if let Some((target, values)) = stack_goto_marker(call, source)? {
+                Ok(StructuredStmt::StackGoto { target, values })
             } else {
                 Ok(StructuredStmt::Expr {
                     expr: parse_expression(&statement.expression, source)?,
@@ -334,6 +344,32 @@ fn control_marker_target(call: &CallExpression<'_>, name: &str) -> Option<usize>
     Some(value as usize)
 }
 
+fn stack_goto_marker(
+    call: &CallExpression<'_>,
+    source: &str,
+) -> Result<Option<(usize, Vec<Expression>)>> {
+    let ast::Expression::Identifier(ident) = &call.callee else {
+        return Ok(None);
+    };
+    if ident.name.as_str() != "stackpush_then" {
+        return Ok(None);
+    }
+    let Some((last, values)) = call.arguments.split_last() else {
+        return Ok(None);
+    };
+    let ast::Argument::CallExpression(goto_call) = last else {
+        return Ok(None);
+    };
+    let Some(target) = control_marker_target(goto_call, "goto") else {
+        return Ok(None);
+    };
+    let values = values
+        .iter()
+        .map(|argument| parse_argument_expression(argument, source))
+        .collect::<Result<Vec<_>>>()?;
+    Ok(Some((target, values)))
+}
+
 fn parse_assignment_target(
     target: &ast::AssignmentTarget<'_>,
     source: &str,
@@ -355,15 +391,26 @@ fn parse_assignment_target(
     }
 }
 
+fn parse_switch_case_value(expr: Expression) -> Result<i32> {
+    match expr {
+        Expression::NumberLiteral(value) => Ok(value.value),
+        Expression::UnaryOperation(unary) if unary.op == UnaryOp::Neg => {
+            let Expression::NumberLiteral(value) = *unary.operand else {
+                bail!("switch case values must be numeric literals");
+            };
+            Ok(-value.value)
+        }
+        _ => bail!("switch case values must be numeric literals"),
+    }
+}
+
 fn parse_expression(expression: &ast::Expression<'_>, source: &str) -> Result<Expression> {
     match expression {
         ast::Expression::NumericLiteral(value) => Ok(Expression::NumberLiteral(NumberLiteral {
             value: numeric_literal_to_i32(value, source)?,
         })),
         ast::Expression::BigIntLiteral(value) => Ok(Expression::BigIntLiteral(BigIntLiteral {
-            value: slice_span(value.span, source)
-                .trim_end_matches('n')
-                .parse::<i64>()?,
+            value: bigint_literal_to_i64(value, source)?,
         })),
         ast::Expression::StringLiteral(value) => Ok(Expression::StringLiteral(StringLiteral {
             value: value.value.to_string(),
@@ -393,14 +440,9 @@ fn parse_expression(expression: &ast::Expression<'_>, source: &str) -> Result<Ex
                 right: Box::new(parse_expression(&logical.right, source)?),
             }))
         }
-        ast::Expression::UnaryExpression(unary) => Ok(Expression::UnaryOperation(UnaryOperation {
-            op: match unary.operator {
-                ast::UnaryOperator::UnaryNegation => UnaryOp::Neg,
-                ast::UnaryOperator::LogicalNot => UnaryOp::Not,
-                _ => bail!("unsupported unary operator"),
-            },
-            operand: Box::new(parse_expression(&unary.argument, source)?),
-        })),
+        ast::Expression::UnaryExpression(unary) => {
+            parse_unary_expression(unary.operator, &unary.argument, source)
+        }
         ast::Expression::ParenthesizedExpression(expr) => {
             parse_expression(&expr.expression, source)
         }
@@ -495,9 +537,7 @@ fn parse_expression_elements(
             }
             ast::ArrayExpressionElement::BigIntLiteral(value) => {
                 values.push(Expression::BigIntLiteral(BigIntLiteral {
-                    value: slice_span(value.span, source)
-                        .trim_end_matches('n')
-                        .parse::<i64>()?,
+                    value: bigint_literal_to_i64(value, source)?,
                 }));
             }
             ast::ArrayExpressionElement::StringLiteral(value) => {
@@ -521,14 +561,11 @@ fn parse_expression_elements(
                 }));
             }
             ast::ArrayExpressionElement::UnaryExpression(value) => {
-                values.push(Expression::UnaryOperation(UnaryOperation {
-                    op: match value.operator {
-                        ast::UnaryOperator::UnaryNegation => UnaryOp::Neg,
-                        ast::UnaryOperator::LogicalNot => UnaryOp::Not,
-                        _ => bail!("unsupported unary operator"),
-                    },
-                    operand: Box::new(parse_expression(&value.argument, source)?),
-                }));
+                values.push(parse_unary_expression(
+                    value.operator,
+                    &value.argument,
+                    source,
+                )?);
             }
             ast::ArrayExpressionElement::ComputedMemberExpression(value) => {
                 values.push(Expression::ArrayAccess(ArrayAccess {
@@ -598,9 +635,7 @@ fn parse_argument_expression(argument: &ast::Argument<'_>, source: &str) -> Resu
             value: numeric_literal_to_i32(value, source)?,
         })),
         ast::Argument::BigIntLiteral(value) => Ok(Expression::BigIntLiteral(BigIntLiteral {
-            value: slice_span(value.span, source)
-                .trim_end_matches('n')
-                .parse::<i64>()?,
+            value: bigint_literal_to_i64(value, source)?,
         })),
         ast::Argument::StringLiteral(value) => Ok(Expression::StringLiteral(StringLiteral {
             value: value.value.to_string(),
@@ -627,14 +662,9 @@ fn parse_argument_expression(argument: &ast::Argument<'_>, source: &str) -> Resu
                 right: Box::new(parse_expression(&logical.right, source)?),
             }))
         }
-        ast::Argument::UnaryExpression(unary) => Ok(Expression::UnaryOperation(UnaryOperation {
-            op: match unary.operator {
-                ast::UnaryOperator::UnaryNegation => UnaryOp::Neg,
-                ast::UnaryOperator::LogicalNot => UnaryOp::Not,
-                _ => bail!("unsupported unary operator"),
-            },
-            operand: Box::new(parse_expression(&unary.argument, source)?),
-        })),
+        ast::Argument::UnaryExpression(unary) => {
+            parse_unary_expression(unary.operator, &unary.argument, source)
+        }
         ast::Argument::ParenthesizedExpression(expr) => parse_expression(&expr.expression, source),
         ast::Argument::ComputedMemberExpression(expr) => Ok(Expression::ArrayAccess(ArrayAccess {
             array: Box::new(parse_expression(&expr.object, source)?),
@@ -690,6 +720,54 @@ fn slice_span(span: oxc_span::Span, source: &str) -> &str {
     &source[span.start as usize..span.end as usize]
 }
 
+fn parse_unary_expression(
+    operator: ast::UnaryOperator,
+    argument: &ast::Expression<'_>,
+    source: &str,
+) -> Result<Expression> {
+    let op = parse_unary_op(operator)?;
+    if op == UnaryOp::Neg
+        && let ast::Expression::BigIntLiteral(literal) = argument
+    {
+        return Ok(Expression::BigIntLiteral(BigIntLiteral {
+            value: negated_bigint_literal_to_i64(literal, source)?,
+        }));
+    }
+    Ok(Expression::UnaryOperation(UnaryOperation {
+        op,
+        operand: Box::new(parse_expression(argument, source)?),
+    }))
+}
+
+fn parse_unary_op(operator: ast::UnaryOperator) -> Result<UnaryOp> {
+    match operator {
+        ast::UnaryOperator::UnaryNegation => Ok(UnaryOp::Neg),
+        ast::UnaryOperator::LogicalNot => Ok(UnaryOp::Not),
+        _ => bail!("unsupported unary operator"),
+    }
+}
+
+fn bigint_literal_to_i64(literal: &ast::BigIntLiteral<'_>, source: &str) -> Result<i64> {
+    bigint_literal_digits(literal, source)
+        .parse::<i64>()
+        .map_err(Into::into)
+}
+
+fn negated_bigint_literal_to_i64(literal: &ast::BigIntLiteral<'_>, source: &str) -> Result<i64> {
+    const I64_MIN_ABS: u64 = 9_223_372_036_854_775_808;
+
+    let magnitude = bigint_literal_digits(literal, source).parse::<u64>()?;
+    if magnitude == I64_MIN_ABS {
+        Ok(i64::MIN)
+    } else {
+        Ok(-i64::try_from(magnitude)?)
+    }
+}
+
+fn bigint_literal_digits<'a>(literal: &ast::BigIntLiteral<'_>, source: &'a str) -> &'a str {
+    slice_span(literal.span, source).trim_end_matches('n')
+}
+
 /// Convert an oxc-parsed numeric literal to the i32 a CS2 int operand holds.
 /// oxc has already parsed the literal value (handling hex/binary/octal/`_`
 /// separators), so we work from that rather than re-parsing the raw span with
@@ -704,4 +782,72 @@ fn numeric_literal_to_i32(literal: &ast::NumericLiteral<'_>, source: &str) -> Re
         );
     }
     Ok(value as u32 as i32)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_structured_typescript;
+    use crate::transpile::ast::Expression;
+    use crate::transpile::structured::StructuredStmt;
+
+    #[test]
+    fn parses_negative_switch_case_value() {
+        let script = parse_structured_typescript(
+            "export function script0(): void {\n    let local_int_0: number;\n    switch (local_int_0) {\n        case -1:\n            return;\n    }\n}\n",
+        )
+        .expect("negative switch case should parse");
+
+        assert!(matches!(
+            &script.body[0],
+            StructuredStmt::Switch { cases, .. } if cases[0].value == -1
+        ));
+    }
+
+    #[test]
+    fn parses_switch_default_case() {
+        let script = parse_structured_typescript(
+            "export function script0(): void {\n    let local_int_0: number;\n    switch (local_int_0) {\n        case 1:\n            return;\n        default:\n            camreset();\n            break;\n    }\n}\n",
+        )
+        .expect("default switch case should parse");
+
+        assert!(matches!(
+            &script.body[0],
+            StructuredStmt::Switch {
+                default_body: Some(body),
+                ..
+            } if body.len() == 1
+        ));
+    }
+
+    #[test]
+    fn parses_min_i64_bigint_literal() {
+        let script = parse_structured_typescript(
+            "export function script0(): bigint {\n    return longconst(-9223372036854775808n);\n}\n",
+        )
+        .expect("min i64 bigint should parse");
+
+        let StructuredStmt::Return {
+            value: Some(Expression::Call(call)),
+        } = &script.body[0]
+        else {
+            panic!("expected return call");
+        };
+        assert!(matches!(
+            call.arguments.as_slice(),
+            [Expression::BigIntLiteral(value)] if value.value == i64::MIN
+        ));
+    }
+
+    #[test]
+    fn parses_stackpush_then_goto_as_stack_goto() {
+        let script = parse_structured_typescript(
+            "export function script0(): void {\n    stackpush_then(18, 1, goto(42));\n}\n",
+        )
+        .expect("stack goto should parse");
+
+        assert!(matches!(
+            &script.body[0],
+            StructuredStmt::StackGoto { target: 42, values } if values.len() == 2
+        ));
+    }
 }

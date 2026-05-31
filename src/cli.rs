@@ -51,8 +51,9 @@ use crate::script::{
 };
 use crate::transpile::{
     REVERSIBLE_FORMAT_VERSION, ReverseCompileContext, ScriptCatalog, ScriptCatalogBuilder,
-    Transpiler, is_reversible_source, lower_structured_script, parse_reversible_source,
-    parse_structured_typescript, render_reversible_source, structured_digest,
+    Transpiler, enum_pair_property_name, is_reversible_source, lower_structured_script,
+    parse_reversible_source, parse_structured_typescript, render_reversible_source,
+    structured_digest,
 };
 use crate::vars::{VarDomain, parse_var, parse_varbit};
 use crate::vfx::decode as decode_vfx;
@@ -192,6 +193,9 @@ pub enum Command {
         out_dir: PathBuf,
         #[arg(long)]
         filter_script: Option<String>,
+        /// Generated script style. `high-ts` tries cleaner control flow first and falls back after byte gate.
+        #[arg(long, value_enum, default_value_t = TranspileOutputStyle::HighTs)]
+        output_style: TranspileOutputStyle,
         #[arg(long, default_value_t = 100)]
         max_scripts: usize,
         /// Transpile every script in the cache (ignores max-scripts cap).
@@ -419,6 +423,12 @@ impl VarDomainArg {
             Self::PlayerGroup => PLAYER_GROUP,
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub enum TranspileOutputStyle {
+    HighTs,
+    Reversible,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -842,6 +852,7 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::TranspileScripts {
             out_dir,
             filter_script,
+            output_style,
             max_scripts,
             all_scripts,
             max_script_bytes,
@@ -853,6 +864,7 @@ pub fn run(cli: Cli) -> Result<()> {
             &cli.data_dir,
             &out_dir,
             filter_script.as_deref(),
+            output_style,
             max_scripts,
             all_scripts,
             crate::transpile::TranspileLimits {
@@ -4217,35 +4229,61 @@ fn build_reverse_compile_context_from_catalog(
                     transmog: false,
                 },
             );
+            var_refs_by_name.insert(
+                format!("{}_transmog", entry.var_name),
+                VarRef {
+                    domain: *domain,
+                    id: id as u16,
+                    transmog: true,
+                },
+            );
         }
     }
 
     let mut varbit_refs_by_name = HashMap::new();
     for (&id, entry) in &ctx.varbits {
+        let id = id as u16;
         varbit_refs_by_name.insert(
             entry.varbit_name.clone(),
             VarBitRef {
-                id: id as u16,
+                id,
                 transmog: false,
             },
         );
+        varbit_refs_by_name.insert(
+            format!("{}_transmog", entry.varbit_name),
+            VarBitRef { id, transmog: true },
+        );
+        varbit_refs_by_name.insert(
+            format!("varbit_{id}"),
+            VarBitRef {
+                id,
+                transmog: false,
+            },
+        );
+        varbit_refs_by_name.insert(
+            format!("varbit_{id}_transmog"),
+            VarBitRef { id, transmog: true },
+        );
     }
+
+    let string_param_ids = ctx
+        .params
+        .values()
+        .filter(|entry| {
+            matches!(entry.type_char, Some(b's' | b'S'))
+                || matches!(entry.default, Some(crate::config::ScalarValue::Str(_)))
+        })
+        .map(|entry| entry.id as i32)
+        .collect::<HashSet<_>>();
 
     let mut enum_values_by_name = HashMap::new();
     for entry in ctx.enums.values() {
         let object_name = format!("Enum_{}", entry.id);
+        let mut used_properties = HashSet::new();
         for pair in &entry.values {
-            let property_name = match &pair.value {
-                crate::config::ScalarValue::Str(value) => {
-                    let prop = screaming_snake(value);
-                    if prop.is_empty() {
-                        format!("KEY_{}", pair.key)
-                    } else {
-                        prop
-                    }
-                }
-                _ => format!("KEY_{}", pair.key),
-            };
+            let property_name =
+                enum_pair_property_name(&pair.value, pair.key, &mut used_properties);
             enum_values_by_name.insert(format!("{object_name}.{property_name}"), pair.key);
         }
     }
@@ -4277,6 +4315,7 @@ fn build_reverse_compile_context_from_catalog(
         script_catalog,
         var_refs_by_name,
         varbit_refs_by_name,
+        string_param_ids,
         enum_values_by_name,
         component_ids_by_name,
         opcode_commands: ctx.opcode_book.commands().map(str::to_string).collect(),
@@ -4333,6 +4372,181 @@ fn finalize_reversible_transpile_output(
         &metadata,
         &parsed.asm_trailer,
     )?)
+}
+
+struct FinalizedTranspileOutput {
+    source: String,
+    fallback_reason: Option<String>,
+    primary_blocking_diagnostics: Vec<String>,
+    primary_gate_messages: Vec<String>,
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "fallback finalization threads existing command context and mutable diagnostics"
+)]
+fn finalize_with_linear_fallback(
+    source: String,
+    transpiler: &Transpiler,
+    script: &CompiledScript,
+    script_id: crate::transpile::ScriptId,
+    script_catalog: &ScriptCatalog,
+    reverse_ctx: &ReverseCompileContext,
+    opcode_book: &OpcodeBook,
+    diagnostics: &mut crate::transpile::Diagnostics,
+    editable_structured: &mut bool,
+    blocking_diagnostics: &mut Vec<String>,
+) -> Result<FinalizedTranspileOutput> {
+    let primary_control_fallback = source_control_flow_fallback_reason(&source);
+    let primary_diagnostic_start = diagnostics.diagnostics.len();
+    let finalized = finalize_reversible_transpile_output(
+        source,
+        reverse_ctx,
+        opcode_book,
+        diagnostics,
+        editable_structured,
+        blocking_diagnostics,
+    )?;
+    let primary_blocking_diagnostics = if *editable_structured {
+        Vec::new()
+    } else {
+        blocking_diagnostics.clone()
+    };
+    let primary_gate_messages = diagnostics.diagnostics[primary_diagnostic_start..]
+        .iter()
+        .map(|diagnostic| diagnostic.message.clone())
+        .collect::<Vec<_>>();
+    let should_try_linear_fallback = blocking_diagnostics.iter().any(|blocker| {
+        matches!(
+            blocker.as_str(),
+            "recompile_mismatch" | "reverse_unsupported"
+        )
+    });
+    if *editable_structured || !should_try_linear_fallback {
+        return Ok(FinalizedTranspileOutput {
+            source: finalized,
+            fallback_reason: primary_control_fallback,
+            primary_blocking_diagnostics,
+            primary_gate_messages,
+        });
+    }
+
+    let conservative = transpiler.transpile_structured_conservative(script, script_id)?;
+    let crate::transpile::TranspiledScript {
+        source: conservative_source,
+        diagnostics: mut conservative_diagnostics,
+        editable_structured: mut conservative_editable,
+        blocking_diagnostics: mut conservative_blocking,
+        ..
+    } = conservative;
+    add_ambiguous_export_warning(&mut conservative_diagnostics, script_catalog, script_id);
+    let finalized_conservative = finalize_reversible_transpile_output(
+        conservative_source,
+        reverse_ctx,
+        opcode_book,
+        &mut conservative_diagnostics,
+        &mut conservative_editable,
+        &mut conservative_blocking,
+    )?;
+    if conservative_editable {
+        let fallback_reason = source_control_flow_fallback_reason(&finalized_conservative);
+        *diagnostics = conservative_diagnostics;
+        *editable_structured = conservative_editable;
+        *blocking_diagnostics = conservative_blocking;
+        return Ok(FinalizedTranspileOutput {
+            source: finalized_conservative,
+            fallback_reason,
+            primary_blocking_diagnostics,
+            primary_gate_messages,
+        });
+    }
+
+    let linear = transpiler.transpile_linear(script, script_id)?;
+    let crate::transpile::TranspiledScript {
+        source: linear_source,
+        diagnostics: mut linear_diagnostics,
+        editable_structured: mut linear_editable,
+        blocking_diagnostics: mut linear_blocking,
+        ..
+    } = linear;
+    add_ambiguous_export_warning(&mut linear_diagnostics, script_catalog, script_id);
+    let finalized_linear = finalize_reversible_transpile_output(
+        linear_source,
+        reverse_ctx,
+        opcode_book,
+        &mut linear_diagnostics,
+        &mut linear_editable,
+        &mut linear_blocking,
+    )?;
+    if linear_editable {
+        *diagnostics = linear_diagnostics;
+        *editable_structured = linear_editable;
+        *blocking_diagnostics = linear_blocking;
+        Ok(FinalizedTranspileOutput {
+            source: finalized_linear,
+            fallback_reason: Some("gate_mismatch".to_string()),
+            primary_blocking_diagnostics,
+            primary_gate_messages,
+        })
+    } else {
+        Ok(FinalizedTranspileOutput {
+            source: finalized,
+            fallback_reason: primary_control_fallback,
+            primary_blocking_diagnostics,
+            primary_gate_messages,
+        })
+    }
+}
+
+fn source_control_flow_fallback_reason(source: &str) -> Option<String> {
+    if source
+        .lines()
+        .any(|line| line.contains("stackpush_then(") && line.contains("goto("))
+    {
+        Some("stack_goto".to_string())
+    } else if source.contains("goto(") || source.contains("label(") {
+        Some("residual_goto".to_string())
+    } else {
+        None
+    }
+}
+
+fn output_style_fallback_reason(
+    output_style: TranspileOutputStyle,
+    fallback_reason: Option<String>,
+) -> Option<String> {
+    match output_style {
+        TranspileOutputStyle::HighTs => fallback_reason,
+        TranspileOutputStyle::Reversible => Some("forced_reversible".to_string()),
+    }
+}
+
+fn add_ambiguous_export_warning(
+    diagnostics: &mut crate::transpile::Diagnostics,
+    script_catalog: &ScriptCatalog,
+    script_id: crate::transpile::ScriptId,
+) {
+    if let Some(metadata) = script_catalog.get(script_id) {
+        let base_name = script_base_export_name(metadata);
+        if metadata.export_name != base_name {
+            diagnostics.warning(format!(
+                "ambiguous export name '{}' resolved to '{}'",
+                base_name, metadata.export_name
+            ));
+        }
+    }
+}
+
+fn transpile_script_with_style(
+    transpiler: &Transpiler,
+    script: &CompiledScript,
+    script_id: crate::transpile::ScriptId,
+    output_style: TranspileOutputStyle,
+) -> Result<crate::transpile::TranspiledScript> {
+    match output_style {
+        TranspileOutputStyle::HighTs => Ok(transpiler.transpile(script, script_id)?),
+        TranspileOutputStyle::Reversible => Ok(transpiler.transpile_linear(script, script_id)?),
+    }
 }
 
 /// A script is only truly `editable_structured` if its structured TS recompiles
@@ -4491,25 +4705,6 @@ fn recompile_divergence(
         "header_or_locals".to_string(),
         "recompile differs in header/locals/args only".to_string(),
     )
-}
-
-fn screaming_snake(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for c in value.chars() {
-        if c.is_ascii_alphanumeric() {
-            out.push(c.to_ascii_uppercase());
-        } else if matches!(c, ' ' | '-' | '/' | '.') {
-            out.push('_');
-        }
-    }
-    let trimmed = out.trim_matches('_');
-    if trimmed.is_empty() {
-        String::new()
-    } else if trimmed.starts_with(|c: char| c.is_ascii_digit()) {
-        format!("_{trimmed}")
-    } else {
-        trimmed.to_string()
-    }
 }
 
 fn run_dump_raw_flat(
@@ -5107,6 +5302,7 @@ fn run_transpile_scripts(
     data_dir: &Path,
     out_dir: &Path,
     filter_script: Option<&str>,
+    output_style: TranspileOutputStyle,
     max_scripts: usize,
     all_scripts: bool,
     limits: crate::transpile::TranspileLimits,
@@ -5121,6 +5317,7 @@ fn run_transpile_scripts(
             data_dir,
             out_dir,
             filter,
+            output_style,
             max_scripts,
             limits,
             version,
@@ -5145,15 +5342,6 @@ fn run_transpile_scripts(
         script_catalog_builder.add_script(packed_id_raw, data);
     }
     let script_catalog = script_catalog_builder.build();
-    // The catalog is built `.without_return_types()` for speed, so its
-    // signatures read "unknown". The recompile-fidelity gate lowers through
-    // this context and would then treat every void call as int-returning,
-    // emitting a spurious pop_*_discard (the return->pop_int_discard mismatch
-    // cause). Return types are inferred lazily per referenced script into
-    // `signature_cache` below; mirror them into this context so the gate
-    // classifies calls the same way the renderer does.
-    let mut reverse_ctx = build_reverse_compile_context_from_catalog(&ctx, script_catalog.clone());
-
     let mut transpiler = Transpiler::new()
         .with_version(version.build, version.subbuild)
         .with_enums(&ctx.enums)
@@ -5163,7 +5351,16 @@ fn run_transpile_scripts(
         .with_params(&ctx.params)
         .with_limits(limits)
         .with_script_catalog(script_catalog.clone())
-        .with_components(&ctx.parsed_components);
+        .with_components(&ctx.parsed_components)
+        .with_script_signatures(&ctx.scripts, &opcode_book, version.build);
+
+    let mut reverse_ctx = build_reverse_compile_context_from_catalog(&ctx, script_catalog.clone());
+    reverse_ctx.script_signatures.extend(
+        transpiler
+            .script_signatures()
+            .iter()
+            .map(|(script_id, signature)| (*script_id, signature.clone())),
+    );
 
     fs::create_dir_all(out_dir)?;
 
@@ -5192,7 +5389,7 @@ fn run_transpile_scripts(
     let script_limit = if all_scripts { usize::MAX } else { max_scripts };
     let trace_transpile = std::env::var_os("RS3_TRANSPILE_TRACE").is_some();
 
-    let mut signature_cache = HashMap::new();
+    let mut signature_cache = transpiler.script_signatures().clone();
     let mut script_count = 0;
     let mut errors = 0;
     let mut barrel_exports: Vec<String> = Vec::new();
@@ -5256,13 +5453,14 @@ fn run_transpile_scripts(
             version.build,
         );
 
-        match transpiler.transpile(&script, script_id) {
+        match transpile_script_with_style(&transpiler, &script, script_id, output_style) {
             Ok(ts) => {
                 let crate::transpile::TranspiledScript {
                     source,
                     diagnostics,
                     editable_structured,
                     blocking_diagnostics,
+                    control_flow_fallback_reason,
                     ..
                 } = ts;
                 let script_name = transpiler
@@ -5278,24 +5476,33 @@ fn run_transpile_scripts(
                 let mut diagnostics = diagnostics;
                 let mut editable_structured = editable_structured;
                 let mut blocking_diagnostics = blocking_diagnostics;
-                if let Some(metadata) = script_catalog.get(script_id) {
-                    let base_name = script_base_export_name(metadata);
-                    if metadata.export_name != base_name {
-                        diagnostics.warning(format!(
-                            "ambiguous export name '{}' resolved to '{}'",
-                            base_name, metadata.export_name
-                        ));
-                    }
-                }
-                let source = finalize_reversible_transpile_output(
+                add_ambiguous_export_warning(&mut diagnostics, &script_catalog, script_id);
+                let finalized = finalize_with_linear_fallback(
                     source,
+                    &transpiler,
+                    &script,
+                    script_id,
+                    &script_catalog,
                     &reverse_ctx,
                     &opcode_book,
                     &mut diagnostics,
                     &mut editable_structured,
                     &mut blocking_diagnostics,
                 )?;
-                fs::write(&out_path, &source)?;
+                let high_ts_style = HighTsScriptStyle::from_source(&finalized.source);
+                let high_ts_fallback_reason = output_style_fallback_reason(
+                    output_style,
+                    finalized.fallback_reason.or(control_flow_fallback_reason),
+                );
+                let high_ts_gate_diagnostics = match output_style {
+                    TranspileOutputStyle::HighTs => finalized.primary_blocking_diagnostics,
+                    TranspileOutputStyle::Reversible => Vec::new(),
+                };
+                let high_ts_gate_messages = match output_style {
+                    TranspileOutputStyle::HighTs => finalized.primary_gate_messages,
+                    TranspileOutputStyle::Reversible => Vec::new(),
+                };
+                fs::write(&out_path, &finalized.source)?;
                 if let Some(metadata) = script_catalog.get(script_id) {
                     script_diagnostics.push(ScriptDiagnosticsEntry {
                         packed_id: metadata.packed_id.0,
@@ -5304,6 +5511,10 @@ fn run_transpile_scripts(
                         module_name: metadata.module_name.clone(),
                         editable_structured,
                         blocking_diagnostics,
+                        high_ts_style,
+                        high_ts_fallback_reason,
+                        high_ts_gate_diagnostics,
+                        high_ts_gate_messages,
                         diagnostics: diagnostics.diagnostics,
                     });
                 }
@@ -5356,6 +5567,7 @@ fn run_filtered_transpile_scripts(
     data_dir: &Path,
     out_dir: &Path,
     filter_script: &str,
+    output_style: TranspileOutputStyle,
     max_scripts: usize,
     limits: crate::transpile::TranspileLimits,
     version: RuntimeVersion,
@@ -5478,13 +5690,14 @@ fn run_filtered_transpile_scripts(
             version.build,
         );
 
-        match transpiler.transpile(&loaded.script, script_id) {
+        match transpile_script_with_style(&transpiler, &loaded.script, script_id, output_style) {
             Ok(ts) => {
                 let crate::transpile::TranspiledScript {
                     source,
                     diagnostics,
                     editable_structured,
                     blocking_diagnostics,
+                    control_flow_fallback_reason,
                     ..
                 } = ts;
                 let script_name = transpiler
@@ -5500,24 +5713,33 @@ fn run_filtered_transpile_scripts(
                 let mut diagnostics = diagnostics;
                 let mut editable_structured = editable_structured;
                 let mut blocking_diagnostics = blocking_diagnostics;
-                if let Some(metadata) = script_catalog.get(script_id) {
-                    let base_name = script_base_export_name(metadata);
-                    if metadata.export_name != base_name {
-                        diagnostics.warning(format!(
-                            "ambiguous export name '{}' resolved to '{}'",
-                            base_name, metadata.export_name
-                        ));
-                    }
-                }
-                let source = finalize_reversible_transpile_output(
+                add_ambiguous_export_warning(&mut diagnostics, &script_catalog, script_id);
+                let finalized = finalize_with_linear_fallback(
                     source,
+                    &transpiler,
+                    &loaded.script,
+                    script_id,
+                    &script_catalog,
                     &reverse_ctx,
                     &opcode_book,
                     &mut diagnostics,
                     &mut editable_structured,
                     &mut blocking_diagnostics,
                 )?;
-                fs::write(&out_path, &source)?;
+                let high_ts_style = HighTsScriptStyle::from_source(&finalized.source);
+                let high_ts_fallback_reason = output_style_fallback_reason(
+                    output_style,
+                    finalized.fallback_reason.or(control_flow_fallback_reason),
+                );
+                let high_ts_gate_diagnostics = match output_style {
+                    TranspileOutputStyle::HighTs => finalized.primary_blocking_diagnostics,
+                    TranspileOutputStyle::Reversible => Vec::new(),
+                };
+                let high_ts_gate_messages = match output_style {
+                    TranspileOutputStyle::HighTs => finalized.primary_gate_messages,
+                    TranspileOutputStyle::Reversible => Vec::new(),
+                };
+                fs::write(&out_path, &finalized.source)?;
                 if let Some(metadata) = script_catalog.get(script_id) {
                     script_diagnostics.push(ScriptDiagnosticsEntry {
                         packed_id: metadata.packed_id.0,
@@ -5526,6 +5748,10 @@ fn run_filtered_transpile_scripts(
                         module_name: metadata.module_name.clone(),
                         editable_structured,
                         blocking_diagnostics,
+                        high_ts_style,
+                        high_ts_fallback_reason,
+                        high_ts_gate_diagnostics,
+                        high_ts_gate_messages,
                         diagnostics: diagnostics.diagnostics,
                     });
                 }
@@ -5773,19 +5999,23 @@ fn infer_transpile_script_signature(
 ) -> crate::transpile::ScriptSignature {
     let empty_components: HashMap<u32, String> = HashMap::new();
     let empty_enums: HashMap<i32, String> = HashMap::new();
+    let inferred = crate::transpile::infer_return_signature_for_script(
+        script,
+        script_id,
+        build,
+        &empty_components,
+        &empty_enums,
+        script_catalog,
+        signature_cache,
+    );
     crate::transpile::ScriptSignature {
         arg_count_int: script.argument_count_int,
         arg_count_obj: script.argument_count_object,
         arg_count_long: script.argument_count_long,
-        return_type: crate::transpile::infer_return_type_for_script(
-            script,
-            script_id,
-            build,
-            &empty_components,
-            &empty_enums,
-            script_catalog,
-            signature_cache,
-        ),
+        return_count_int: inferred.return_counts.int,
+        return_count_obj: inferred.return_counts.obj,
+        return_count_long: inferred.return_counts.long,
+        return_type: inferred.return_type,
     }
 }
 
@@ -5807,6 +6037,7 @@ fn trim_transpile_runtime_context(ctx: &mut ResolverContext) {
 struct TranspileDiagnosticsReport {
     build: u32,
     coverage: CoverageSummary,
+    high_ts_coverage: HighTsCoverageSummary,
     catalog: Vec<crate::transpile::Diagnostic>,
     scripts: Vec<ScriptDiagnosticsEntry>,
 }
@@ -5849,6 +6080,177 @@ impl CoverageSummary {
     }
 }
 
+#[derive(Clone, Debug, Default, Serialize)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "diagnostic report mirrors independent marker flags"
+)]
+struct HighTsScriptStyle {
+    #[serde(rename = "controlFlowMarkers")]
+    control_flow_markers: bool,
+    #[serde(rename = "controlFlowMarkerOccurrences")]
+    control_flow_marker_occurrences: usize,
+    #[serde(rename = "gotoCalls")]
+    goto_calls: usize,
+    #[serde(rename = "labelCalls")]
+    label_calls: usize,
+    #[serde(rename = "stackPseudos")]
+    stack_pseudos: bool,
+    #[serde(rename = "stackPseudoOccurrences")]
+    stack_pseudo_occurrences: usize,
+    #[serde(rename = "withMode")]
+    with_mode: bool,
+    #[serde(rename = "withModeOccurrences")]
+    with_mode_occurrences: usize,
+    #[serde(rename = "unknownCommand")]
+    unknown_command: bool,
+    #[serde(rename = "unknownCommandOccurrences")]
+    unknown_command_occurrences: usize,
+    #[serde(rename = "noVisibleLowLevelMarkers")]
+    no_visible_low_level_markers: bool,
+}
+
+impl HighTsScriptStyle {
+    fn from_source(source: &str) -> Self {
+        let goto_calls = source.matches("goto(").count();
+        let label_calls = source.matches("label(").count();
+        let control_flow_marker_occurrences = goto_calls + label_calls;
+        let control_flow_markers = control_flow_marker_occurrences > 0;
+        let stack_pseudo_occurrences = source.matches("stackpush_then(").count()
+            + source.matches("stackassign_").count()
+            + source.matches("pop(").count()
+            + source.matches("push(").count()
+            + source
+                .matches("push_array_int_leave_index_on_stack")
+                .count();
+        let stack_pseudos = stack_pseudo_occurrences > 0;
+        let with_mode_occurrences = source.matches("WithMode").count();
+        let with_mode = with_mode_occurrences > 0;
+        let unknown_command_occurrences = source.matches("unknowncommand").count();
+        let unknown_command = unknown_command_occurrences > 0;
+        let no_visible_low_level_markers =
+            !(control_flow_markers || stack_pseudos || with_mode || unknown_command);
+        Self {
+            control_flow_markers,
+            control_flow_marker_occurrences,
+            goto_calls,
+            label_calls,
+            stack_pseudos,
+            stack_pseudo_occurrences,
+            with_mode,
+            with_mode_occurrences,
+            unknown_command,
+            unknown_command_occurrences,
+            no_visible_low_level_markers,
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct HighTsCoverageSummary {
+    total: usize,
+    #[serde(rename = "controlFlowMarkers")]
+    control_flow_markers: usize,
+    #[serde(rename = "controlFlowMarkerOccurrences")]
+    control_flow_marker_occurrences: usize,
+    #[serde(rename = "gotoCalls")]
+    goto_calls: usize,
+    #[serde(rename = "labelCalls")]
+    label_calls: usize,
+    #[serde(rename = "stackPseudos")]
+    stack_pseudos: usize,
+    #[serde(rename = "stackPseudoOccurrences")]
+    stack_pseudo_occurrences: usize,
+    #[serde(rename = "withMode")]
+    with_mode: usize,
+    #[serde(rename = "withModeOccurrences")]
+    with_mode_occurrences: usize,
+    #[serde(rename = "unknownCommand")]
+    unknown_command: usize,
+    #[serde(rename = "unknownCommandOccurrences")]
+    unknown_command_occurrences: usize,
+    #[serde(rename = "noVisibleLowLevelMarkers")]
+    no_visible_low_level_markers: usize,
+    #[serde(rename = "noVisibleLowLevelMarkersPct")]
+    no_visible_low_level_markers_pct: f64,
+    #[serde(rename = "fallbackReasons")]
+    fallback_reasons: BTreeMap<String, usize>,
+    #[serde(rename = "fallbackGateBlockers")]
+    fallback_gate_blockers: BTreeMap<String, usize>,
+}
+
+impl HighTsCoverageSummary {
+    fn from_scripts(scripts: &[ScriptDiagnosticsEntry]) -> Self {
+        let total = scripts.len();
+        let mut fallback_reasons = BTreeMap::<String, usize>::new();
+        let mut fallback_gate_blockers = BTreeMap::<String, usize>::new();
+        for script in scripts {
+            if let Some(reason) = &script.high_ts_fallback_reason {
+                *fallback_reasons.entry(reason.clone()).or_default() += 1;
+            }
+            for blocker in &script.high_ts_gate_diagnostics {
+                *fallback_gate_blockers.entry(blocker.clone()).or_default() += 1;
+            }
+        }
+        let no_visible_low_level_markers = scripts
+            .iter()
+            .filter(|script| script.high_ts_style.no_visible_low_level_markers)
+            .count();
+        let no_visible_low_level_markers_pct = if total == 0 {
+            0.0
+        } else {
+            (no_visible_low_level_markers as f64) * 100.0 / (total as f64)
+        };
+        Self {
+            total,
+            control_flow_markers: scripts
+                .iter()
+                .filter(|script| script.high_ts_style.control_flow_markers)
+                .count(),
+            control_flow_marker_occurrences: scripts
+                .iter()
+                .map(|script| script.high_ts_style.control_flow_marker_occurrences)
+                .sum(),
+            goto_calls: scripts
+                .iter()
+                .map(|script| script.high_ts_style.goto_calls)
+                .sum(),
+            label_calls: scripts
+                .iter()
+                .map(|script| script.high_ts_style.label_calls)
+                .sum(),
+            stack_pseudos: scripts
+                .iter()
+                .filter(|script| script.high_ts_style.stack_pseudos)
+                .count(),
+            stack_pseudo_occurrences: scripts
+                .iter()
+                .map(|script| script.high_ts_style.stack_pseudo_occurrences)
+                .sum(),
+            with_mode: scripts
+                .iter()
+                .filter(|script| script.high_ts_style.with_mode)
+                .count(),
+            with_mode_occurrences: scripts
+                .iter()
+                .map(|script| script.high_ts_style.with_mode_occurrences)
+                .sum(),
+            unknown_command: scripts
+                .iter()
+                .filter(|script| script.high_ts_style.unknown_command)
+                .count(),
+            unknown_command_occurrences: scripts
+                .iter()
+                .map(|script| script.high_ts_style.unknown_command_occurrences)
+                .sum(),
+            no_visible_low_level_markers,
+            no_visible_low_level_markers_pct,
+            fallback_reasons,
+            fallback_gate_blockers,
+        }
+    }
+}
+
 #[derive(Serialize)]
 struct ScriptDiagnosticsEntry {
     packed_id: i32,
@@ -5859,6 +6261,14 @@ struct ScriptDiagnosticsEntry {
     editable_structured: bool,
     #[serde(rename = "blockingDiagnostics")]
     blocking_diagnostics: Vec<String>,
+    #[serde(rename = "highTsStyle")]
+    high_ts_style: HighTsScriptStyle,
+    #[serde(rename = "highTsFallbackReason")]
+    high_ts_fallback_reason: Option<String>,
+    #[serde(rename = "highTsGateDiagnostics")]
+    high_ts_gate_diagnostics: Vec<String>,
+    #[serde(rename = "highTsGateMessages")]
+    high_ts_gate_messages: Vec<String>,
     diagnostics: Vec<crate::transpile::Diagnostic>,
 }
 
@@ -5870,6 +6280,7 @@ fn write_transpile_diagnostics_report(
 ) -> Result<()> {
     scripts.sort_by(|a, b| a.packed_id.cmp(&b.packed_id));
     let coverage = CoverageSummary::from_scripts(&scripts);
+    let high_ts_coverage = HighTsCoverageSummary::from_scripts(&scripts);
     // Canonical coverage event (queryable; the headline completeness metric).
     eprintln!(
         "{}",
@@ -5883,9 +6294,32 @@ fn write_transpile_diagnostics_report(
             "blockers": coverage.blockers,
         }))?
     );
+    eprintln!(
+        "{}",
+        serde_json::to_string(&serde_json::json!({
+            "event": "high_ts_coverage",
+            "build": build,
+            "total": high_ts_coverage.total,
+            "control_flow_markers": high_ts_coverage.control_flow_markers,
+            "control_flow_marker_occurrences": high_ts_coverage.control_flow_marker_occurrences,
+            "goto_calls": high_ts_coverage.goto_calls,
+            "label_calls": high_ts_coverage.label_calls,
+            "stack_pseudos": high_ts_coverage.stack_pseudos,
+            "stack_pseudo_occurrences": high_ts_coverage.stack_pseudo_occurrences,
+            "with_mode": high_ts_coverage.with_mode,
+            "with_mode_occurrences": high_ts_coverage.with_mode_occurrences,
+            "unknown_command": high_ts_coverage.unknown_command,
+            "unknown_command_occurrences": high_ts_coverage.unknown_command_occurrences,
+            "no_visible_low_level_markers": high_ts_coverage.no_visible_low_level_markers,
+            "no_visible_low_level_markers_pct": high_ts_coverage.no_visible_low_level_markers_pct,
+            "fallback_reasons": high_ts_coverage.fallback_reasons,
+            "fallback_gate_blockers": high_ts_coverage.fallback_gate_blockers,
+        }))?
+    );
     let report = TranspileDiagnosticsReport {
         build,
         coverage,
+        high_ts_coverage,
         catalog,
         scripts,
     };
@@ -6067,25 +6501,10 @@ fn export_enum_types(ctx: &ResolverContext, out_dir: &Path) -> Result<()> {
         }
         let obj_name = format!("Enum_{id}", id = entry.id);
         let mut props: Vec<String> = Vec::new();
+        let mut used_properties = HashSet::new();
 
         for pair in &entry.values {
-            let prop = match &pair.value {
-                crate::config::ScalarValue::Str(s) => {
-                    let name = str_to_screaming_snake(s);
-                    if name.is_empty() {
-                        format!("KEY_{key}", key = pair.key)
-                    } else {
-                        name
-                    }
-                }
-                _ => format!("KEY_{key}", key = pair.key),
-            };
-            // Deduplicate property names
-            let unique_prop = if props.iter().any(|p| p.starts_with(&format!("{prop} ="))) {
-                format!("{prop}_{key}", key = pair.key)
-            } else {
-                prop.clone()
-            };
+            let unique_prop = enum_pair_property_name(&pair.value, pair.key, &mut used_properties);
             props.push(format!("    {unique_prop}: {key},", key = pair.key));
             reverse_lookup.push((pair.key, format!("{obj_name}.{unique_prop}")));
         }
@@ -7489,6 +7908,97 @@ mod tests {
         assert!(!source.contains("{{"));
         assert!(!source.contains("}}"));
         assert_export_braces_are_balanced(&source);
+    }
+
+    #[test]
+    fn high_ts_style_classifies_visible_low_level_markers() {
+        let source = r#"
+export function script0(): void {
+    label(10);
+    stackpush_then(1, goto(20));
+    UI.setTextWithMode("x", 1);
+    unknowncommand58(0);
+}
+"#;
+
+        let style = HighTsScriptStyle::from_source(source);
+
+        assert!(style.control_flow_markers);
+        assert_eq!(1, style.goto_calls);
+        assert_eq!(1, style.label_calls);
+        assert_eq!(2, style.control_flow_marker_occurrences);
+        assert!(style.stack_pseudos);
+        assert_eq!(1, style.stack_pseudo_occurrences);
+        assert!(style.with_mode);
+        assert_eq!(1, style.with_mode_occurrences);
+        assert!(style.unknown_command);
+        assert_eq!(1, style.unknown_command_occurrences);
+        assert!(!style.no_visible_low_level_markers);
+    }
+
+    #[test]
+    fn high_ts_coverage_counts_markers_and_fallback_reasons() {
+        let scripts = vec![
+            ScriptDiagnosticsEntry {
+                packed_id: 1,
+                group_id: 1,
+                export_name: "script1".to_string(),
+                module_name: "script1".to_string(),
+                editable_structured: true,
+                blocking_diagnostics: Vec::new(),
+                high_ts_style: HighTsScriptStyle::from_source("goto(1);"),
+                high_ts_fallback_reason: Some("gate_mismatch".to_string()),
+                high_ts_gate_diagnostics: vec![
+                    "recompile_mismatch".to_string(),
+                    "recompile_mismatch_cause:branch:operand".to_string(),
+                ],
+                high_ts_gate_messages: vec![
+                    "recompile diverges at [0]: original `branch Branch(1)` vs structured `branch Branch(2)`"
+                        .to_string(),
+                ],
+                diagnostics: Vec::new(),
+            },
+            ScriptDiagnosticsEntry {
+                packed_id: 2,
+                group_id: 2,
+                export_name: "script2".to_string(),
+                module_name: "script2".to_string(),
+                editable_structured: true,
+                blocking_diagnostics: Vec::new(),
+                high_ts_style: HighTsScriptStyle::from_source("return;"),
+                high_ts_fallback_reason: None,
+                high_ts_gate_diagnostics: Vec::new(),
+                high_ts_gate_messages: Vec::new(),
+                diagnostics: Vec::new(),
+            },
+        ];
+
+        let coverage = HighTsCoverageSummary::from_scripts(&scripts);
+
+        assert_eq!(2, coverage.total);
+        assert_eq!(1, coverage.control_flow_markers);
+        assert_eq!(1, coverage.control_flow_marker_occurrences);
+        assert_eq!(1, coverage.goto_calls);
+        assert_eq!(0, coverage.label_calls);
+        assert_eq!(1, coverage.no_visible_low_level_markers);
+        assert_eq!(Some(&1), coverage.fallback_reasons.get("gate_mismatch"));
+        assert_eq!(
+            Some(&1),
+            coverage.fallback_gate_blockers.get("recompile_mismatch")
+        );
+    }
+
+    #[test]
+    fn source_control_flow_fallback_reason_classifies_stack_and_residual_gotos() {
+        assert_eq!(
+            Some("stack_goto".to_string()),
+            source_control_flow_fallback_reason("stackpush_then(1, goto(2));")
+        );
+        assert_eq!(
+            Some("residual_goto".to_string()),
+            source_control_flow_fallback_reason("stackpush_then(1, push(x));\ngoto(2);")
+        );
+        assert_eq!(None, source_control_flow_fallback_reason("return;"));
     }
 
     fn assert_export_braces_are_balanced(source: &str) {

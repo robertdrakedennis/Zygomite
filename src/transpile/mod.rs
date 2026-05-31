@@ -15,8 +15,11 @@ pub use ast::*;
 pub use cfg::{Block, build_cfg, detect_return_type, emit_structured};
 pub use codegen::CodeGen;
 pub use diagnostics::{Diagnostic, Diagnostics, Severity, Span};
-pub use expr_recovery::detect_return_type_from_recovered;
-pub use expr_recovery::opcode_stack_effect;
+pub use expr_recovery::{
+    detect_return_counts_from_recovered_with_signatures, detect_return_type_from_recovered,
+    detect_return_type_from_recovered_with_signatures,
+};
+pub use expr_recovery::{opcode_stack_effect, opcode_stack_effect_for_build};
 pub use reversible_format::{
     ParsedReversibleSource, REVERSIBLE_FORMAT_VERSION, ReversibleMetadata,
     append_reversible_footer, blocking_diagnostics, editable_structured, is_reversible_source,
@@ -24,21 +27,22 @@ pub use reversible_format::{
 };
 pub use scope::{LocalType, Scope, Scopes, Symbol, SymbolKind, SymbolTable};
 pub use structured::{AssignmentTarget, StructuredScript, StructuredStmt, SwitchCaseStmt};
-pub use structured_writer::StructuredWriter;
+pub use structured_writer::{BuiltStructuredScript, StructuredWriter};
 pub use ts_lower::{ReverseCompileContext, lower_structured_script};
 pub use ts_parse::parse_structured_typescript;
 
 use crate::cache_bail as bail;
-use crate::config::EnumEntry;
+use crate::config::{EnumEntry, ScalarValue};
 use crate::error::Result;
 use crate::script::{CompiledScript, MIN_SCRIPT_BUILD, OpcodeBook, decode_script, script_to_asm};
 use crate::vars::VarDomain;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::BuildHasher;
 
 pub const DEFAULT_MAX_TRANSPILE_SCRIPT_BYTES: usize = 16 << 20;
 pub const DEFAULT_MAX_TRANSPILE_INSTRUCTIONS: usize = 25_000;
 pub const DEFAULT_MAX_TRANSPILE_GENERATED_BYTES: usize = 4 << 20;
+const MAX_RETURN_TYPE_INFERENCE_PASSES: usize = 16;
 
 #[derive(Debug, Clone, Copy)]
 pub struct TranspileLimits {
@@ -63,12 +67,34 @@ pub struct ScriptSignature {
     pub arg_count_int: u16,
     pub arg_count_obj: u16,
     pub arg_count_long: u16,
+    pub return_count_int: u16,
+    pub return_count_obj: u16,
+    pub return_count_long: u16,
     pub return_type: String,
 }
 
 impl ScriptSignature {
     pub fn total_args(&self) -> usize {
         self.arg_count_int as usize + self.arg_count_obj as usize + self.arg_count_long as usize
+    }
+
+    pub fn total_returns(&self) -> usize {
+        self.return_count_int as usize
+            + self.return_count_obj as usize
+            + self.return_count_long as usize
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ScriptReturnCounts {
+    pub int: u16,
+    pub obj: u16,
+    pub long: u16,
+}
+
+impl ScriptReturnCounts {
+    pub fn total(self) -> usize {
+        self.int as usize + self.obj as usize + self.long as usize
     }
 }
 
@@ -123,6 +149,7 @@ pub struct ScriptMetadata {
 pub struct ScriptCatalog {
     entries: HashMap<ScriptId, ScriptMetadata>,
     by_group: HashMap<ScriptGroupId, Vec<ScriptId>>,
+    by_export_name: HashMap<String, ScriptId>,
     diagnostics: Vec<Diagnostic>,
 }
 
@@ -132,6 +159,8 @@ impl ScriptCatalog {
             .entry(metadata.group_id)
             .or_default()
             .push(metadata.packed_id);
+        self.by_export_name
+            .insert(metadata.export_name.clone(), metadata.packed_id);
         self.entries.insert(metadata.packed_id, metadata);
     }
 
@@ -160,9 +189,8 @@ impl ScriptCatalog {
     }
 
     pub fn resolve_export_name(&self, export_name: &str) -> Option<&ScriptMetadata> {
-        self.entries
-            .values()
-            .find(|metadata| metadata.export_name == export_name)
+        let script_id = self.by_export_name.get(export_name)?;
+        self.entries.get(script_id)
     }
 
     pub fn export_name(&self, script_id: ScriptId) -> Option<&str> {
@@ -198,15 +226,14 @@ impl ScriptCatalog {
     }
 }
 
-#[expect(
-    clippy::implicit_hasher,
-    reason = "transpile APIs use default HashMap aliases across module boundaries"
-)]
-pub fn resolve_script_signature<'a>(
+pub fn resolve_script_signature<'a, SignatureHasher>(
     script_catalog: &'a ScriptCatalog,
-    script_signatures: &'a HashMap<ScriptId, ScriptSignature>,
+    script_signatures: &'a HashMap<ScriptId, ScriptSignature, SignatureHasher>,
     script_id: ScriptId,
-) -> Option<&'a ScriptSignature> {
+) -> Option<&'a ScriptSignature>
+where
+    SignatureHasher: std::hash::BuildHasher,
+{
     script_signatures.get(&script_id).or_else(|| {
         script_catalog
             .get(script_id)
@@ -214,15 +241,14 @@ pub fn resolve_script_signature<'a>(
     })
 }
 
-#[expect(
-    clippy::implicit_hasher,
-    reason = "transpile APIs use default HashMap aliases across module boundaries"
-)]
-pub fn resolve_call_target_signature<'a>(
+pub fn resolve_call_target_signature<'a, SignatureHasher>(
     script_catalog: &'a ScriptCatalog,
-    script_signatures: &'a HashMap<ScriptId, ScriptSignature>,
+    script_signatures: &'a HashMap<ScriptId, ScriptSignature, SignatureHasher>,
     raw_id: i32,
-) -> Option<(&'a ScriptMetadata, &'a ScriptSignature)> {
+) -> Option<(&'a ScriptMetadata, &'a ScriptSignature)>
+where
+    SignatureHasher: std::hash::BuildHasher,
+{
     let metadata = script_catalog.resolve_call_target(raw_id)?;
     let signature =
         resolve_script_signature(script_catalog, script_signatures, metadata.packed_id)?;
@@ -245,6 +271,7 @@ struct PendingScriptMetadata {
     short_name: String,
     signature: ScriptSignature,
     export_name: String,
+    script: Option<CompiledScript>,
 }
 
 pub struct ScriptCatalogBuilder<'a, S> {
@@ -292,6 +319,9 @@ where
 
     pub fn build(mut self) -> ScriptCatalog {
         let diagnostics = assign_script_export_names(&mut self.pending);
+        if self.infer_return_types {
+            infer_pending_return_types(&mut self.pending, self.version);
+        }
 
         let mut catalog = ScriptCatalog {
             diagnostics,
@@ -344,6 +374,7 @@ fn push_pending_script_metadata<S: BuildHasher>(
     let group_id = ScriptGroupId((packed_id_raw >> 16) as i32);
     let file_id = (packed_id_raw & 0xffff) as u16;
     let parsed_name = script.name.as_deref().and_then(parse_script_name_tag);
+    let raw_name = script.name.clone();
     let short_name = parsed_name
         .as_ref()
         .map(|parsed| parsed.short_name.clone())
@@ -357,19 +388,11 @@ fn push_pending_script_metadata<S: BuildHasher>(
         arg_count_int: script.argument_count_int,
         arg_count_obj: script.argument_count_object,
         arg_count_long: script.argument_count_long,
+        return_count_int: 0,
+        return_count_obj: 0,
+        return_count_long: 0,
         return_type: if infer_return_types {
-            let empty_components: HashMap<u32, String> = HashMap::new();
-            let empty_enums: HashMap<i32, String> = HashMap::new();
-            let empty_catalog = ScriptCatalog::default();
-            infer_return_type_for_script(
-                &script,
-                packed_id,
-                version,
-                &empty_components,
-                &empty_enums,
-                &empty_catalog,
-                &HashMap::new(),
-            )
+            "void".to_string()
         } else {
             "unknown".to_string()
         },
@@ -380,11 +403,88 @@ fn push_pending_script_metadata<S: BuildHasher>(
         group_id,
         file_id,
         kind,
-        raw_name: script.name,
+        raw_name,
         short_name,
         signature,
         export_name: String::new(),
+        script: infer_return_types.then_some(script),
     });
+}
+
+fn infer_pending_return_types(pending: &mut [PendingScriptMetadata], version: u32) {
+    let catalog = catalog_from_pending(pending);
+    let mut signatures = pending
+        .iter()
+        .map(|entry| (entry.packed_id, entry.signature.clone()))
+        .collect::<HashMap<_, _>>();
+    let scripts = pending
+        .iter()
+        .filter_map(|entry| Some((entry.packed_id, entry.script.as_ref()?)))
+        .collect::<Vec<_>>();
+    infer_return_types_fixed_point(&scripts, version, &catalog, &mut signatures);
+    for entry in pending {
+        if let Some(signature) = signatures.remove(&entry.packed_id) {
+            entry.signature = signature;
+        }
+    }
+}
+
+fn catalog_from_pending(pending: &[PendingScriptMetadata]) -> ScriptCatalog {
+    let mut catalog = ScriptCatalog::default();
+    for entry in pending {
+        catalog.insert(ScriptMetadata {
+            packed_id: entry.packed_id,
+            group_id: entry.group_id,
+            file_id: entry.file_id,
+            kind: entry.kind,
+            raw_name: entry.raw_name.clone(),
+            short_name: entry.short_name.clone(),
+            module_name: entry.export_name.clone(),
+            export_name: entry.export_name.clone(),
+            signature: entry.signature.clone(),
+        });
+    }
+    catalog
+}
+
+fn infer_return_types_fixed_point(
+    scripts: &[(ScriptId, &CompiledScript)],
+    version: u32,
+    script_catalog: &ScriptCatalog,
+    signatures: &mut HashMap<ScriptId, ScriptSignature>,
+) {
+    let empty_components: HashMap<u32, String> = HashMap::new();
+    let empty_enums: HashMap<i32, String> = HashMap::new();
+    for _ in 0..MAX_RETURN_TYPE_INFERENCE_PASSES {
+        let snapshot = signatures.clone();
+        let mut changed = false;
+        for (script_id, script) in scripts {
+            let inferred = infer_return_signature_for_script(
+                script,
+                *script_id,
+                version,
+                &empty_components,
+                &empty_enums,
+                script_catalog,
+                &snapshot,
+            );
+            if let Some(signature) = signatures.get_mut(script_id)
+                && (signature.return_type != inferred.return_type
+                    || signature.return_count_int != inferred.return_counts.int
+                    || signature.return_count_obj != inferred.return_counts.obj
+                    || signature.return_count_long != inferred.return_counts.long)
+            {
+                signature.return_type = inferred.return_type;
+                signature.return_count_int = inferred.return_counts.int;
+                signature.return_count_obj = inferred.return_counts.obj;
+                signature.return_count_long = inferred.return_counts.long;
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
 }
 
 fn assign_script_export_names(entries: &mut [PendingScriptMetadata]) -> Vec<Diagnostic> {
@@ -540,10 +640,16 @@ impl Transpiler {
     }
 
     pub fn with_varbits(mut self, varbits: &BTreeMap<u32, crate::vars::VarBitEntry>) -> Self {
+        let mut name_counts = HashMap::<String, usize>::new();
+        for varbit in varbits.values() {
+            *name_counts.entry(varbit.varbit_name.clone()).or_default() += 1;
+        }
         for (id, varbit) in varbits {
-            self.symbol_table
-                .varbit_map
-                .insert(*id as u16, varbit.varbit_name.clone());
+            if name_counts.get(&varbit.varbit_name) == Some(&1) {
+                self.symbol_table
+                    .varbit_map
+                    .insert(*id as u16, varbit.varbit_name.clone());
+            }
         }
         self
     }
@@ -615,18 +721,9 @@ impl Transpiler {
         let mut names = HashMap::new();
         for entry in enums.values() {
             let obj = format!("Enum_{id}", id = entry.id);
+            let mut used_properties = HashSet::new();
             for pair in &entry.values {
-                let prop = match &pair.value {
-                    crate::config::ScalarValue::Str(s) => {
-                        let name = str_to_screaming_snake(s);
-                        if name.is_empty() {
-                            format!("KEY_{key}", key = pair.key)
-                        } else {
-                            name
-                        }
-                    }
-                    _ => format!("KEY_{key}", key = pair.key),
-                };
+                let prop = enum_pair_property_name(&pair.value, pair.key, &mut used_properties);
                 names.insert(pair.key, format!("{obj}.{prop}"));
             }
         }
@@ -643,32 +740,35 @@ impl Transpiler {
         opcode_book: &OpcodeBook,
         version: u32,
     ) -> Self {
-        let empty_components = HashMap::new();
-        let empty_enums = HashMap::new();
-        let empty_catalog = ScriptCatalog::default();
+        let mut decoded = Vec::new();
         for (&id, data) in scripts {
             if let Ok(script) = decode_script(data, opcode_book, version) {
                 let script_id = ScriptId(id as i32);
-                let return_type = infer_return_type_for_script(
-                    &script,
-                    script_id,
-                    version,
-                    &empty_components,
-                    &empty_enums,
-                    &empty_catalog,
-                    &self.script_signatures,
-                );
                 self.script_signatures.insert(
                     script_id,
                     ScriptSignature {
                         arg_count_int: script.argument_count_int,
                         arg_count_obj: script.argument_count_object,
                         arg_count_long: script.argument_count_long,
-                        return_type,
+                        return_count_int: 0,
+                        return_count_obj: 0,
+                        return_count_long: 0,
+                        return_type: "void".to_string(),
                     },
                 );
+                decoded.push((script_id, script));
             }
         }
+        let decoded_refs = decoded
+            .iter()
+            .map(|(script_id, script)| (*script_id, script))
+            .collect::<Vec<_>>();
+        infer_return_types_fixed_point(
+            &decoded_refs,
+            version,
+            &self.script_catalog,
+            &mut self.script_signatures,
+        );
         self
     }
 
@@ -679,6 +779,10 @@ impl Transpiler {
     /// Get a script's signature for cross-script call typing.
     pub fn script_signature(&self, id: ScriptId) -> Option<&ScriptSignature> {
         resolve_script_signature(&self.script_catalog, &self.script_signatures, id)
+    }
+
+    pub fn script_signatures(&self) -> &HashMap<ScriptId, ScriptSignature> {
+        &self.script_signatures
     }
 
     pub fn script_name_for(&self, script_id: ScriptId) -> Option<String> {
@@ -708,6 +812,17 @@ impl Transpiler {
         self.transpile_structured(script, script_id)
     }
 
+    pub fn transpile_linear(
+        &self,
+        script: &CompiledScript,
+        script_id: ScriptId,
+    ) -> Result<TranspiledScript> {
+        self.transpile_with_writer(script, script_id, |writer, decl| BuiltStructuredScript {
+            script: writer.build_linear_script(decl),
+            control_flow_fallback_reason: Some("forced_reversible".to_string()),
+        })
+    }
+
     pub fn transpile_to_ast(&self, script: &CompiledScript, script_id: ScriptId) -> Declaration {
         let codegen = CodeGen::new(&self.symbol_table);
         codegen.generate(script, script_id)
@@ -717,6 +832,27 @@ impl Transpiler {
         &self,
         script: &CompiledScript,
         script_id: ScriptId,
+    ) -> Result<TranspiledScript> {
+        self.transpile_with_writer(script, script_id, |writer, decl| {
+            writer.build_script_with_report(decl)
+        })
+    }
+
+    pub fn transpile_structured_conservative(
+        &self,
+        script: &CompiledScript,
+        script_id: ScriptId,
+    ) -> Result<TranspiledScript> {
+        self.transpile_with_writer(script, script_id, |writer, decl| {
+            writer.build_script_with_options(decl, structurer::StructureOptions::CONSERVATIVE)
+        })
+    }
+
+    fn transpile_with_writer(
+        &self,
+        script: &CompiledScript,
+        script_id: ScriptId,
+        build_structured: impl FnOnce(&StructuredWriter<'_>, &Declaration) -> BuiltStructuredScript,
     ) -> Result<TranspiledScript> {
         self.check_instruction_limit(script_id, script.code.len())?;
 
@@ -729,8 +865,10 @@ impl Transpiler {
             &self.symbol_table.enum_value_names,
             &self.script_catalog,
             &self.script_signatures,
+            self.build,
         );
-        let structured_script = writer.build_script(&decl);
+        let built_script = build_structured(&writer, &decl);
+        let structured_script = built_script.script;
         let body_source = structured_script.render();
         self.check_generated_source_limit(script_id, body_source.len())?;
         let diagnostics = self.finish_transpile_diagnostics(diagnostics, script_id, &body_source);
@@ -751,6 +889,7 @@ impl Transpiler {
             referenced_scripts: collect_script_refs(script),
             editable_structured: metadata.editable_structured,
             blocking_diagnostics: metadata.blocking_diagnostics.clone(),
+            control_flow_fallback_reason: built_script.control_flow_fallback_reason,
             diagnostics,
         })
     }
@@ -871,12 +1010,6 @@ impl Transpiler {
         // `goto(...)` is no longer an automatic blocker: the linear fallback
         // emits lowerable gotos for irreducible control flow, and the
         // recompile-fidelity gate decides whether the result is byte-identical.
-        if source.contains("pop()") {
-            diagnostics.warning_at(
-                script_span.clone(),
-                "bad stack state: residual pop() in output",
-            );
-        }
         if source.contains("// if (") {
             diagnostics.note_at(
                 script_span,
@@ -929,6 +1062,7 @@ pub struct TranspiledScript {
     pub referenced_scripts: Vec<ScriptId>,
     pub editable_structured: bool,
     pub blocking_diagnostics: Vec<String>,
+    pub control_flow_fallback_reason: Option<String>,
     pub diagnostics: Diagnostics,
 }
 
@@ -1010,32 +1144,81 @@ pub fn infer_return_type_for_script<S>(
 where
     S: BuildHasher + Clone,
 {
+    infer_return_signature_for_script(
+        script,
+        script_id,
+        build,
+        component_names,
+        enum_value_names,
+        script_catalog,
+        script_signatures,
+    )
+    .return_type
+}
+
+#[derive(Debug, Clone)]
+pub struct InferredReturnSignature {
+    pub return_type: String,
+    pub return_counts: ScriptReturnCounts,
+}
+
+pub fn infer_return_signature_for_script<ComponentHasher, SignatureHasher>(
+    script: &CompiledScript,
+    script_id: ScriptId,
+    build: u32,
+    component_names: &HashMap<u32, String, ComponentHasher>,
+    enum_value_names: &HashMap<i32, String, ComponentHasher>,
+    script_catalog: &ScriptCatalog,
+    script_signatures: &HashMap<ScriptId, ScriptSignature, SignatureHasher>,
+) -> InferredReturnSignature
+where
+    ComponentHasher: BuildHasher + Clone,
+    SignatureHasher: BuildHasher,
+{
     let symbol_table = SymbolTable::new();
     let codegen = CodeGen::new(&symbol_table);
     let decl = codegen.generate(script, script_id);
-    if build >= MIN_SCRIPT_BUILD {
-        let blocks = build_cfg(
-            &decl.instructions,
-            &symbol_table.var_map,
-            component_names,
-            enum_value_names,
-            script_catalog,
-            script_signatures,
-        );
-        let structured = emit_structured(&blocks);
-        return detect_return_type(&structured).to_string();
-    }
-
-    let recovered = expr_recovery::ExprRecovery::new(
+    let recovered = expr_recovery::ExprRecovery::new_for_build(
         &decl.instructions,
         &symbol_table.var_map,
         component_names,
         enum_value_names,
         script_catalog,
         script_signatures,
+        build,
     )
     .recover();
-    detect_return_type_from_recovered(&recovered).to_string()
+    let return_counts = detect_return_counts_from_recovered_with_signatures(
+        &recovered,
+        script_catalog,
+        script_signatures,
+    )
+    .unwrap_or_default();
+    let return_type = if build >= MIN_SCRIPT_BUILD {
+        let blocks = cfg::build_cfg_for_build(
+            &decl.instructions,
+            &symbol_table.var_map,
+            component_names,
+            enum_value_names,
+            script_catalog,
+            script_signatures,
+            build,
+        );
+        let structured = emit_structured(&blocks);
+        cfg::detect_return_type_with_signatures(&structured, script_catalog, script_signatures)
+            .to_string()
+    } else {
+        detect_return_type_from_recovered_with_signatures(
+            &recovered,
+            script_catalog,
+            script_signatures,
+        )
+        .to_string()
+    };
+    InferredReturnSignature {
+        return_type,
+        return_counts,
+    }
 }
 
 fn str_to_screaming_snake(s: &str) -> String {
@@ -1054,6 +1237,49 @@ fn str_to_screaming_snake(s: &str) -> String {
         String::new()
     } else {
         trimmed.to_string()
+    }
+}
+
+pub fn enum_pair_property_name<S: BuildHasher>(
+    value: &ScalarValue,
+    key: i32,
+    used_properties: &mut HashSet<String, S>,
+) -> String {
+    let base = match value {
+        ScalarValue::Str(value) => {
+            let name = str_to_screaming_snake(value);
+            if name.is_empty() {
+                format!("KEY_{key}")
+            } else {
+                name
+            }
+        }
+        _ => format!("KEY_{key}"),
+    };
+    unique_enum_property_name(base, key, used_properties)
+}
+
+fn unique_enum_property_name<S: BuildHasher>(
+    base: String,
+    key: i32,
+    used_properties: &mut HashSet<String, S>,
+) -> String {
+    if used_properties.insert(base.clone()) {
+        return base;
+    }
+
+    let keyed = format!("{base}_{key}");
+    if used_properties.insert(keyed.clone()) {
+        return keyed;
+    }
+
+    let mut suffix = 2;
+    loop {
+        let candidate = format!("{base}_{key}_{suffix}");
+        if used_properties.insert(candidate.clone()) {
+            return candidate;
+        }
+        suffix += 1;
     }
 }
 
@@ -1131,12 +1357,13 @@ fn is_ts_reserved_word(word: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        ScriptCatalog, ScriptId, ScriptKind, TranspileLimits, Transpiler,
+        ScriptCatalog, ScriptId, ScriptKind, TranspileLimits, Transpiler, enum_pair_property_name,
         extract_script_name_suffix, infer_return_type_for_script, parse_script_name_tag,
         sanitize_export_name, sanitize_ts_ident,
     };
+    use crate::config::ScalarValue;
     use crate::script::{CompiledScript, Instruction, MIN_SCRIPT_BUILD, Operand};
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
 
     fn test_script(code: Vec<Instruction>) -> CompiledScript {
         CompiledScript {
@@ -1183,6 +1410,18 @@ mod tests {
     fn sanitize_export_name_emits_valid_identifier() {
         assert_eq!("foo_bar", sanitize_export_name("foo-bar"));
         assert_eq!("_123abc", sanitize_export_name("123abc"));
+    }
+
+    #[test]
+    fn enum_pair_property_name_suffixes_duplicate_text_values() {
+        let mut used = HashSet::new();
+        let first =
+            enum_pair_property_name(&ScalarValue::Str("Reserved".to_string()), 12292, &mut used);
+        let second =
+            enum_pair_property_name(&ScalarValue::Str("Reserved".to_string()), 12421, &mut used);
+
+        assert_eq!("RESERVED", first);
+        assert_eq!("RESERVED_12421", second);
     }
 
     #[test]

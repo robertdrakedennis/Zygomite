@@ -11,8 +11,8 @@
 //! - `While { body }`           → an *infinite* loop (`continue:` body `branch
 //!   continue; break:`); the body must `Break` to exit and never re-emits the
 //!   back-edge.
-//! - `Switch { expr, cases }`   → switch table; no-match falls through to the
-//!   join, so a reconstructed switch must have no default body.
+//! - `Switch { expr, cases, default_body }` → switch table; no-match falls
+//!   through to `default_body` when the bytecode has a real fallthrough block.
 //! - `Break` / `Continue`       → unlabeled, so only the *innermost* loop's exit
 //!   / header can be expressed; anything else falls back to `Goto`.
 //!
@@ -23,18 +23,52 @@
 
 use super::cfg::{Block, assignment_target_from_recovered};
 use super::expr_recovery::RecoveredStmt;
-use super::structured::{StructuredStmt, SwitchCaseStmt};
+use super::structured::{StructuredStmt, SwitchCaseStmt, stmts_terminate};
+use std::collections::BTreeSet;
 
 /// Guards against pathological/irreducible graphs blowing the stack.
 const MAX_DEPTH: usize = 400;
+
+pub fn structure(blocks: &[Block]) -> Vec<StructuredStmt> {
+    structure_with_report(blocks).statements
+}
+
+pub struct StructureResult {
+    pub statements: Vec<StructuredStmt>,
+    pub fallback_reason: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct StructureOptions {
+    pub fold_branch_trampolines: bool,
+}
+
+impl StructureOptions {
+    pub(crate) const AGGRESSIVE: Self = Self {
+        fold_branch_trampolines: true,
+    };
+    pub(crate) const CONSERVATIVE: Self = Self {
+        fold_branch_trampolines: false,
+    };
+}
+
+pub fn structure_with_report(blocks: &[Block]) -> StructureResult {
+    structure_with_options(blocks, StructureOptions::AGGRESSIVE)
+}
 
 #[expect(
     clippy::similar_names,
     reason = "succ/pred are the conventional names for the two CFG adjacency lists"
 )]
-pub fn structure(blocks: &[Block]) -> Vec<StructuredStmt> {
+pub(crate) fn structure_with_options(
+    blocks: &[Block],
+    options: StructureOptions,
+) -> StructureResult {
     if blocks.is_empty() {
-        return Vec::new();
+        return StructureResult {
+            statements: Vec::new(),
+            fallback_reason: None,
+        };
     }
     let n = blocks.len();
     let succ: Vec<Vec<usize>> = blocks
@@ -50,11 +84,40 @@ pub fn structure(blocks: &[Block]) -> Vec<StructuredStmt> {
     let ipdom = post_dominators(n, &succ);
     let loops = LoopInfo::detect(&succ, &pred, &idom);
 
+    if let Some(reason) = conservative_fallback_reason(blocks) {
+        return StructureResult {
+            statements: structure_linear(blocks),
+            fallback_reason: Some(reason.to_string()),
+        };
+    }
+
+    let statements = emit_structured_pass(blocks, ipdom, loops, &BTreeSet::new(), options);
+    StructureResult {
+        statements: statements.statements,
+        fallback_reason: None,
+    }
+}
+
+struct StructuredPass {
+    statements: Vec<StructuredStmt>,
+}
+
+fn emit_structured_pass(
+    blocks: &[Block],
+    ipdom: Vec<Option<usize>>,
+    loops: LoopInfo,
+    label_targets: &BTreeSet<usize>,
+    options: StructureOptions,
+) -> StructuredPass {
+    let n = blocks.len();
     let mut s = Structurer {
         blocks,
         ipdom,
         loops,
         emitted: vec![false; n],
+        label_targets,
+        goto_targets: BTreeSet::new(),
+        options,
     };
     let mut out = s.emit_region(0, None, &[], 0);
 
@@ -72,30 +135,49 @@ pub fn structure(blocks: &[Block]) -> Vec<StructuredStmt> {
         }
     }
 
-    // Irreducible control flow (shared blocks, jump tables) leaves residual
-    // `goto`s the nested structuring can't express. Fall back to a linear
-    // emission: every block in original order, jump targets labelled, branches
-    // as `goto`/`if (cond) goto`. This isn't pretty but it preserves the
-    // original instruction order exactly, so it recompiles byte-identically and
-    // the script becomes editable instead of stranded on the ASM trailer.
-    if contains_goto(&out) {
-        emit_linear(blocks)
+    if label_targets.is_empty() && contains_goto(&out) && !s.goto_targets.is_empty() {
+        let goto_targets = s.goto_targets.clone();
+        return emit_structured_pass(blocks, s.ipdom, s.loops, &goto_targets, s.options);
+    }
+
+    StructuredPass { statements: out }
+}
+
+fn conservative_fallback_reason(blocks: &[Block]) -> Option<&'static str> {
+    if has_stack_goto(blocks) {
+        Some("stack_goto")
     } else {
-        out
+        None
     }
 }
 
 fn contains_goto(stmts: &[StructuredStmt]) -> bool {
     stmts.iter().any(|s| match s {
-        StructuredStmt::Goto { .. } => true,
+        StructuredStmt::Goto { .. } | StructuredStmt::StackGoto { .. } => true,
         StructuredStmt::While { body } => contains_goto(body),
         StructuredStmt::If {
             then_body,
             else_body,
             ..
         } => contains_goto(then_body) || else_body.as_deref().is_some_and(contains_goto),
-        StructuredStmt::Switch { cases, .. } => cases.iter().any(|c| contains_goto(&c.body)),
+        StructuredStmt::Switch {
+            cases,
+            default_body,
+            ..
+        } => {
+            cases.iter().any(|c| contains_goto(&c.body))
+                || default_body.as_deref().is_some_and(contains_goto)
+        }
         _ => false,
+    })
+}
+
+fn has_stack_goto(blocks: &[Block]) -> bool {
+    blocks.iter().any(|block| {
+        block
+            .statements
+            .iter()
+            .any(|stmt| matches!(stmt, RecoveredStmt::GotoStack { .. }))
     })
 }
 
@@ -104,7 +186,7 @@ fn contains_goto(stmts: &[StructuredStmt]) -> bool {
 /// `if (cond) goto` / `switch`/`return`. Order-faithful, so it recompiles
 /// byte-identically; used only as the fallback for control flow that cannot be
 /// reduced to nested `if`/`while`/`switch`.
-fn emit_linear(blocks: &[Block]) -> Vec<StructuredStmt> {
+pub(crate) fn structure_linear(blocks: &[Block]) -> Vec<StructuredStmt> {
     let n = blocks.len();
     let mut needs_label = vec![false; n];
     let mut mark = |instr: usize| {
@@ -116,6 +198,7 @@ fn emit_linear(blocks: &[Block]) -> Vec<StructuredStmt> {
         for stmt in &b.statements {
             match stmt {
                 RecoveredStmt::Goto(t)
+                | RecoveredStmt::GotoStack { target: t, .. }
                 | RecoveredStmt::Branch { target: t, .. }
                 | RecoveredStmt::BranchBinary { target: t, .. } => mark(*t),
                 RecoveredStmt::Switch { cases, .. } => {
@@ -155,6 +238,12 @@ fn emit_linear(blocks: &[Block]) -> Vec<StructuredStmt> {
                 RecoveredStmt::Goto(target) => out.push(StructuredStmt::Goto {
                     target: label_start(*target),
                 }),
+                RecoveredStmt::GotoStack { target, values } => {
+                    out.push(StructuredStmt::StackGoto {
+                        target: label_start(*target),
+                        values: values.clone(),
+                    });
+                }
                 RecoveredStmt::Branch { target, .. }
                 | RecoveredStmt::BranchBinary { target, .. } => {
                     if let Some(condition) = super::cfg::branch_condition_expr(stmt) {
@@ -182,11 +271,14 @@ fn emit_linear(blocks: &[Block]) -> Vec<StructuredStmt> {
                             body: vec![StructuredStmt::Goto {
                                 target: label_start(*target),
                             }],
+                            fallthrough: false,
+                            break_after: true,
                         })
                         .collect();
                     out.push(StructuredStmt::Switch {
                         expr: discriminant.clone(),
                         cases,
+                        default_body: None,
                     });
                 }
             }
@@ -325,6 +417,7 @@ enum LoopExit {
     Multi,
 }
 
+#[derive(Clone)]
 struct LoopInfo {
     headers: Vec<bool>,
     exit: std::collections::HashMap<usize, LoopExit>,
@@ -409,6 +502,9 @@ struct Structurer<'a> {
     ipdom: Vec<Option<usize>>,
     loops: LoopInfo,
     emitted: Vec<bool>,
+    label_targets: &'a BTreeSet<usize>,
+    goto_targets: BTreeSet<usize>,
+    options: StructureOptions,
 }
 
 impl Structurer<'_> {
@@ -433,9 +529,29 @@ impl Structurer<'_> {
         }
     }
 
-    fn goto(&self, target: usize) -> StructuredStmt {
+    fn goto(&mut self, target: usize) -> StructuredStmt {
         let label = self.blocks.get(target).map_or(target, |b| b.start);
+        self.goto_targets.insert(label);
         StructuredStmt::Goto { target: label }
+    }
+
+    fn goto_instr(&mut self, target: usize) -> StructuredStmt {
+        let label = block_at_instr(self.blocks, target).map_or(target, |b| self.blocks[b].start);
+        self.goto_targets.insert(label);
+        StructuredStmt::Goto { target: label }
+    }
+
+    fn stack_goto_instr(
+        &mut self,
+        target: usize,
+        values: Vec<super::ast::Expression>,
+    ) -> StructuredStmt {
+        let label = block_at_instr(self.blocks, target).map_or(target, |b| self.blocks[b].start);
+        self.goto_targets.insert(label);
+        StructuredStmt::StackGoto {
+            target: label,
+            values,
+        }
     }
 
     /// Structure a linear region beginning at `entry`, stopping at `stop`
@@ -483,12 +599,30 @@ impl Structurer<'_> {
             }
 
             self.emitted[cur] = true;
+            if self.label_targets.contains(&self.blocks[cur].start) {
+                out.push(StructuredStmt::Label {
+                    target: self.blocks[cur].start,
+                });
+            }
             for stmt in &self.blocks[cur].statements {
                 if let Some(s) = convert_stmt(stmt) {
                     out.push(s);
                 }
             }
-            let (mut term, next) = self.emit_terminator(cur, loops, depth);
+            if self.blocks[cur].predecessors.is_empty()
+                && let [RecoveredStmt::Goto(target)] = self.blocks[cur].statements.as_slice()
+            {
+                out.push(self.goto_instr(*target));
+                break;
+            }
+            if self.blocks[cur].predecessors.is_empty()
+                && let [RecoveredStmt::GotoStack { target, values }] =
+                    self.blocks[cur].statements.as_slice()
+            {
+                out.push(self.stack_goto_instr(*target, values.clone()));
+                break;
+            }
+            let (mut term, next) = self.emit_terminator(cur, stop, loops, depth);
             out.append(&mut term);
             match next {
                 Some(n) => cur = n,
@@ -504,6 +638,7 @@ impl Structurer<'_> {
     fn emit_terminator(
         &mut self,
         cur: usize,
+        stop: Option<usize>,
         loops: &[LoopCtx],
         depth: usize,
     ) -> (Vec<StructuredStmt>, Option<usize>) {
@@ -515,6 +650,13 @@ impl Structurer<'_> {
             return (vec![StructuredStmt::Return { value }], None);
         }
 
+        if let Some((target, values)) = block.statements.iter().find_map(|s| match s {
+            RecoveredStmt::GotoStack { target, values } => Some((*target, values.clone())),
+            _ => None,
+        }) {
+            return (vec![self.stack_goto_instr(target, values)], None);
+        }
+
         if let Some((discriminant, cases)) = switch_of(block) {
             return self.emit_switch(cur, &discriminant, &cases, loops, depth);
         }
@@ -524,8 +666,28 @@ impl Structurer<'_> {
             && let Some(condition) = block.branch_condition.clone()
         {
             let true_target = block.successors[0];
-            let false_target = block.successors[1];
-            let join = self.ipdom_of(cur);
+            let raw_false_target = block.successors[1];
+            let false_target = if self.options.fold_branch_trampolines {
+                self.branch_trampoline_target(raw_false_target)
+                    .unwrap_or(raw_false_target)
+            } else {
+                raw_false_target
+            };
+            if self.is_shared_forward_continuation(cur, true_target, false_target, loops) {
+                if self.options.fold_branch_trampolines && raw_false_target != false_target {
+                    self.emitted[raw_false_target] = true;
+                }
+                let then_body = self.emit_arm(true_target, Some(false_target), loops, depth);
+                let stmt = StructuredStmt::If {
+                    condition,
+                    then_body,
+                    else_body: None,
+                };
+                return (vec![stmt], Some(false_target));
+            }
+            let join = stop
+                .filter(|stop| block.successors.contains(stop))
+                .or_else(|| self.ipdom_of(cur));
             let then_body = self.emit_arm(true_target, join, loops, depth);
             let else_body = self.emit_arm(false_target, join, loops, depth);
             // An empty else arm must be `None`, not `Some(vec![])`: a simple
@@ -547,6 +709,33 @@ impl Structurer<'_> {
         // Unconditional / fall-through: hand the single successor back to the
         // linear walk (whose guards handle loop edges, boundaries, cross edges).
         (Vec::new(), block.successors.first().copied())
+    }
+
+    fn is_shared_forward_continuation(
+        &self,
+        cur: usize,
+        true_target: usize,
+        false_target: usize,
+        loops: &[LoopCtx],
+    ) -> bool {
+        let Some(false_block) = self.blocks.get(false_target) else {
+            return false;
+        };
+        let Some(true_block) = self.blocks.get(true_target) else {
+            return false;
+        };
+        false_target > cur
+            && true_block.start < false_block.start
+            && !self.emitted[false_target]
+            && self.loop_edge(false_target, loops).is_none()
+    }
+
+    fn branch_trampoline_target(&self, block_index: usize) -> Option<usize> {
+        let [RecoveredStmt::Goto(target)] = self.blocks.get(block_index)?.statements.as_slice()
+        else {
+            return None;
+        };
+        block_at_instr(self.blocks, *target)
     }
 
     /// Structure one arm of an `if`, bounded by the join (immediate
@@ -593,9 +782,11 @@ impl Structurer<'_> {
                 body.push(s);
             }
         }
-        let (mut term, next) = self.emit_terminator(header, &inner, depth);
+        let (mut term, next) = self.emit_terminator(header, None, &inner, depth);
         body.append(&mut term);
-        if let Some(n) = next {
+        if let Some(n) = next
+            && Some(n) != exit
+        {
             body.extend(self.emit_region(n, None, &inner, depth + 1));
         }
         Some((StructuredStmt::While { body }, exit))
@@ -610,20 +801,100 @@ impl Structurer<'_> {
         depth: usize,
     ) -> (Vec<StructuredStmt>, Option<usize>) {
         let join = self.ipdom_of(cur);
+        let default_body = block_at_instr(self.blocks, self.blocks[cur].end)
+            .filter(|&entry| Some(entry) != join)
+            .filter(|&entry| {
+                !cases.iter().any(|(_, target_instr)| {
+                    block_at_instr(self.blocks, *target_instr) == Some(entry)
+                })
+            })
+            .map(|entry| self.emit_arm(entry, join, loops, depth));
         let mut out_cases = Vec::with_capacity(cases.len());
-        for &(value, target_instr) in cases {
-            let Some(entry) = block_at_instr(self.blocks, target_instr) else {
-                // Can't map the case target → leave it unstructured.
-                return (vec![self.goto(cur)], None);
-            };
+        let entries = cases
+            .iter()
+            .map(|&(value, target_instr)| {
+                block_at_instr(self.blocks, target_instr).map(|entry| (value, entry))
+            })
+            .collect::<Option<Vec<_>>>();
+        let Some(entries) = entries else {
+            // Can't map a case target -> leave it unstructured.
+            return (vec![self.goto(cur)], None);
+        };
+        for (index, &(value, entry)) in entries.iter().enumerate() {
+            if entries
+                .get(index + 1)
+                .is_some_and(|&(_, next_entry)| next_entry == entry)
+            {
+                out_cases.push(SwitchCaseStmt {
+                    value,
+                    body: Vec::new(),
+                    fallthrough: true,
+                    break_after: false,
+                });
+                continue;
+            }
             let body = self.emit_arm(entry, join, loops, depth);
-            out_cases.push(SwitchCaseStmt { value, body });
+            let has_following_case_or_default = index + 1 < entries.len() || default_body.is_some();
+            let break_after = (!stmts_terminate(&body) && has_following_case_or_default)
+                || self.dead_break_after_case_body(entry, join);
+            out_cases.push(SwitchCaseStmt {
+                value,
+                body,
+                fallthrough: false,
+                break_after,
+            });
         }
         let stmt = StructuredStmt::Switch {
             expr: discriminant.clone(),
             cases: out_cases,
+            default_body,
         };
         (vec![stmt], join)
+    }
+
+    fn dead_break_after_case_body(&self, entry: usize, join: Option<usize>) -> bool {
+        let mut cur = entry;
+        let mut seen = BTreeSet::new();
+        while seen.insert(cur) {
+            let Some(block) = self.blocks.get(cur) else {
+                return false;
+            };
+            let mut saw_return = false;
+            for stmt in &block.statements {
+                if saw_return && let RecoveredStmt::Goto(target) = stmt {
+                    return self.dead_break_target_matches(*target, join);
+                }
+                if matches!(stmt, RecoveredStmt::Return(_)) {
+                    saw_return = true;
+                }
+            }
+            if block
+                .statements
+                .iter()
+                .any(|stmt| matches!(stmt, RecoveredStmt::Return(_)))
+            {
+                if let [target] = block.successors.as_slice() {
+                    return join.is_none_or(|join| *target == join);
+                }
+                let Some(next_block) = block_at_instr(self.blocks, block.end) else {
+                    return false;
+                };
+                let [RecoveredStmt::Goto(target)] = self.blocks[next_block].statements.as_slice()
+                else {
+                    return false;
+                };
+                return self.dead_break_target_matches(*target, join);
+            }
+            let [next] = block.successors.as_slice() else {
+                return false;
+            };
+            cur = *next;
+        }
+        false
+    }
+
+    fn dead_break_target_matches(&self, target: usize, join: Option<usize>) -> bool {
+        join.is_none_or(|join| block_at_instr(self.blocks, target) == Some(join))
     }
 }
 
@@ -641,6 +912,7 @@ fn convert_stmt(stmt: &RecoveredStmt) -> Option<StructuredStmt> {
         | RecoveredStmt::BranchBinary { .. }
         | RecoveredStmt::Switch { .. }
         | RecoveredStmt::Goto(_)
+        | RecoveredStmt::GotoStack { .. }
         | RecoveredStmt::Return(_) => None,
     }
 }
@@ -659,4 +931,202 @@ fn block_at_instr(blocks: &[Block], instr: usize) -> Option<usize> {
     blocks
         .iter()
         .position(|b| instr >= b.start && instr < b.end)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::transpile::ast::{BooleanLiteral, Expression};
+
+    fn bool_expr(value: bool) -> Expression {
+        Expression::BooleanLiteral(BooleanLiteral { value })
+    }
+
+    fn block(
+        index: usize,
+        start: usize,
+        end: usize,
+        statements: Vec<RecoveredStmt>,
+        successors: Vec<usize>,
+        predecessors: Vec<usize>,
+    ) -> Block {
+        Block {
+            index,
+            start,
+            end,
+            statements,
+            successors,
+            predecessors,
+            is_loop_header: false,
+            loop_target: None,
+            is_conditional_branch: false,
+            branch_condition: None,
+        }
+    }
+
+    #[test]
+    fn residual_goto_inserts_target_label_without_conservative_fallback() {
+        let blocks = vec![
+            block(0, 0, 1, vec![RecoveredStmt::Goto(4)], vec![2], vec![]),
+            block(1, 2, 3, vec![RecoveredStmt::Return(None)], vec![], vec![]),
+            block(
+                2,
+                4,
+                5,
+                vec![
+                    RecoveredStmt::Expression(bool_expr(true)),
+                    RecoveredStmt::Return(None),
+                ],
+                vec![],
+                vec![0, 1],
+            ),
+        ];
+
+        let structured = structure_with_report(&blocks);
+
+        assert_eq!(None, structured.fallback_reason);
+        assert!(
+            structured
+                .statements
+                .iter()
+                .any(|stmt| matches!(stmt, StructuredStmt::Goto { target } if *target == 4))
+        );
+        assert!(
+            structured
+                .statements
+                .iter()
+                .any(|stmt| matches!(stmt, StructuredStmt::Label { target } if *target == 4))
+        );
+    }
+
+    #[test]
+    fn shared_forward_continuation_structures_as_guard_clause() {
+        let mut blocks = vec![
+            block(
+                0,
+                0,
+                4,
+                vec![RecoveredStmt::Branch {
+                    condition: bool_expr(true),
+                    target: 5,
+                    negated: false,
+                }],
+                vec![2, 1],
+                vec![],
+            ),
+            block(1, 4, 5, vec![RecoveredStmt::Goto(11)], vec![5], vec![0]),
+            block(
+                2,
+                5,
+                8,
+                vec![RecoveredStmt::Branch {
+                    condition: bool_expr(false),
+                    target: 9,
+                    negated: false,
+                }],
+                vec![4, 3],
+                vec![0],
+            ),
+            block(3, 8, 9, vec![RecoveredStmt::Goto(11)], vec![5], vec![2]),
+            block(4, 9, 11, vec![RecoveredStmt::Return(None)], vec![], vec![2]),
+            block(
+                5,
+                11,
+                15,
+                vec![RecoveredStmt::Return(None)],
+                vec![],
+                vec![1, 3],
+            ),
+        ];
+        blocks[0].is_conditional_branch = true;
+        blocks[0].branch_condition = Some(bool_expr(true));
+        blocks[2].is_conditional_branch = true;
+        blocks[2].branch_condition = Some(bool_expr(false));
+
+        let structured = structure_with_report(&blocks);
+
+        let [
+            StructuredStmt::If {
+                then_body,
+                else_body: None,
+                ..
+            },
+            StructuredStmt::Return { .. },
+        ] = structured.statements.as_slice()
+        else {
+            panic!(
+                "expected top-level guard clause: {:#?}",
+                structured.statements
+            );
+        };
+        assert!(
+            matches!(
+                then_body.as_slice(),
+                [StructuredStmt::If {
+                    else_body: None,
+                    ..
+                }]
+            ),
+            "expected nested guard clause: {then_body:#?}"
+        );
+        assert!(!contains_goto(&structured.statements));
+        assert!(
+            !structured
+                .statements
+                .iter()
+                .any(|stmt| matches!(stmt, StructuredStmt::Label { .. })),
+            "guard clause should not need labels: {:#?}",
+            structured.statements
+        );
+    }
+
+    #[test]
+    fn conservative_shared_forward_continuation_keeps_trampoline_goto() {
+        let mut blocks = vec![
+            block(
+                0,
+                0,
+                4,
+                vec![RecoveredStmt::Branch {
+                    condition: bool_expr(true),
+                    target: 5,
+                    negated: false,
+                }],
+                vec![2, 1],
+                vec![],
+            ),
+            block(1, 4, 5, vec![RecoveredStmt::Goto(11)], vec![5], vec![0]),
+            block(
+                2,
+                5,
+                8,
+                vec![RecoveredStmt::Branch {
+                    condition: bool_expr(false),
+                    target: 9,
+                    negated: false,
+                }],
+                vec![4, 3],
+                vec![0],
+            ),
+            block(3, 8, 9, vec![RecoveredStmt::Goto(11)], vec![5], vec![2]),
+            block(4, 9, 11, vec![RecoveredStmt::Return(None)], vec![], vec![2]),
+            block(
+                5,
+                11,
+                15,
+                vec![RecoveredStmt::Return(None)],
+                vec![],
+                vec![1, 3],
+            ),
+        ];
+        blocks[0].is_conditional_branch = true;
+        blocks[0].branch_condition = Some(bool_expr(true));
+        blocks[2].is_conditional_branch = true;
+        blocks[2].branch_condition = Some(bool_expr(false));
+
+        let structured = structure_with_options(&blocks, StructureOptions::CONSERVATIVE);
+
+        assert_eq!(None, structured.fallback_reason);
+        assert!(contains_goto(&structured.statements));
+    }
 }

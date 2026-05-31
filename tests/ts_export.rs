@@ -67,6 +67,7 @@ fn require_script_fixture_947() -> Option<PathBuf> {
 fn run_rs3(build: u32, subcommand: &str, out_dir: &Path, extra: &[&str]) {
     let (cache, data) = require_fixture(build).expect("fixture");
     let bin = env!("CARGO_BIN_EXE_rs3-cache-rs");
+    let subbuild = if build == 947 { "1" } else { "0" };
     let output = Command::new(bin)
         .args([
             "--cache-dir",
@@ -76,7 +77,7 @@ fn run_rs3(build: u32, subcommand: &str, out_dir: &Path, extra: &[&str]) {
             "--build",
             &build.to_string(),
             "--subbuild",
-            "0",
+            subbuild,
             subcommand,
             "--out-dir",
             &out_dir.to_string_lossy(),
@@ -370,7 +371,7 @@ fn transpile_script621_947_uses_group_name_and_signature() {
         "expected raw script identity metadata for script621"
     );
     assert!(
-        script.contains("export function script621(): number | void"),
+        script.contains("export function script621(): number"),
         "expected canonical group-based export name"
     );
 

@@ -1,6 +1,7 @@
 use super::ast::{Declaration, ImportStatement, TypeAnnotation};
-use super::cfg::{build_cfg, detect_return_type, emit_structured};
+use super::cfg::{build_cfg_for_build, detect_return_type_with_signatures, emit_linear_structured};
 use super::structured::StructuredScript;
+use super::structurer::StructureOptions;
 use super::{ScriptCatalog, ScriptId, ScriptSignature, resolve_script_signature};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -10,6 +11,12 @@ pub struct StructuredWriter<'a> {
     enum_value_names: &'a HashMap<i32, String>,
     script_catalog: &'a ScriptCatalog,
     script_signatures: &'a HashMap<ScriptId, ScriptSignature>,
+    build: u32,
+}
+
+pub struct BuiltStructuredScript {
+    pub script: StructuredScript,
+    pub control_flow_fallback_reason: Option<String>,
 }
 
 impl<'a> StructuredWriter<'a> {
@@ -19,6 +26,7 @@ impl<'a> StructuredWriter<'a> {
         enum_value_names: &'a HashMap<i32, String>,
         script_catalog: &'a ScriptCatalog,
         script_signatures: &'a HashMap<ScriptId, ScriptSignature>,
+        build: u32,
     ) -> Self {
         Self {
             var_names,
@@ -26,25 +34,70 @@ impl<'a> StructuredWriter<'a> {
             enum_value_names,
             script_catalog,
             script_signatures,
+            build,
         }
     }
 
     pub fn build_script(&self, decl: &Declaration) -> StructuredScript {
-        let blocks = build_cfg(
+        self.build_script_with_report(decl).script
+    }
+
+    pub fn build_script_with_report(&self, decl: &Declaration) -> BuiltStructuredScript {
+        self.build_script_with_options(decl, StructureOptions::AGGRESSIVE)
+    }
+
+    pub(crate) fn build_script_with_options(
+        &self,
+        decl: &Declaration,
+        options: StructureOptions,
+    ) -> BuiltStructuredScript {
+        let blocks = build_cfg_for_build(
             &decl.instructions,
             self.var_names,
             self.component_names,
             self.enum_value_names,
             self.script_catalog,
             self.script_signatures,
+            self.build,
         );
-        let structured = emit_structured(&blocks);
+        let structured = super::structurer::structure_with_options(&blocks, options);
+        BuiltStructuredScript {
+            script: self.build_script_with_body(decl, structured.statements),
+            control_flow_fallback_reason: structured.fallback_reason,
+        }
+    }
+
+    pub fn build_linear_script(&self, decl: &Declaration) -> StructuredScript {
+        let blocks = build_cfg_for_build(
+            &decl.instructions,
+            self.var_names,
+            self.component_names,
+            self.enum_value_names,
+            self.script_catalog,
+            self.script_signatures,
+            self.build,
+        );
+        let structured = emit_linear_structured(&blocks);
+        self.build_script_with_body(decl, structured)
+    }
+
+    fn build_script_with_body(
+        &self,
+        decl: &Declaration,
+        structured: Vec<super::structured::StructuredStmt>,
+    ) -> StructuredScript {
         let return_type =
             resolve_script_signature(self.script_catalog, self.script_signatures, decl.script_id)
                 .and_then(|signature| {
                     (signature.return_type != "unknown").then_some(signature.return_type.as_str())
                 })
-                .unwrap_or_else(|| detect_return_type(&structured))
+                .unwrap_or_else(|| {
+                    detect_return_type_with_signatures(
+                        &structured,
+                        self.script_catalog,
+                        self.script_signatures,
+                    )
+                })
                 .to_string();
         let function_name = self
             .script_catalog
