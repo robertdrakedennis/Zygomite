@@ -82,8 +82,8 @@ Status legend: `[ ]` todo · `[~]` in progress · `[x]` done
 The relooper structures the control flow; the remaining editable gain is locked behind making that
 structure recompile **byte-identically**. Gate-protected, measured via `transpile_coverage`.
 
-**Current gated baseline (full corpus): 947 = 8541/20577 = 41.51%, 910 = 6198/14313 = 43.30%**
-(up from the post-relooper 4.6%/5.9% — a 9.0x / 7.3x session gain, all byte-identity gated).
+**Current gated baseline (full corpus): 947 = 8947/20577 = 43.48%, 910 = 7250/14313 = 50.65%**
+(up from the post-relooper 4.6%/5.9% — a 9.4x / 8.6x gain, all byte-identity gated).
 
 **goto / shared-block support (linear fallback).** Irreducible control flow (shared return/join
 blocks, jump tables) can't be nested into if/while/switch, so it stayed `residual_goto`-blocked.
@@ -185,6 +185,16 @@ Done this session (each gate-verified, byte-identity preserved):
   dead code. Fixed with +1 in decode / -1 in encode for branches and switches. **+761 (947) / +716
   (910) editable** — the largest single fix, and it corrects the decompiled control flow for every
   branching script (readability), not just the gated ones.
+- **✅ `concat(...)` and 910 subtraction lowering.** The decompiler renders `join_string N` as
+  `concat(a, b, ...)`; lower it back to `join_string` with a count operand. Also lower binary `-`
+  to 910's legacy `quickchat_dynamic_command_add` when `sub` is absent. **+292 (947) / +958 (910)**;
+  `reverse_unsupported_cause:other` collapsed from 2043→342 (947) and 2521→258 (910) before the UI
+  pass.
+- **✅ Generic UI camel/snake inverse.** Recovered missing UI stack effects for setobject variants,
+  button/grid helpers, scriptqueue clear, and related methods; lower `UI.SetobjectNonum`,
+  `UI.SetparamInt`, `UI.GetmodelangleX`, etc. by matching the decompiler's `sanitize_camel` output
+  and argument count back to the `cc_`/`if_` opcode. **+114 (947) / +94 (910)** on top of concat/sub;
+  `reverse_unsupported_cause:ui_method` is now 66 (947) and 0 (910).
 
 ### Correction to an earlier "dead code" claim
 A prior pass concluded the dominant `branch_equals:operand` residual was corpus dead code (no-op
@@ -194,12 +204,14 @@ it was the symptom of the off-by-one above. Those are genuine guard clauses (`if
 byte round-trip alone cannot validate control-flow interpretation — cross-check the client VM.
 
 Next levers (genuine capability, not corpus artifacts):
-- [ ] **Recover result types for generic commands** so value-producing command calls (the ~912
-  residual "unsupported call expression") lower with the right discard/assignment type instead of
-  `Void`. Needs a *typed* per-opcode effect (int/obj/long push) in the lowerer — reuse the typed
-  model in `validate.rs::stack_effect_for` rather than the count-only `expr_recovery::stack_effect`.
-- [ ] **`ui_method` (128), `callback_watcher` (104)**: smaller lowering gaps surfaced by the
-  `reverse_unsupported_cause:*` histogram.
+- [ ] **Recompile layout fidelity**: `branch:operand` and `switch:operand` now dominate
+  (`947: 3278/1883`, `910: 2220/1284`). This is instruction ordering / expression ordering, not
+  decode loss.
+- [ ] **`callback_watcher` and callback target lowering**: remaining reverse blockers are now mostly
+  watcher names and non-literal callback targets (`947 callback_watcher=276`, `910=240`).
+- [ ] **Remaining generic calls / expression forms**: unsupported call expression is now small
+  (≈50-60 scripts/build); comparison/logical expressions outside control-flow and array access are
+  next small reverse gaps.
 - [ ] Remove the now-dead `StructuredEmitter` from `cfg.rs` (the relooper replaced it).
 
 ## P1 — Control-flow recovery (the dominant lever: ~62%+49% of corpus)

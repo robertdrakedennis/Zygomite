@@ -352,6 +352,17 @@ fn stack_effect(
         | "cc_setparam" | "cc_setparam_int" | "cc_setparam_string" => {
             StackEffect { pops: 2, pushes: 0 }
         }
+        "cc_setobject"
+        | "cc_setobject_nonum"
+        | "cc_setobject_alwaysnum"
+        | "cc_setobject_wearcol"
+        | "cc_setobject_wearcol_nonum"
+        | "cc_setobject_wearcol_alwaysnum"
+        | "cc_setobject_long"
+        | "cc_setobject_alwaysnum_long"
+        | "cc_setobject_wearcol_long"
+        | "cc_setobject_wearcol_alwaysnum_long" => StackEffect { pops: 2, pushes: 0 },
+        "cc_setobject_highres" => StackEffect { pops: 1, pushes: 0 },
         "cc_settextalign" | "cc_setrecol" | "cc_setretex" => StackEffect { pops: 3, pushes: 0 },
         "cc_setposition" | "cc_setsize" | "cc_setmodeltint" => StackEffect { pops: 4, pushes: 0 },
         "cc_setmodelangle" => StackEffect { pops: 6, pushes: 0 },
@@ -364,9 +375,18 @@ fn stack_effect(
         | "cc_sendtoback"
         | "cc_resetmodellighting"
         | "cc_clearops"
-        | "cc_callonresize" => StackEffect { pops: 0, pushes: 0 },
+        | "cc_callonresize"
+        | "cc_resume_pausebutton"
+        | "cc_scriptqueue_clear" => StackEffect { pops: 0, pushes: 0 },
         "cc_deleteall" | "if_sendtofront" | "if_sendtoback" => StackEffect { pops: 1, pushes: 0 },
         "cc_find" => StackEffect { pops: 2, pushes: 1 },
+        "cc_find_parent" => StackEffect { pops: 0, pushes: 1 },
+        "cc_button_setcantoggle" | "cc_button_settoggled" => StackEffect { pops: 1, pushes: 0 },
+        "cc_button_setlinkobjoptions" | "cc_scriptqueue_clear_script" => {
+            StackEffect { pops: 2, pushes: 0 }
+        }
+        "cc_grid_setlayoutparams" => StackEffect { pops: 3, pushes: 0 },
+        "cc_button_settextareasizeoffsets" => StackEffect { pops: 4, pushes: 0 },
         "if_find" => StackEffect { pops: 1, pushes: 1 },
         "if_gettext" => StackEffect { pops: 1, pushes: 1 },
         "if_settext"
@@ -397,13 +417,32 @@ fn stack_effect(
         | "if_setoninvtransmit" => StackEffect { pops: 2, pushes: 0 },
         "if_setscrollpos" | "if_setscrollsize" | "if_setaspect" | "if_setmodelorigin"
         | "if_setparam_int" | "if_setparam_string" => StackEffect { pops: 3, pushes: 0 },
+        "if_setobject"
+        | "if_setobject_nonum"
+        | "if_setobject_alwaysnum"
+        | "if_setobject_wearcol"
+        | "if_setobject_wearcol_nonum"
+        | "if_setobject_wearcol_alwaysnum"
+        | "if_setobject_long"
+        | "if_setobject_alwaysnum_long"
+        | "if_setobject_wearcol_long"
+        | "if_setobject_wearcol_alwaysnum_long" => StackEffect { pops: 3, pushes: 0 },
+        "if_setobject_highres"
+        | "if_button_setcantoggle"
+        | "if_button_settoggled"
+        | "if_scriptqueue_clear_script" => StackEffect { pops: 2, pushes: 0 },
         "if_settextalign" | "if_setrecol" | "if_setretex" => StackEffect { pops: 4, pushes: 0 },
+        "if_button_setlinkobjoptions" | "if_grid_setlayoutparams" => {
+            StackEffect { pops: 3, pushes: 0 }
+        }
         "if_setposition" | "if_setsize" | "if_setmodeltint" => StackEffect { pops: 5, pushes: 0 },
+        "if_button_settextareasizeoffsets" => StackEffect { pops: 5, pushes: 0 },
         "if_setmodelangle" => StackEffect { pops: 7, pushes: 0 },
         "if_setmodellighting" => StackEffect {
             pops: 11,
             pushes: 0,
         },
+        "if_resume_pausebutton" | "if_scriptqueue_clear" => StackEffect { pops: 1, pushes: 0 },
 
         // Misc known ops
         "cc_create" => StackEffect { pops: 3, pushes: 0 },

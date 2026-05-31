@@ -594,6 +594,19 @@ impl<'a> StructuredLowerer<'a> {
 
     fn emit_call(&mut self, call: &super::CallExpr) -> Result<ValueKind> {
         if let Expression::Identifier(identifier) = &*call.callee
+            && identifier.name == "concat"
+        {
+            for argument in &call.arguments {
+                self.emit_expr(argument)?;
+            }
+            self.emit_instruction(
+                "join_string",
+                Operand::Count(i32::try_from(call.arguments.len())?),
+            );
+            return Ok(ValueKind::Object);
+        }
+
+        if let Expression::Identifier(identifier) = &*call.callee
             && let Some(script_metadata) = self
                 .ctx
                 .script_catalog
@@ -717,32 +730,31 @@ impl<'a> StructuredLowerer<'a> {
             method if method.starts_with("Get") => self.emit_ui_getter(method, arguments),
             method if method.starts_with("Seton") => self.emit_ui_hook_call(method, arguments),
             method => {
-                // Generic inverse of the decompiler's UI naming. The decompiler
-                // renders generic `if_*`/`cc_*` set-methods via `sanitize_camel`
-                // (capital first letter, e.g. `if_sethide` -> `UI.Sethide`),
-                // while explicit `cc_*` cases keep lowercase-first camelCase
-                // (`cc_sethide` -> `UI.setHide`). So a capital-first method
-                // backed by an `if_*` opcode is the interface-targeted form and
-                // must lower to `if_<lower>`, not the current-component
-                // `cc_<lower>` (the if_sethide->cc_sethide mismatch). Otherwise
-                // fall back to `cc_<lower>`. The recompile gate is the backstop
-                // for the rare opcodes that decompile to a colliding name.
-                let lower = method.to_ascii_lowercase();
-                let starts_upper = method.starts_with(|c: char| c.is_ascii_uppercase());
-                let if_form = format!("if_{lower}");
-                let cc_form = format!("cc_{lower}");
-                let command: String = if starts_upper && self.ctx.has_command(&if_form) {
-                    if_form
-                } else if self.ctx.has_command(&cc_form) {
-                    cc_form
-                } else {
-                    match method {
-                        "setParam" => "cc_setparam".to_string(),
-                        "setParamInt" => "cc_setparam_int".to_string(),
-                        "setParamString" => "cc_setparam_string".to_string(),
-                        _ => bail!("unsupported UI method {method}"),
-                    }
-                };
+                // Generic inverse of the decompiler's UI naming. It renders
+                // unhandled `cc_*`/`if_*` commands as `UI.{sanitize_camel(suffix)}`,
+                // so recover the original command by matching that transform
+                // and the observed argument count.
+                let command =
+                    if let Some(command) = self.resolve_ui_command(method, arguments.len()) {
+                        command
+                    } else {
+                        let lower = method.to_ascii_lowercase();
+                        let starts_upper = method.starts_with(|c: char| c.is_ascii_uppercase());
+                        let if_form = format!("if_{lower}");
+                        let cc_form = format!("cc_{lower}");
+                        if starts_upper && self.ctx.has_command(&if_form) {
+                            if_form
+                        } else if self.ctx.has_command(&cc_form) {
+                            cc_form
+                        } else {
+                            match method {
+                                "setParam" => "cc_setparam".to_string(),
+                                "setParamInt" => "cc_setparam_int".to_string(),
+                                "setParamString" => "cc_setparam_string".to_string(),
+                                _ => bail!("unsupported UI method {method}"),
+                            }
+                        }
+                    };
                 for argument in arguments {
                     self.emit_expr(argument)?;
                 }
@@ -768,6 +780,8 @@ impl<'a> StructuredLowerer<'a> {
             if_form
         } else if self.ctx.has_command(&cc_form) {
             cc_form
+        } else if let Some(command) = self.resolve_ui_command(method, arguments.len()) {
+            command
         } else {
             bail!("unsupported UI getter {method}");
         };
@@ -780,6 +794,24 @@ impl<'a> StructuredLowerer<'a> {
         } else {
             ValueKind::Int
         })
+    }
+
+    fn resolve_ui_command(&self, method: &str, arg_count: usize) -> Option<String> {
+        let mut candidates = Vec::new();
+        for command in &self.ctx.opcode_commands {
+            let Some(suffix) = ui_command_suffix(command) else {
+                continue;
+            };
+            if ui_method_from_suffix(suffix) != method {
+                continue;
+            }
+            if ui_command_arg_count(command) != Some(arg_count) {
+                continue;
+            }
+            candidates.push(command.clone());
+        }
+        candidates.sort();
+        candidates.into_iter().next()
     }
 
     fn emit_ui_hook_call(&mut self, method: &str, arguments: &[Expression]) -> Result<ValueKind> {
@@ -815,6 +847,8 @@ impl<'a> StructuredLowerer<'a> {
             .resolve_export_name(&callback.script)
         {
             metadata.group_id.0
+        } else if let Some(value) = self.ctx.enum_values_by_name.get(&callback.script) {
+            *value
         } else if let Some(id) = callback.script.strip_prefix("script") {
             id.parse::<i32>()?
         } else {
@@ -844,6 +878,14 @@ impl<'a> StructuredLowerer<'a> {
     fn emit_callback_watcher(&mut self, watcher: &str) -> Result<()> {
         // Watcher trigger ids are int constants, encoded the same typed-constant
         // way as every other int constant in the corpus (see emit_int_constant).
+        if let Some(value) = self.ctx.enum_values_by_name.get(watcher).copied() {
+            self.emit_int_constant(value);
+            return Ok(());
+        }
+        if let Some(value) = self.ctx.component_ids_by_name.get(watcher).copied() {
+            self.emit_int_constant(value);
+            return Ok(());
+        }
         if let Some(var_ref) = self.ctx.var_refs_by_name.get(watcher) {
             let id = i32::from(var_ref.id);
             self.emit_int_constant(id);
@@ -854,9 +896,23 @@ impl<'a> StructuredLowerer<'a> {
             self.emit_int_constant(id);
             return Ok(());
         }
-        for prefix in ["inv_", "stat_", "varc_", "varcstr_"] {
+        for prefix in [
+            "inv_",
+            "stat_",
+            "varc_",
+            "varcstr_",
+            "varplayer_",
+            "varplayerint_",
+            "varplayerbit_",
+        ] {
             if let Some(id) = watcher.strip_prefix(prefix) {
                 self.emit_int_constant(id.parse::<i32>()?);
+                return Ok(());
+            }
+        }
+        if self.local_types.contains_key(watcher) {
+            let kind = self.emit_identifier(watcher)?;
+            if kind == ValueKind::Int {
                 return Ok(());
             }
         }
@@ -870,6 +926,10 @@ impl<'a> StructuredLowerer<'a> {
                 self.emit_expr(&binary.right)?;
                 let command = match binary.op {
                     BinaryOp::Add => "add",
+                    BinaryOp::Sub if self.ctx.has_command("sub") => "sub",
+                    BinaryOp::Sub if self.ctx.has_command("quickchat_dynamic_command_add") => {
+                        "quickchat_dynamic_command_add"
+                    }
                     BinaryOp::Sub => "sub",
                     BinaryOp::Mul => "multiply",
                     BinaryOp::Div => "divide",
@@ -1045,4 +1105,336 @@ fn parse_numeric_suffix(name: &str) -> Result<usize> {
         bail!("missing numeric suffix for {name}");
     };
     suffix.parse::<usize>().map_err(Into::into)
+}
+
+fn ui_command_suffix(command: &str) -> Option<&str> {
+    command
+        .strip_prefix("cc_")
+        .or_else(|| command.strip_prefix("if_"))
+}
+
+fn ui_method_from_suffix(suffix: &str) -> String {
+    let mut out = String::new();
+    let mut capitalize = true;
+    for c in suffix.chars() {
+        if c == '_' {
+            capitalize = true;
+        } else if capitalize {
+            out.push(c.to_ascii_uppercase());
+            capitalize = false;
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+fn ui_command_arg_count(command: &str) -> Option<usize> {
+    let suffix = ui_command_suffix(command)?;
+    let component_arg = usize::from(command.starts_with("if_"));
+    match suffix {
+        "set_gamescreen_enabled" => Some(1),
+        "find_parent" | "get_gamescreen" => Some(0),
+        "setobject_highres" => Some(component_arg + 1),
+        suffix if suffix.starts_with("setobject") => Some(component_arg + 2),
+        "setparam" | "setparam_int" | "setparam_string" => Some(component_arg + 2),
+        "getmodelangle_x" | "getmodelangle_y" | "getmodelangle_z" => Some(component_arg),
+        "resume_pausebutton" | "scriptqueue_clear" => Some(component_arg),
+        "scriptqueue_clear_script" | "button_setcantoggle" | "button_settoggled" => {
+            Some(component_arg + 1)
+        }
+        "button_setlinkobjoptions" => Some(component_arg + 2),
+        "grid_setlayoutparams" => Some(component_arg + 3),
+        "button_settextareasizeoffsets" => Some(component_arg + 4),
+        _ => super::expr_recovery::opcode_stack_effect(command).map(|effect| effect.total_pops()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ReverseCompileContext, lower_structured_script};
+    use crate::script::Operand;
+    use crate::transpile::ast::{
+        BinaryOp, BinaryOperation, CallExpr, CallbackLiteral, Expression, Identifier,
+        LocalVariable, NumberLiteral, PropertyAccess, ScriptId, StringLiteral, TypeAnnotation,
+    };
+    use crate::transpile::reversible_format::ReversibleMetadata;
+    use crate::transpile::structured::{AssignmentTarget, StructuredScript, StructuredStmt};
+    use crate::transpile::{ScriptCatalog, ScriptSignature};
+    use std::collections::{HashMap, HashSet};
+
+    #[test]
+    fn concat_call_lowers_to_join_string_with_count_operand() {
+        let script = script_with_body(
+            vec![LocalVariable {
+                index: 0,
+                name: "local_obj_0".to_string(),
+                type_annotation: TypeAnnotation::String,
+            }],
+            vec![StructuredStmt::Assignment {
+                target: AssignmentTarget::Identifier("local_obj_0".to_string()),
+                value: call("concat", vec![string("a"), string("b")]),
+            }],
+        );
+        let ctx = context(
+            947,
+            &["push_constant_string", "join_string", "pop_string_local"],
+        );
+
+        let compiled = lower_structured_script(&script, &metadata(947), &ctx)
+            .expect("concat should lower to join_string");
+
+        assert_eq!(compiled.code[2].command, "join_string");
+        assert!(matches!(compiled.code[2].operand, Operand::Count(2)));
+    }
+
+    #[test]
+    fn subtraction_uses_legacy_910_opcode_when_sub_is_absent() {
+        let script = script_with_body(
+            vec![LocalVariable {
+                index: 0,
+                name: "local_int_0".to_string(),
+                type_annotation: TypeAnnotation::Number,
+            }],
+            vec![StructuredStmt::Assignment {
+                target: AssignmentTarget::Identifier("local_int_0".to_string()),
+                value: Expression::BinaryOperation(BinaryOperation {
+                    op: BinaryOp::Sub,
+                    left: Box::new(number(10)),
+                    right: Box::new(number(3)),
+                }),
+            }],
+        );
+        let ctx = context(
+            910,
+            &[
+                "push_constant_string",
+                "quickchat_dynamic_command_add",
+                "pop_int_local",
+            ],
+        );
+
+        let compiled = lower_structured_script(&script, &metadata(910), &ctx)
+            .expect("910 subtraction should lower to legacy opcode");
+
+        assert_eq!(compiled.code[2].command, "quickchat_dynamic_command_add");
+    }
+
+    #[test]
+    fn generic_ui_method_restores_underscored_opcode_by_arg_count() {
+        let script = script_with_body(
+            Vec::new(),
+            vec![StructuredStmt::Expr {
+                expr: ui_call("SetobjectNonum", vec![number(15660), number(0)]),
+            }],
+        );
+        let ctx = context(
+            947,
+            &[
+                "push_constant_string",
+                "cc_setobject_nonum",
+                "if_setobject_nonum",
+            ],
+        );
+
+        let compiled = lower_structured_script(&script, &metadata(947), &ctx)
+            .expect("SetobjectNonum should resolve cc form");
+
+        assert_eq!(compiled.code[2].command, "cc_setobject_nonum");
+    }
+
+    #[test]
+    fn generic_ui_getter_restores_underscored_opcode() {
+        let script = script_with_body(
+            vec![LocalVariable {
+                index: 0,
+                name: "local_int_0".to_string(),
+                type_annotation: TypeAnnotation::Number,
+            }],
+            vec![StructuredStmt::Assignment {
+                target: AssignmentTarget::Identifier("local_int_0".to_string()),
+                value: ui_call("GetmodelangleX", Vec::new()),
+            }],
+        );
+        let ctx = context(947, &["cc_getmodelangle_x", "pop_int_local"]);
+
+        let compiled = lower_structured_script(&script, &metadata(947), &ctx)
+            .expect("GetmodelangleX should resolve cc getter");
+
+        assert_eq!(compiled.code[0].command, "cc_getmodelangle_x");
+    }
+
+    #[test]
+    fn callback_watcher_varplayerint_prefix_lowers_to_constant_id() {
+        let script = script_with_body(
+            Vec::new(),
+            vec![StructuredStmt::Expr {
+                expr: ui_call(
+                    "Setonvartransmit",
+                    vec![callback(
+                        "script123",
+                        Vec::new(),
+                        vec!["varplayerint_3814"],
+                        "Y",
+                    )],
+                ),
+            }],
+        );
+        let ctx = context(947, &["push_constant_string", "cc_setonvartransmit"]);
+
+        let compiled = lower_structured_script(&script, &metadata(947), &ctx)
+            .expect("varplayerint watcher should lower to constant id");
+
+        assert!(matches!(compiled.code[1].operand, Operand::Int(3814)));
+        assert!(matches!(compiled.code[2].operand, Operand::Int(1)));
+    }
+
+    #[test]
+    fn callback_watcher_local_identifier_lowers_to_local_load() {
+        let script = script_with_body(
+            vec![LocalVariable {
+                index: 0,
+                name: "local_int_0".to_string(),
+                type_annotation: TypeAnnotation::Number,
+            }],
+            vec![StructuredStmt::Expr {
+                expr: ui_call(
+                    "Setonvartransmit",
+                    vec![callback("script123", Vec::new(), vec!["local_int_0"], "Y")],
+                ),
+            }],
+        );
+        let ctx = context(
+            947,
+            &[
+                "push_constant_string",
+                "push_int_local",
+                "cc_setonvartransmit",
+            ],
+        );
+
+        let compiled = lower_structured_script(&script, &metadata(947), &ctx)
+            .expect("local watcher should lower to local load");
+
+        assert_eq!(compiled.code[1].command, "push_int_local");
+        assert!(matches!(compiled.code[1].operand, Operand::Local(0)));
+    }
+
+    #[test]
+    fn callback_target_enum_constant_lowers_to_script_id() {
+        let script = script_with_body(
+            Vec::new(),
+            vec![StructuredStmt::Expr {
+                expr: ui_call(
+                    "Setontimer",
+                    vec![callback("Enum_1.SCRIPT_TARGET", Vec::new(), Vec::new(), "")],
+                ),
+            }],
+        );
+        let mut ctx = context(947, &["push_constant_string", "cc_setontimer"]);
+        ctx.enum_values_by_name
+            .insert("Enum_1.SCRIPT_TARGET".to_string(), 4938);
+
+        let compiled = lower_structured_script(&script, &metadata(947), &ctx)
+            .expect("enum callback target should lower to script id");
+
+        assert!(matches!(compiled.code[0].operand, Operand::Int(4938)));
+    }
+
+    fn script_with_body(locals: Vec<LocalVariable>, body: Vec<StructuredStmt>) -> StructuredScript {
+        StructuredScript {
+            script_id: ScriptId(0),
+            raw_name: None,
+            header_comments: Vec::new(),
+            imports: Vec::new(),
+            function_name: "script0".to_string(),
+            arguments: Vec::new(),
+            locals,
+            arrays: Vec::new(),
+            return_type: "void".to_string(),
+            body,
+        }
+    }
+
+    fn metadata(build: u32) -> ReversibleMetadata {
+        ReversibleMetadata {
+            format_version: 1,
+            build,
+            subbuild: 0,
+            packed_id: 0,
+            group_id: 0,
+            file_id: 0,
+            script_id: 0,
+            export_name: "script0".to_string(),
+            raw_name: None,
+            editable_structured: true,
+            structured_digest: String::new(),
+            blocking_diagnostics: Vec::new(),
+        }
+    }
+
+    fn context(build: u32, commands: &[&str]) -> ReverseCompileContext {
+        ReverseCompileContext {
+            build,
+            script_catalog: ScriptCatalog::default(),
+            script_signatures: HashMap::<ScriptId, ScriptSignature>::new(),
+            var_refs_by_name: HashMap::new(),
+            varbit_refs_by_name: HashMap::new(),
+            enum_values_by_name: HashMap::new(),
+            component_ids_by_name: HashMap::new(),
+            opcode_commands: commands
+                .iter()
+                .map(|command| (*command).to_string())
+                .collect::<HashSet<_>>(),
+        }
+    }
+
+    fn call(name: &str, arguments: Vec<Expression>) -> Expression {
+        Expression::Call(CallExpr {
+            callee: Box::new(Expression::Identifier(Identifier {
+                name: name.to_string(),
+            })),
+            arguments,
+        })
+    }
+
+    fn ui_call(method: &str, arguments: Vec<Expression>) -> Expression {
+        Expression::Call(CallExpr {
+            callee: Box::new(Expression::PropertyAccess(PropertyAccess {
+                object: Box::new(Expression::Identifier(Identifier {
+                    name: "UI".to_string(),
+                })),
+                property: method.to_string(),
+            })),
+            arguments,
+        })
+    }
+
+    fn callback(
+        script: &str,
+        arguments: Vec<Expression>,
+        watchers: Vec<&str>,
+        raw_descriptor: &str,
+    ) -> Expression {
+        Expression::CallbackLiteral(CallbackLiteral {
+            script: script.to_string(),
+            script_id: None,
+            raw_descriptor: raw_descriptor.to_string(),
+            arguments,
+            watchers: watchers
+                .into_iter()
+                .map(std::string::ToString::to_string)
+                .collect(),
+        })
+    }
+
+    fn number(value: i32) -> Expression {
+        Expression::NumberLiteral(NumberLiteral { value })
+    }
+
+    fn string(value: &str) -> Expression {
+        Expression::StringLiteral(StringLiteral {
+            value: value.to_string(),
+        })
+    }
 }

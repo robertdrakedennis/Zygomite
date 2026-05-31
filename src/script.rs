@@ -25,6 +25,11 @@ pub struct OpcodeBook {
     pub by_id: Vec<Option<String>>,
     by_name: BTreeMap<String, u16>,
     large_by_id: Vec<bool>,
+    // Encode-only aliases: maps a cross-build opcode name (e.g. 947's `enum`) to
+    // this build's canonical name (910's `_enum`) for the SAME engine opcode.
+    // Consulted only when a direct name lookup misses, so decode/`name()` is
+    // unaffected. Sourced from `opcode-aliases-<build>[-<sub>].txt`.
+    aliases: BTreeMap<String, String>,
 }
 
 impl OpcodeBook {
@@ -105,10 +110,36 @@ impl OpcodeBook {
             }
         }
 
+        let mut aliases = BTreeMap::<String, String>::new();
+        if let Some(alias_path) = scoped_data_file(data_dir, "opcode-aliases", version, subversion)
+        {
+            let alias_content = fs::read_to_string(&alias_path)
+                .with_context(|| format!("failed reading alias file {}", alias_path.display()))?;
+            for raw in alias_content.lines() {
+                let line = raw.trim();
+                if line.is_empty() || line.starts_with("//") {
+                    continue;
+                }
+                let mut parts = line.split(',');
+                let alt = parts.next().context("alias row missing alt name")?.trim();
+                let canonical = parts
+                    .next()
+                    .context("alias row missing canonical name")?
+                    .trim();
+                if !by_name.contains_key(canonical) {
+                    bail!(
+                        "alias row '{line}' maps to unknown canonical opcode '{canonical}' in build {version}"
+                    );
+                }
+                aliases.insert(alt.to_string(), canonical.to_string());
+            }
+        }
+
         Ok(Self {
             by_id,
             by_name,
             large_by_id,
+            aliases,
         })
     }
 
@@ -120,10 +151,15 @@ impl OpcodeBook {
     }
 
     pub fn opcode_for(&self, name: &str) -> Result<u16> {
-        self.by_name
-            .get(name)
-            .copied()
-            .with_context(|| format!("missing opcode mapping for name '{name}'"))
+        if let Some(id) = self.by_name.get(name) {
+            return Ok(*id);
+        }
+        if let Some(canonical) = self.aliases.get(name)
+            && let Some(id) = self.by_name.get(canonical)
+        {
+            return Ok(*id);
+        }
+        bail!("missing opcode mapping for name '{name}'")
     }
 
     pub fn commands(&self) -> impl Iterator<Item = &str> {

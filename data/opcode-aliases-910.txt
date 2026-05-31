@@ -1,0 +1,9 @@
+// Encode-only opcode-name aliases for build 910.
+// Format: <alt_name>,<canonical_910_name>
+// Maps a cross-build opcode name (left, e.g. the name 947 uses) to this build's
+// canonical name (right) for the SAME engine opcode. Consulted ONLY when a direct
+// name->index lookup misses, so decode / name() output is unchanged.
+//
+// Verified same opcode, different name across builds:
+//   947 `enum` (idx 1660)  ==  910 `_enum` (idx 810)   — config enum read; stack args, no inline operand.
+enum,_enum

@@ -1491,3 +1491,53 @@ fn grabs_audio_archives() -> Result<()> {
     assert!(unknown < scanned);
     Ok(())
 }
+
+#[test]
+fn interface_1218_layer_rect_graphic_roundtrip_910() -> Result<()> {
+    const BUILD_910: u32 = 910;
+    const DEFAULT_910_CACHE: &str = "/Users/robert/projects/alerion/cache/unpacked/910";
+    const DEFAULT_910_TAR: &str = "/Users/robert/projects/ignis/static/cache-runescape-live-en-b910-2019-12-11-00-00-00-openrs2#1730.tar";
+
+    let cache_dir = std::env::var("RS3_CACHE_DIR_910")
+        .map_or_else(|_| PathBuf::from(DEFAULT_910_CACHE), PathBuf::from);
+    if !cache_dir.join("255/3.dat").is_file() {
+        eprintln!("SKIP (no 910 interface cache at {})", cache_dir.display());
+        return Ok(());
+    }
+    let tar = std::env::var("RS3_CACHE_TAR_910")
+        .map_or_else(|_| PathBuf::from(DEFAULT_910_TAR), PathBuf::from);
+
+    let _guard = lock_guard();
+    ensure_archive_groups(&cache_dir, &tar, ARCHIVE_INTERFACES, &[1218])?;
+    let cache = FlatCache::open(&cache_dir)?;
+    let index = cache.archive_index(ARCHIVE_INTERFACES)?;
+    let files = cache.group_files_with_index(&index, ARCHIVE_INTERFACES, 1218)?;
+
+    let (mut roundtripped, mut skipped) = (0usize, 0usize);
+    for (component, data) in &files {
+        // if3 components carry the version byte first; the type byte (with the
+        // name bit stripped) is at offset 1.
+        let if_type = data.get(1).copied().unwrap_or(0) & 0x7F;
+        if !matches!(if_type, 0 | 3 | 5) {
+            skipped += 1;
+            continue;
+        }
+
+        let decoded = rs3_cache_rs::interface_codec::decode_raw(data, BUILD_910)
+            .with_context(|| format!("decode_raw failed for 1218 com{component}"))?;
+        let encoded = rs3_cache_rs::interface_codec::encode_raw(&decoded, BUILD_910)
+            .with_context(|| format!("encode_raw failed for 1218 com{component}"))?;
+        assert_eq!(
+            &encoded, data,
+            "1218 com{component} (type {if_type}) did not round-trip byte-identically"
+        );
+        roundtripped += 1;
+    }
+
+    eprintln!("1218 codec round-trip: {roundtripped} layer/rect/graphic, {skipped} skipped");
+    assert!(
+        roundtripped >= 100,
+        "expected many layer/rect/graphic slots in 1218, only {roundtripped} round-tripped"
+    );
+    Ok(())
+}
