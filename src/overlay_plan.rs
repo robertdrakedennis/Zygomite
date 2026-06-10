@@ -23,14 +23,16 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::fs;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
-pub const OVERLAY_PLAN_VERSION: u32 = 1;
+pub const OVERLAY_PLAN_VERSION: u32 = 2;
 
 const MAX_PLAN_WARNINGS: usize = 2048;
 const MAX_EDGE_SAMPLES: usize = 256;
 type SemanticRefBuckets = HashMap<u32, HashMap<SemanticRefKey, Vec<u32>>>;
 type ConfigGroupFileCache = HashMap<(RootKind, u32, u32), Option<BTreeMap<u32, Vec<u8>>>>;
+type MapGroupRefs = Vec<(u32, Option<(Vec<u32>, Vec<u32>)>)>;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -107,6 +109,8 @@ struct OverlayImports {
     seqs: Vec<u32>,
     #[serde(default)]
     bas: Vec<u32>,
+    #[serde(default)]
+    spots: Vec<u32>,
     #[serde(default)]
     structs: Vec<u32>,
     #[serde(default)]
@@ -704,10 +708,10 @@ pub fn run_overlay_plan_command(options: OverlayPlanCommandOptions<'_>) -> Resul
         donor_build == 947,
         "native overlay-plan currently supports donor build 947 only"
     );
-    let manifest_value: CacheOverlayManifest = serde_json::from_slice(
-        &fs::read(manifest).with_context(|| format!("reading {}", manifest.display()))?,
-    )
-    .with_context(|| format!("decoding overlay manifest {}", manifest.display()))?;
+    let manifest_bytes =
+        fs::read(manifest).with_context(|| format!("reading {}", manifest.display()))?;
+    let manifest_value: CacheOverlayManifest = serde_json::from_slice(&manifest_bytes)
+        .with_context(|| format!("decoding overlay manifest {}", manifest.display()))?;
     let roots = resolve_roots(&manifest_value)?;
     let donor_manifest = read_semantic_manifest(&PathBuf::from(&roots.donor_semantic_root))?;
     let base_manifest = read_semantic_manifest(&PathBuf::from(&roots.base_semantic_root))?;
@@ -727,6 +731,26 @@ pub fn run_overlay_plan_command(options: OverlayPlanCommandOptions<'_>) -> Resul
         base_manifest.build,
         base_manifest.subbuild
     );
+    let cache_path = if audit_dir.is_none() {
+        overlay_plan_cache_path(
+            &manifest_bytes,
+            &donor_manifest,
+            &base_manifest,
+            allow_heuristic_sites,
+        )?
+    } else {
+        None
+    };
+    if let Some(cache_path) = cache_path.as_ref().filter(|path| path.is_file()) {
+        if let Some(path) = out_file {
+            fs::copy(cache_path, path)
+                .with_context(|| format!("copying cached overlay plan to {}", path.display()))?;
+        } else {
+            print!("{}", fs::read_to_string(cache_path)?);
+        }
+        eprintln!("overlay plan: cached");
+        return Ok(());
+    }
 
     let semantic_index = ConfigSemanticIndex::new(Path::new(&roots.donor_semantic_root))?;
     let mut builder = PlanBuilder {
@@ -789,6 +813,14 @@ pub fn run_overlay_plan_command(options: OverlayPlanCommandOptions<'_>) -> Resul
 
     if let Some(path) = out_file {
         write_json(path, &serde_json::to_value(&plan)?)?;
+        if let Some(cache_path) = cache_path {
+            if let Some(parent) = cache_path.parent() {
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("creating {}", parent.display()))?;
+            }
+            fs::copy(path, &cache_path)
+                .with_context(|| format!("writing overlay plan cache {}", cache_path.display()))?;
+        }
     } else {
         print_json(&serde_json::to_value(&plan)?)?;
     }
@@ -800,6 +832,29 @@ pub fn run_overlay_plan_command(options: OverlayPlanCommandOptions<'_>) -> Resul
         plan.proof.heuristic_site_count
     );
     Ok(())
+}
+
+fn overlay_plan_cache_path(
+    manifest_bytes: &[u8],
+    donor_manifest: &Rs3CacheManifest,
+    base_manifest: &Rs3CacheManifest,
+    allow_heuristic_sites: bool,
+) -> Result<Option<PathBuf>> {
+    let Some(home) = std::env::var_os("HOME") else {
+        return Ok(None);
+    };
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    env!("CARGO_PKG_VERSION").hash(&mut hasher);
+    OVERLAY_PLAN_VERSION.hash(&mut hasher);
+    allow_heuristic_sites.hash(&mut hasher);
+    manifest_bytes.hash(&mut hasher);
+    manifest_fingerprint(donor_manifest).hash(&mut hasher);
+    manifest_fingerprint(base_manifest).hash(&mut hasher);
+    Ok(Some(
+        PathBuf::from(home)
+            .join(".cache/alerion/rs3-cache-rs-overlay-plans")
+            .join(format!("{:016x}.json", hasher.finish())),
+    ))
 }
 
 impl ConfigSemanticIndex {
@@ -902,11 +957,14 @@ impl RefGraphRepository {
     }
 
     fn has_kind(&self, kind: &str) -> bool {
-        self.graphs.contains_key(kind)
+        self.graphs.contains_key(semantic_refs_file_name(kind))
     }
 
     fn get_refs(&self, kind: &str, id: u32) -> Option<&HashMap<SemanticRefKey, Vec<u32>>> {
-        self.graphs.get(kind)?.get(&id)
+        // Semantic kinds and refs file names differ for spotanims ("spotanim" config kind,
+        // refs/spot.json); normalise so spot configs get dependency closure instead of a
+        // missing-refs heuristic gap.
+        self.graphs.get(semantic_refs_file_name(kind))?.get(&id)
     }
 
     fn get_dbrow_table_id(&self, row_id: u32) -> Option<u32> {
@@ -1114,9 +1172,7 @@ fn seed_imports(builder: &mut PlanBuilder<'_>) -> Result<()> {
                     builder.roots.donor_raw_root
                 )
             })?;
-        for group_id in donor_index.group_id {
-            builder.primary_maps.insert(group_id);
-        }
+        builder.primary_maps.extend(donor_index.group_id);
     }
     for archive_ref in builder.manifest.imports.full_archives.clone() {
         seed_full_archive_selection(builder, &archive_ref)?;
@@ -1165,6 +1221,9 @@ fn seed_imports(builder: &mut PlanBuilder<'_>) -> Result<()> {
     }
     for id in builder.manifest.imports.bas.clone() {
         builder.queue(RefKind::Bas, id, "manifest", SelectionMode::Primary);
+    }
+    for id in builder.manifest.imports.spots.clone() {
+        builder.queue(RefKind::Spot, id, "manifest", SelectionMode::Primary);
     }
     for id in builder.manifest.imports.structs.clone() {
         builder.primary_structs.insert(id);
@@ -1218,21 +1277,133 @@ fn seed_full_archive_selection(
             )
         })?;
     builder.full_archive_selections.insert(archive.id);
-    for group_id in donor_index.group_id {
-        builder.add_group(&archive, group_id);
-    }
+    builder
+        .group_selections
+        .entry(archive.id)
+        .or_default()
+        .extend(donor_index.group_id);
     Ok(())
 }
 
 fn build_selections(builder: &mut PlanBuilder<'_>, allow_heuristic_sites: bool) -> Result<()> {
     let map_groups = builder.primary_maps.iter().copied().collect::<Vec<_>>();
-    for group_id in map_groups {
-        process_map_group(builder, group_id)?;
+    if !map_groups.is_empty() {
+        process_map_groups(builder, &map_groups)?;
     }
     while let Some(reference) = builder.pending.pop_front() {
         process_ref(builder, &reference, allow_heuristic_sites)?;
     }
     Ok(())
+}
+
+fn process_map_groups(builder: &mut PlanBuilder<'_>, map_groups: &[u32]) -> Result<()> {
+    let archive = archive_maps();
+    let donor_index = builder
+        .get_index(RootKind::Donor, &archive)?
+        .with_context(|| {
+            format!(
+                "Donor map archive index missing under {}",
+                builder.roots.donor_raw_root
+            )
+        })?;
+    let scanned = if let Some(cache_path) = map_refs_cache_path(&builder.donor_manifest, map_groups)
+        && let Ok(bytes) = fs::read(&cache_path)
+        && let Ok(scanned) = serde_json::from_slice::<MapGroupRefs>(&bytes)
+    {
+        scanned
+    } else {
+        let donor_cache = builder.donor_cache.clone();
+        let scanned = map_groups
+            .par_iter()
+            .map(|&group_id| scan_map_group_refs(&donor_cache, &donor_index, &archive, group_id))
+            .collect::<Result<MapGroupRefs>>()?;
+        if let Some(cache_path) = map_refs_cache_path(&builder.donor_manifest, map_groups) {
+            if let Some(parent) = cache_path.parent() {
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("creating {}", parent.display()))?;
+            }
+            fs::write(&cache_path, serde_json::to_vec(&scanned)?)
+                .with_context(|| format!("writing map refs cache {}", cache_path.display()))?;
+        }
+        scanned
+    };
+    let mut selected_groups = Vec::with_capacity(scanned.len());
+    for (group_id, refs) in scanned {
+        let Some((loc_ids, npc_ids)) = refs else {
+            builder.add_blocked(OverlayBlockedIssue {
+                kind: "missing".to_string(),
+                archive: Some(archive.name.to_string()),
+                archive_id: Some(archive.id),
+                group_id: Some(group_id),
+                file_id: None,
+                id: None,
+                ref_kind: None,
+                message: format!("Donor map group {group_id} missing."),
+            });
+            continue;
+        };
+        selected_groups.push(group_id);
+        let source = format!("map_{group_id}");
+        for loc_id in loc_ids {
+            builder.queue(
+                RefKind::Loc,
+                loc_id,
+                source.clone(),
+                SelectionMode::Dependency,
+            );
+        }
+        for npc_id in npc_ids {
+            builder.queue(
+                RefKind::Npc,
+                npc_id,
+                source.clone(),
+                SelectionMode::Dependency,
+            );
+        }
+    }
+    builder
+        .group_selections
+        .entry(archive.id)
+        .or_default()
+        .extend(selected_groups);
+    Ok(())
+}
+
+fn map_refs_cache_path(donor_manifest: &Rs3CacheManifest, map_groups: &[u32]) -> Option<PathBuf> {
+    let home = std::env::var_os("HOME")?;
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    env!("CARGO_PKG_VERSION").hash(&mut hasher);
+    OVERLAY_PLAN_VERSION.hash(&mut hasher);
+    manifest_fingerprint(donor_manifest).hash(&mut hasher);
+    map_groups.hash(&mut hasher);
+    Some(
+        PathBuf::from(home)
+            .join(".cache/alerion/rs3-cache-rs-map-refs")
+            .join(format!("{:016x}.json", hasher.finish())),
+    )
+}
+
+fn scan_map_group_refs(
+    donor_cache: &FlatCache,
+    donor_index: &ArchiveIndex,
+    archive: &ArchiveDef,
+    group_id: u32,
+) -> Result<(u32, Option<(Vec<u32>, Vec<u32>)>)> {
+    if !is_group_present(donor_index, group_id) {
+        return Ok((group_id, None));
+    }
+    let files = donor_cache
+        .group_files_with_index(donor_index, archive.id, group_id)
+        .with_context(|| format!("reading donor map group {group_id}"))?;
+    let loc_ids = match files.get(&0) {
+        Some(file) => parse_loc_ids(file)?,
+        None => Vec::new(),
+    };
+    let npc_ids = match files.get(&2) {
+        Some(file) => parse_npc_ids(file)?,
+        None => Vec::new(),
+    };
+    Ok((group_id, Some((loc_ids, npc_ids))))
 }
 
 fn process_ref(
@@ -1276,35 +1447,16 @@ fn process_ref(
             process_struct_ref(builder, reference, &target)?;
         }
         RefKind::Enum => {
-            let allow_ids = builder.manifest.allow.enum_ids.clone();
             let target = config_target(RefKind::Enum, reference.id);
-            process_gated_config_ref(builder, reference, &target, "enum", &allow_ids, &allow_ids)?;
+            process_gated_config_ref(builder, reference, &target, "enum")?;
         }
         RefKind::VarBit => {
-            let allow_ids = builder.manifest.allow.varbit_ids.clone();
-            let conflict_allow_ids = builder.manifest.allow.varbit_conflict_ids.clone();
             let target = config_target(RefKind::VarBit, reference.id);
-            process_gated_config_ref(
-                builder,
-                reference,
-                &target,
-                "varbit",
-                &allow_ids,
-                &conflict_allow_ids,
-            )?;
+            process_gated_config_ref(builder, reference, &target, "varbit")?;
         }
         RefKind::Varp => {
-            let allow_ids = builder.manifest.allow.varp_ids.clone();
-            let conflict_allow_ids = builder.manifest.allow.varp_conflict_ids.clone();
             let target = config_target(RefKind::Varp, reference.id);
-            process_gated_config_ref(
-                builder,
-                reference,
-                &target,
-                "varp",
-                &allow_ids,
-                &conflict_allow_ids,
-            )?;
+            process_gated_config_ref(builder, reference, &target, "varp")?;
         }
         RefKind::Quest => {
             let target = config_target(RefKind::Quest, reference.id);
@@ -1372,8 +1524,18 @@ fn process_covered_ref_dependencies(
         return Ok(());
     }
     match reference.kind {
-        RefKind::Loc => scan_config_dependencies(builder, "loc", reference.id, &reference.source),
-        RefKind::Npc => scan_config_dependencies(builder, "npc", reference.id, &reference.source),
+        RefKind::Loc => {
+            scan_config_dependencies(builder, "loc", reference.id, &reference.source)?;
+            let _ =
+                scan_binary_multivar_dependencies(builder, "loc", reference.id, &reference.source)?;
+            Ok(())
+        }
+        RefKind::Npc => {
+            scan_config_dependencies(builder, "npc", reference.id, &reference.source)?;
+            let _ =
+                scan_binary_multivar_dependencies(builder, "npc", reference.id, &reference.source)?;
+            Ok(())
+        }
         _ => Ok(()),
     }
 }
@@ -1396,57 +1558,6 @@ fn full_archive_for_ref(
         RefKind::Anim => archive_anims_rt7(),
         _ => return Ok(None),
     }))
-}
-
-fn process_map_group(builder: &mut PlanBuilder<'_>, group_id: u32) -> Result<()> {
-    let archive = archive_maps();
-    let donor_index = builder
-        .get_index(RootKind::Donor, &archive)?
-        .with_context(|| {
-            format!(
-                "Donor map archive index missing under {}",
-                builder.roots.donor_raw_root
-            )
-        })?;
-    if !is_group_present(&donor_index, group_id) {
-        builder.add_blocked(OverlayBlockedIssue {
-            kind: "missing".to_string(),
-            archive: Some(archive.name.to_string()),
-            archive_id: Some(archive.id),
-            group_id: Some(group_id),
-            file_id: None,
-            id: None,
-            ref_kind: None,
-            message: format!("Donor map group {group_id} missing."),
-        });
-        return Ok(());
-    }
-    builder.add_group(&archive, group_id);
-    let files = builder
-        .donor_cache
-        .group_files_with_index(&donor_index, archive.id, group_id)
-        .with_context(|| format!("reading donor map group {group_id}"))?;
-    if let Some(loc_file) = files.get(&1) {
-        for loc_id in parse_loc_ids(loc_file)? {
-            builder.queue(
-                RefKind::Loc,
-                loc_id,
-                format!("map_{group_id}"),
-                SelectionMode::Dependency,
-            );
-        }
-    }
-    if let Some(npc_file) = files.get(&2) {
-        for npc_id in parse_npc_ids(npc_file)? {
-            builder.queue(
-                RefKind::Npc,
-                npc_id,
-                format!("map_{group_id}"),
-                SelectionMode::Dependency,
-            );
-        }
-    }
-    Ok(())
 }
 
 fn process_config_ref(
@@ -1523,8 +1634,6 @@ fn process_gated_config_ref(
     reference: &PendingRef,
     target: &ConfigTarget,
     semantic_kind: &str,
-    allow_ids: &[u32],
-    conflict_allow_ids: &[u32],
 ) -> Result<()> {
     let state = compare_file(builder, &target.archive, target.group_id, target.file_id)?;
     if state == CompareState::MissingDonor {
@@ -1539,9 +1648,8 @@ fn process_gated_config_ref(
         return scan_config_dependencies(builder, semantic_kind, target.id, &reference.source);
     }
 
-    let allowed_missing_target = allowed_missing_target_ids(builder, target.kind, allow_ids);
     if state == CompareState::MissingTarget {
-        if !allowed_missing_target.contains(&target.id) {
+        if !is_allowed_missing_target_id(builder, target.kind, target.id) {
             builder.add_blocked(OverlayBlockedIssue {
                 kind: "blocked-ref".to_string(),
                 archive: Some(target.archive.name.to_string()),
@@ -1564,7 +1672,7 @@ fn process_gated_config_ref(
         return scan_config_dependencies(builder, semantic_kind, target.id, &reference.source);
     }
 
-    if !conflict_allow_ids.contains(&target.id) {
+    if !is_allowed_conflict_id(builder, target.kind, target.id) {
         builder.add_blocked(OverlayBlockedIssue {
             kind: "conflict".to_string(),
             archive: Some(target.archive.name.to_string()),
@@ -2187,18 +2295,28 @@ fn queue_varbit_base_varp_dependency(
     Ok(())
 }
 
-fn allowed_missing_target_ids(
-    builder: &PlanBuilder<'_>,
-    kind: RefKind,
-    allow_ids: &[u32],
-) -> HashSet<u32> {
-    let mut merged = allow_ids.iter().copied().collect::<HashSet<_>>();
+fn is_allowed_missing_target_id(builder: &PlanBuilder<'_>, kind: RefKind, id: u32) -> bool {
     match kind {
-        RefKind::VarBit => merged.extend(builder.auto_allowed_missing_varbits.iter().copied()),
-        RefKind::Varp => merged.extend(builder.auto_allowed_missing_varps.iter().copied()),
-        _ => {}
+        RefKind::Enum => builder.manifest.allow.enum_ids.contains(&id),
+        RefKind::VarBit => {
+            builder.manifest.allow.varbit_ids.contains(&id)
+                || builder.auto_allowed_missing_varbits.contains(&id)
+        }
+        RefKind::Varp => {
+            builder.manifest.allow.varp_ids.contains(&id)
+                || builder.auto_allowed_missing_varps.contains(&id)
+        }
+        _ => false,
     }
-    merged
+}
+
+fn is_allowed_conflict_id(builder: &PlanBuilder<'_>, kind: RefKind, id: u32) -> bool {
+    match kind {
+        RefKind::Enum => builder.manifest.allow.enum_ids.contains(&id),
+        RefKind::VarBit => builder.manifest.allow.varbit_conflict_ids.contains(&id),
+        RefKind::Varp => builder.manifest.allow.varp_conflict_ids.contains(&id),
+        _ => false,
+    }
 }
 
 fn prove_script_ref(

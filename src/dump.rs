@@ -189,6 +189,15 @@ pub fn dump_raw_flat(
     archive_filter: Option<&[u32]>,
 ) -> Result<RawFlatStats> {
     let start = Instant::now();
+    if archive_filter.is_none() {
+        replace_with_cache_link(cache.root(), out_dir)?;
+        return Ok(RawFlatStats {
+            archives: discover_archives(cache)?.len(),
+            groups_copied: 0,
+            total_bytes: 0,
+            elapsed_ms: start.elapsed().as_millis() as u64,
+        });
+    }
     let allowed: Option<BTreeSet<u32>> = archive_filter.map(|a| a.iter().copied().collect());
 
     fs::create_dir_all(out_dir)
@@ -249,6 +258,39 @@ pub fn dump_raw_flat(
         total_bytes: index_bytes + group_bytes,
         elapsed_ms: start.elapsed().as_millis() as u64,
     })
+}
+
+fn remove_existing_path(path: &Path) -> Result<()> {
+    let Ok(meta) = fs::symlink_metadata(path) else {
+        return Ok(());
+    };
+    if meta.file_type().is_dir() && !meta.file_type().is_symlink() {
+        fs::remove_dir_all(path).with_context(|| format!("removing {}", path.display()))
+    } else {
+        fs::remove_file(path).with_context(|| format!("removing {}", path.display()))
+    }
+}
+
+#[cfg(unix)]
+fn replace_with_cache_link(cache_root: &Path, out_dir: &Path) -> Result<()> {
+    remove_existing_path(out_dir)?;
+    if let Some(parent) = out_dir.parent() {
+        fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
+    }
+    std::os::unix::fs::symlink(cache_root, out_dir)
+        .with_context(|| format!("linking {} -> {}", out_dir.display(), cache_root.display()))
+}
+
+#[cfg(not(unix))]
+fn replace_with_cache_link(cache_root: &Path, out_dir: &Path) -> Result<()> {
+    fs::create_dir_all(out_dir).with_context(|| format!("creating {}", out_dir.display()))?;
+    for archive in discover_archives(&FlatCache::open(cache_root.to_path_buf())?)? {
+        let src_dir = cache_root.join(archive.to_string());
+        if src_dir.is_dir() {
+            clone_tree(&src_dir, &out_dir.join(archive.to_string()))?;
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

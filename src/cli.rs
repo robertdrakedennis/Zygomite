@@ -57,11 +57,11 @@ use crate::transpile::{
 };
 use crate::vars::{VarDomain, parse_var, parse_varbit};
 use crate::vfx::decode as decode_vfx;
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, bail, ensure};
 use clap::{Parser, Subcommand, ValueEnum};
 use image::{ImageBuffer, Rgb};
 use rayon::prelude::*;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Write;
 use std::fs;
@@ -298,6 +298,14 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Assemble multiple pragma ASM scripts in one process.
+    #[command(name = "assemble-script-batch")]
+    AssembleScriptBatch {
+        #[arg(long)]
+        manifest: PathBuf,
+        #[arg(long)]
+        out_dir: PathBuf,
+    },
     /// Dump a lossless raw-flat cache tree for JS5 repacking.
     #[command(name = "dump-raw-flat")]
     DumpRawFlat {
@@ -331,6 +339,22 @@ pub enum Command {
         /// Comma-separated archive IDs for raw-flat (default: all)
         #[arg(long)]
         archives: Option<String>,
+    },
+    /// Verify all mapsquare groups decode from the raw-flat map archive.
+    #[command(name = "verify-map-archive")]
+    VerifyMapArchive,
+    /// Build the RS clip-flag collision grid for one map square (NXT model).
+    #[command(name = "build-collision")]
+    BuildCollision {
+        /// Map-square X coordinate (region X, 0..127).
+        #[arg(long = "map-x")]
+        map_x: u32,
+        /// Map-square Z coordinate (region Z, 0..255).
+        #[arg(long = "map-z")]
+        map_z: u32,
+        /// Write per-level flag grids as JSON to this file (default: summary to stdout).
+        #[arg(long)]
+        out: Option<PathBuf>,
     },
     /// Build canonical overlay plan JSON for Bun cacheoverlay wrapper.
     #[command(name = "overlay-plan")]
@@ -716,6 +740,17 @@ pub fn run(cli: Cli) -> Result<()> {
             },
         );
     }
+    if let Command::AssembleScriptBatch { manifest, out_dir } = &cli.command {
+        return run_assemble_script_batch(
+            &cli.data_dir,
+            manifest,
+            out_dir,
+            RuntimeVersion {
+                build: cli.build,
+                subbuild: cli.subbuild,
+            },
+        );
+    }
 
     let tar_path = cli.cache_tar.unwrap_or_else(default_tar_path);
     let cache = open_cache(cli.cache_dir.as_deref())?;
@@ -962,6 +997,7 @@ pub fn run(cli: Cli) -> Result<()> {
             json,
             version,
         ),
+        Command::AssembleScriptBatch { .. } => unreachable!("handled before cache open"),
         Command::DumpRawFlat { out_dir, archives } => {
             run_dump_raw_flat(&cache, &tar_path, &out_dir, archives.as_deref())
         }
@@ -978,8 +1014,151 @@ pub fn run(cli: Cli) -> Result<()> {
             version.subbuild,
             archives.as_deref(),
         ),
+        Command::VerifyMapArchive => run_verify_map_archive(&cache, version.build),
+        Command::BuildCollision { map_x, map_z, out } => {
+            run_build_collision(&cache, version.build, map_x, map_z, out.as_deref())
+        }
         Command::OverlayPlan { .. } => unreachable!("handled before cache open"),
     }
+}
+
+fn run_verify_map_archive(cache: &FlatCache, build: u32) -> Result<()> {
+    let started = Instant::now();
+    let index = cache.archive_index(ARCHIVE_MAPSQUARES)?;
+    let count = index.group_id.len();
+    index
+        .group_id
+        .par_iter()
+        .try_for_each(|group| -> Result<()> {
+            let files = cache.group_files_with_index(&index, ARCHIVE_MAPSQUARES, *group)?;
+            let square_x = group & 0b111_1111;
+            let square_z = group >> 7;
+            decode_map_square(&files, build).with_context(|| {
+                format!("decode mapsquare group {group} ({square_x}_{square_z})")
+            })?;
+            Ok(())
+        })?;
+    eprintln!(
+        "verify-map-archive: decoded {} mapsquare group(s) in {}ms",
+        count,
+        started.elapsed().as_millis()
+    );
+    Ok(())
+}
+
+/// Load every loc config and reduce it to its collision-relevant [`LocClip`].
+fn load_loc_clips(cache: &FlatCache) -> Result<HashMap<i32, crate::collision::LocClip>> {
+    use crate::collision::LocClip;
+    let mut clips = HashMap::new();
+    if let Ok(loc_index) = cache.archive_index(ARCHIVE_LOC_CONFIG) {
+        for group in &loc_index.group_id {
+            let files = cache.group_files_with_index(&loc_index, ARCHIVE_LOC_CONFIG, *group)?;
+            for (file, data) in files {
+                let loc_id = (*group << 8) | file;
+                let entry =
+                    parse_loc(loc_id, &data).with_context(|| format!("parse_loc id {loc_id}"))?;
+                clips.insert(loc_id as i32, LocClip::from_loc_ops(&entry.ops));
+            }
+        }
+    } else if let Some(payload) = cache.get(ARCHIVE_CONFIG, CONFIG_GROUP_LOC_LEGACY)? {
+        let config_index = cache.archive_index(ARCHIVE_CONFIG)?;
+        let files = crate::js5::unpack_group(&config_index, CONFIG_GROUP_LOC_LEGACY, &payload)?;
+        for (id, data) in files {
+            let entry = parse_loc(id, &data).with_context(|| format!("parse_loc id {id}"))?;
+            clips.insert(id as i32, LocClip::from_loc_ops(&entry.ops));
+        }
+    }
+    Ok(clips)
+}
+
+fn run_build_collision(
+    cache: &FlatCache,
+    build: u32,
+    map_x: u32,
+    map_z: u32,
+    out: Option<&Path>,
+) -> Result<()> {
+    let group = (map_z << 7) | map_x;
+    let index = cache.archive_index(ARCHIVE_MAPSQUARES)?;
+    let files = cache
+        .group_files_with_index(&index, ARCHIVE_MAPSQUARES, group)
+        .with_context(|| format!("load mapsquare group {group} ({map_x}_{map_z})"))?;
+    let map = decode_map_square_best_effort(&files, build);
+    let clips = load_loc_clips(cache)?;
+    let grids = crate::collision::build_collision(&map, |id| {
+        clips.get(&id).copied().unwrap_or_default()
+    });
+
+    #[derive(serde::Serialize)]
+    struct LevelSummary {
+        level: usize,
+        blocked: usize,
+    }
+    let level_summaries: Vec<LevelSummary> = grids
+        .iter()
+        .enumerate()
+        .map(|(level, g)| LevelSummary {
+            level,
+            blocked: g.nonzero_count(),
+        })
+        .collect();
+
+    if let Some(path) = out {
+        #[derive(serde::Serialize)]
+        struct LevelDump {
+            level: usize,
+            blocked: usize,
+            flags: Vec<Vec<i32>>,
+        }
+        #[derive(serde::Serialize)]
+        struct FullDump {
+            build: u32,
+            #[serde(rename = "mapX")]
+            map_x: u32,
+            #[serde(rename = "mapZ")]
+            map_z: u32,
+            size: usize,
+            levels: Vec<LevelDump>,
+        }
+        let dump = FullDump {
+            build,
+            map_x,
+            map_z,
+            size: crate::collision::SQUARE_SIZE,
+            levels: grids
+                .iter()
+                .enumerate()
+                .map(|(level, g)| LevelDump {
+                    level,
+                    blocked: g.nonzero_count(),
+                    flags: g.to_rows(),
+                })
+                .collect(),
+        };
+        write_text(path, &serde_json::to_string(&dump)?)?;
+        eprintln!("build-collision: wrote grids to {}", path.display());
+    }
+
+    #[derive(serde::Serialize)]
+    struct Summary {
+        build: u32,
+        #[serde(rename = "mapX")]
+        map_x: u32,
+        #[serde(rename = "mapZ")]
+        map_z: u32,
+        size: usize,
+        #[serde(rename = "locCount")]
+        loc_count: usize,
+        levels: Vec<LevelSummary>,
+    }
+    print_json(&Summary {
+        build,
+        map_x,
+        map_z,
+        size: crate::collision::SQUARE_SIZE,
+        loc_count: map.locs.len(),
+        levels: level_summaries,
+    })
 }
 
 fn run_interfaces(
@@ -1894,11 +2073,17 @@ fn run_models(
     let available_groups: HashSet<u32> = index.group_id.iter().copied().collect();
 
     let groups: Vec<u32> = if sample_only {
-        let mut sample = (0_u32..=100).collect::<Vec<_>>();
-        sample.extend([1_000, 5_000, 10_000, 50_000, 100_000]);
-        if let Some(last) = index.group_id.last() {
-            sample.push(*last);
-        }
+        let mut sample: Vec<u32> = std::env::var("MODEL_ONLY")
+            .ok()
+            .map(|v| v.split(',').filter_map(|s| s.trim().parse().ok()).collect())
+            .unwrap_or_else(|| {
+                let mut s = (0_u32..=100).collect::<Vec<_>>();
+                s.extend([1_000, 5_000, 10_000, 50_000, 100_000]);
+                if let Some(last) = index.group_id.last() {
+                    s.push(*last);
+                }
+                s
+            });
         sample.sort_unstable();
         sample.dedup();
         sample.retain(|group| available_groups.contains(group));
@@ -4128,6 +4313,71 @@ fn run_assemble_script(
             assemble_mode,
         );
     }
+    Ok(())
+}
+
+#[derive(Deserialize)]
+struct BatchAssembleManifest {
+    scripts: Vec<BatchAssembleScript>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BatchAssembleScript {
+    script_id: u32,
+    input: PathBuf,
+    build: Option<u32>,
+    subbuild: Option<u32>,
+}
+
+fn run_assemble_script_batch(
+    data_dir: &Path,
+    manifest: &Path,
+    out_dir: &Path,
+    version: RuntimeVersion,
+) -> Result<()> {
+    let started = Instant::now();
+    let batch: BatchAssembleManifest = serde_json::from_slice(
+        &fs::read(manifest).with_context(|| format!("reading {}", manifest.display()))?,
+    )?;
+    fs::create_dir_all(out_dir).with_context(|| format!("creating {}", out_dir.display()))?;
+    let build = batch
+        .scripts
+        .first()
+        .and_then(|script| script.build)
+        .unwrap_or(version.build);
+    let subbuild = batch
+        .scripts
+        .first()
+        .and_then(|script| script.subbuild)
+        .unwrap_or(version.subbuild);
+    let opcode_book = OpcodeBook::load(data_dir, build, subbuild)?;
+    for script in &batch.scripts {
+        let effective_build = script.build.unwrap_or(build);
+        let effective_subbuild = script.subbuild.unwrap_or(subbuild);
+        ensure!(
+            effective_build == build && effective_subbuild == subbuild,
+            "assemble-script-batch requires one build/subbuild per invocation"
+        );
+        let source = fs::read_to_string(&script.input)
+            .with_context(|| format!("reading {}", script.input.display()))?;
+        ensure!(
+            !is_reversible_source(&source),
+            "assemble-script-batch only supports pragma ASM inputs: {}",
+            script.input.display()
+        );
+        let compiled = parse_cs2_asm(&source)
+            .with_context(|| format!("parsing ASM pragmas from {}", script.input.display()))?;
+        let binary = encode_script(&compiled, &opcode_book, build)
+            .with_context(|| format!("encoding script {}", script.script_id))?;
+        fs::write(out_dir.join(format!("script-{}.cs2", script.script_id)), binary)
+            .with_context(|| format!("writing script {}", script.script_id))?;
+    }
+    eprintln!(
+        "assemble-script-batch: assembled {} script(s) in {}ms",
+        batch.scripts.len(),
+        started.elapsed().as_millis()
+    );
     Ok(())
 }
 

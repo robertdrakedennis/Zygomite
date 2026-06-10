@@ -210,6 +210,18 @@ impl ArchiveIndex {
             Ok(ids)
         }
     }
+
+    pub fn file_id_for_group_index(&self, group: u32, file_index: usize) -> Result<u32> {
+        let idx = usize::try_from(group).context("group id overflow")?;
+        if file_index >= self.file_count_for_group(group)? {
+            bail!("file index {file_index} out of range for group {group}");
+        }
+        if let Some(ids) = self.group_file_ids.get(idx).and_then(Option::as_ref) {
+            Ok(ids[file_index])
+        } else {
+            u32::try_from(file_index).context("file id too large")
+        }
+    }
 }
 
 pub fn decompress(compressed: &[u8]) -> Result<Vec<u8>> {
@@ -302,11 +314,7 @@ pub fn unpack_group(
     let file_count = index.file_count_for_group(group)?;
     if file_count == 1 {
         let mut out = BTreeMap::new();
-        let file_id = index
-            .file_ids_for_group(group)?
-            .first()
-            .copied()
-            .unwrap_or(0);
+        let file_id = index.file_id_for_group_index(group, 0)?;
         out.insert(file_id, group_data);
         return Ok(out);
     }
@@ -387,9 +395,10 @@ pub fn unpack_group(
         }
     }
 
+    let file_ids = index.file_ids_for_group(group)?;
     let mut map = BTreeMap::new();
     for (idx, file) in files.into_iter().enumerate() {
-        let file_id = index.file_ids_for_group(group)?[idx];
+        let file_id = file_ids[idx];
         map.insert(file_id, file);
     }
     Ok(map)
