@@ -2763,7 +2763,7 @@ pub fn parse_material(id: u32, data: &[u8]) -> Result<OpListEntry> {
     }
 
     if !packet.is_done() {
-        bail!("material {id} did not consume full payload");
+        bail!("material {id} did not consume full payload (pos {} of {})", packet.pos(), data.len());
     }
     Ok(OpListEntry { id, ops })
 }
@@ -3607,6 +3607,9 @@ fn parse_material_v0(packet: &mut Packet<'_>, ops: &mut Vec<String>) -> Result<(
     let flagb5 = (flags_b & 0x20) != 0;
     let flagb6 = (flags_b & 0x40) != 0;
     let flagb11 = (flags_b & 0x800) != 0;
+    // Build 948+: new flag bit 23 gates one BE float read after the flags_c
+    // speed block (byte-mapped against material 3224 in 947.1 vs 948.1).
+    let flagb23 = (flags_b & 0x0080_0000) != 0;
     let flagb18 = (flags_b & 0x40000) != 0;
     let flagb19 = (flags_b & 0x80000) != 0;
     let flagb20 = (flags_b & 0x0010_0000) != 0;
@@ -3674,6 +3677,10 @@ fn parse_material_v0(packet: &mut Packet<'_>, ops: &mut Vec<String>) -> Result<(
     }
     if (flags_c & 2) != 0 {
         ops.push(format!("speedv={}", packet.g2s()?));
+    }
+
+    if flagb23 {
+        ops.push(format!("unknown27={}", gfloat_be(packet)?));
     }
 
     if packet.g1()? == 1 {

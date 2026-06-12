@@ -4,20 +4,44 @@ CLI-first Rust toolkit for RS3 cache extraction, CS2, and overlay semantic trees
 
 Supported native base revisions:
 
+- build `948.1` — OpenRS2 cache id `2573` (current; prepared 2026-06-10)
 - build `947.1` — OpenRS2 cache id `2519`
 - build `910.0` — separate first-class base revision
 
-`910` and `947` are both native targets in this repo. Treat them as separate first-class revisions with their own opcode books, command semantics, roundtrip checks, and transpile expectations. Do not frame `910` as secondary compatibility mode or `947` as sole runtime truth.
+`910`, `947`, and `948` are all native targets in this repo. Treat them as separate first-class revisions with their own opcode books, command semantics, roundtrip checks, and transpile expectations. Do not frame `910` as secondary compatibility mode or `947` as sole runtime truth.
+
+## Adding a new build (how 948 was added)
+
+1. Decompress the OpenRS2 tar into `../../cache/static-caches/`, extract flat
+   to `../../cache/unpacked/<build>/` (`tar -xf ... --strip-components=1`).
+2. Derive the CS2 opcode book — opcodes are fully rescrambled every build:
+   `python3 scripts/derive-opcode-book.py --old-cache .../unpacked/947
+   --new-cache .../unpacked/<build> --old-book data/opcodes-947.txt
+   --out data/opcodes-<build>.txt` (aligns unchanged scripts across caches;
+   948: 20,416 scripts aligned, 1,230 commands, 0 conflicts, all 20,621
+   scripts then decode under code-length validation).
+3. Fix format drift surfaced by consume-full-payload errors. 948 needed two:
+   material v0 gained flag bit 23 → one BE float (`parse_material_v0`), and
+   VFX flow shape kind 8 (3 BE floats, `decode_flow_shape`) — both validated
+   archive-wide on old+new builds (0 regressions).
+4. `prepare-overlay` then `unpack --skip-audio --best-effort-maps` into
+   `../../cache/rs3-cache/<build>-all`, plus `cs2 --out-dir .../cs2`.
+
+948 known follow-ups: 2,230/141,575 mapsquare groups have parse errors under
+`--best-effort-maps` (not yet compared against a 947 baseline), and 1,014
+book commands are unused by any live script so cannot be derived from cache
+alignment (only matter if future scripts use them).
 
 ## What it does
 
-- Extract and render interfaces
+- Extract and text-render interfaces (decode for all component types)
+- Encode/decode interface **components** byte-perfectly for the container types — layer (0), rectangle (3), graphic (5) — via `src/interface_codec.rs`; this powers the `examples/gen_*` interface-clone generators (other component types are decode-only)
 - Decode varps and varbits
-- Decode and decompile CS2 scripts
-- Transpile CS2 to reversible TypeScript and assemble it back to CS2
-- Validate donor `947 -> 910` script/interface slices with migration audit
-- Build native overlay plan JSON for Bun `cacheoverlay` wrapper
-- Decode RT7 models
+- Decode and decompile CS2 scripts; dependency trees for interfaces, scripts, varps, varbits, and configs (`dep-tree-*`)
+- Transpile CS2 to reversible TypeScript (`--output-style high-ts|reversible`) and assemble it back to CS2 (`assemble-script`, batch via `assemble-script-batch`)
+- Validate donor `947 -> 910` script/interface slices with migration audit (`migrate-check`, `migrate-script`)
+- Build native overlay plan JSON for Bun `cacheoverlay` wrapper (`overlay-plan`), plus the overlay's semantic-tree inputs (`prepare-overlay`, `dump-raw-flat`, `dump-refs`, `dump-configs`)
+- Decode RT7 models, maps (`verify-map-archive`), and build the NXT-model clip-flag collision grid per map square (`build-collision`)
 - Extract audio (`jaga` + embedded `ogg`, direct `ogg`)
 - Run full unpack flow with top-level exports (`worldmap`, `maps`, `vfx`, `animator`, `cutscene2d`, defaults, `areas.png`, `ttf`, `fontmetrics`, `binary`)
 
@@ -136,6 +160,46 @@ cargo run --release -- \
   --data-dir /path/to/tools/rs3-cache-rs/data \
   --build 910 --subbuild 0 \
   overlay-plan --manifest /path/to/cacheoverlay-manifest.json --out-file /tmp/overlay-plan.json --audit-dir /tmp/overlay-plan-audit
+```
+
+### Cross-build migration proof (`migrate-check` / `migrate-script`)
+
+Prove a donor `947` interface group or script against the `910` target before splicing it. `--out-file` is required; `--audit-dir` writes the split audit (`summary.json`, `scripts_failed.jsonl`, `unsupported_sites.jsonl`, …):
+
+```bash
+cargo run --release -- \
+  --cache-dir /path/to/cache/unpacked/910 --data-dir data --build 910 --subbuild 0 \
+  migrate-check --interface-group 105 --out-file /tmp/migrate-interface.json \
+  --source-build 947 --source-subbuild 1 --remap --validate-target --audit-dir /tmp/migrate-interface-audit
+
+cargo run --release -- \
+  --cache-dir /path/to/cache/unpacked/910 --data-dir data --build 910 --subbuild 0 \
+  migrate-script --script-id 621 --out-file /tmp/migrate-script.json \
+  --source-build 947 --source-subbuild 1 --remap --validate-target --audit-dir /tmp/migrate-script-audit
+```
+
+### Collision (`build-collision`)
+
+Builds the RS clip-flag collision grid for one map square (NXT collision model — terrain flags + loc clips):
+
+```bash
+cargo run --release -- \
+  --cache-dir /path/to/cache/unpacked/910 --data-dir data --build 910 --subbuild 0 \
+  build-collision --map-x 50 --map-z 50 --out /tmp/collision-50-50.json   # omit --out for a stdout summary
+```
+
+### Interface component codec + examples
+
+`src/interface_codec.rs` byte-perfectly encodes/decodes the container component types — layer (0), rectangle (3), graphic (5); other component types raise `UnsupportedType` and remain decode-only. This is enough to clone and retarget whole interface groups built from those types. The `examples/` directory uses it:
+
+- `gen_necro_page.rs` / `gen_necro_primary.rs` / `gen_necro_action_window.rs` / `gen_necro_ribbon_icon.rs` — clone 910-native interface groups into new ids (e.g. magic ability page 1459 → necromancy 1207) with retargeted component refs, re-encoding each component and verifying the round-trip
+- `gen_skillguide_slots.rs` / `skillguide_grid.rs` — skill-guide/HUD-grid discovery and generation
+- `verify_branch_targets.rs` — decode a `.cs2` file and assert every branch/switch target is in range (run after any mid-script CS2 instruction insertion)
+- `decode_cs2.rs` — standalone CS2 decode for inspection
+
+```bash
+cargo run --release --example verify_branch_targets -- /tmp/out.cs2
+cargo run --release --example gen_necro_page -- /path/to/cache/unpacked/910 /tmp/necro-page-out
 ```
 
 # CS2 workflow (`910` and `947` first-class)

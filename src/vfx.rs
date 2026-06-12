@@ -134,6 +134,9 @@ pub enum FlowShapeType {
     Cone,
     Sphere,
     Hemisphere,
+    /// Build 948+: new shape kind 8; parameter layout derived empirically
+    /// (see scan_vfx example).
+    Unknown8,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -542,6 +545,7 @@ fn decode_flow_shape(packet: &mut Packet<'_>) -> Result<FlowShape> {
         5 => FlowShapeType::Cone,
         6 => FlowShapeType::Sphere,
         7 => FlowShapeType::Hemisphere,
+        8 => FlowShapeType::Unknown8,
         value => bail!("vfx unknown flow shape kind {value}"),
     };
 
@@ -572,6 +576,14 @@ fn decode_flow_shape(packet: &mut Packet<'_>) -> Result<FlowShape> {
         FlowShapeType::Cone => {
             height = read_f32_be(packet)?;
             length = read_f32_be(packet)?;
+            width = read_f32_be(packet)?;
+        }
+        FlowShapeType::Unknown8 => {
+            // 3 BE floats, validated empirically: with exactly 3 reads every
+            // 948.1 vfx file (1200/1200) decodes and consumes fully; 0/1/2/4
+            // misalign the stream. Field roles assumed Box-like.
+            length = read_f32_be(packet)?;
+            height = read_f32_be(packet)?;
             width = read_f32_be(packet)?;
         }
     }

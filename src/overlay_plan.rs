@@ -705,8 +705,8 @@ pub fn run_overlay_plan_command(options: OverlayPlanCommandOptions<'_>) -> Resul
         donor_subbuild,
     } = options;
     ensure!(
-        donor_build == 947,
-        "native overlay-plan currently supports donor build 947 only"
+        donor_build == 947 || donor_build == 948,
+        "native overlay-plan supports donor builds 947 and 948 only"
     );
     let manifest_bytes =
         fs::read(manifest).with_context(|| format!("reading {}", manifest.display()))?;
