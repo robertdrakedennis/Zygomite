@@ -69,6 +69,10 @@ pub struct MeshData {
     pub has_bone_ids: bool,
     pub is_hidden: bool,
     pub has_skin: bool,
+    /// unkint bit 0 (948 "Player Avatar Refresh"): positions are serialized as
+    /// 3xf32 big-endian per vertex instead of 3xi16 little-endian. Values are
+    /// rounded back into `position_buffer`'s i16 schema.
+    pub float_positions: bool,
     pub vertex_count: u32,
     pub position_buffer: Option<Vec<Vec<i16>>>,
     pub normal_buffer: Option<Vec<Vec<i8>>>,
@@ -306,8 +310,13 @@ impl MeshData {
         let vertex_count = read_uint_le(packet)?;
         let vertex_count_usize = usize::try_from(vertex_count).context("vertex count too large")?;
 
+        let float_positions = (unkint & 1) == 1;
         let position_buffer = if has_vertices {
-            Some(read_i16_matrix(packet, vertex_count_usize, 3)?)
+            if float_positions {
+                Some(read_f32be_position_matrix(packet, vertex_count_usize)?)
+            } else {
+                Some(read_i16_matrix(packet, vertex_count_usize, 3)?)
+            }
         } else {
             None
         };
@@ -372,6 +381,7 @@ impl MeshData {
             has_bone_ids,
             is_hidden,
             has_skin,
+            float_positions,
             vertex_count,
             position_buffer,
             normal_buffer,
@@ -479,6 +489,24 @@ fn read_i8_matrix(packet: &mut Packet<'_>, count: usize, width: usize) -> Result
         let mut row = Vec::with_capacity(width);
         for _ in 0..width {
             row.push(packet.g1s()?);
+        }
+        values.push(row);
+    }
+    Ok(values)
+}
+
+fn read_f32be_position_matrix(packet: &mut Packet<'_>, count: usize) -> Result<Vec<Vec<i16>>> {
+    let mut values = Vec::with_capacity(count);
+    for _ in 0..count {
+        let mut row = Vec::with_capacity(3);
+        for _ in 0..3 {
+            let raw = packet.g4s()? as u32;
+            let v = f32::from_bits(raw);
+            if !v.is_finite() {
+                bail!("non-finite float vertex position");
+            }
+            #[allow(clippy::cast_possible_truncation)]
+            row.push(v.round().clamp(f32::from(i16::MIN), f32::from(i16::MAX)) as i16);
         }
         values.push(row);
     }
