@@ -1,0 +1,9 @@
+	@ObfuscatedName("ss.bcj")
+	public final int index;
+
+	@ObfuscatedName("ss.bci")
+	public final boolean isLargeOperand;
+
+	@ObfuscatedName("rd.e(I)[Lss;")
+	public static ClientScriptCommand[] values() {
+		return new ClientScriptCommand[] { 

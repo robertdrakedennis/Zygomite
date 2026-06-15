@@ -93,6 +93,127 @@ pub enum Command {
         #[arg(long)]
         out_dir: Option<PathBuf>,
     },
+    /// Decode / preview / rasterize / diff 910 bitmap fonts and 948 modern (TTF)
+    /// fonts. Reads the runtime `.js5` pack directly (no flat cache needed).
+    Font {
+        #[command(subcommand)]
+        command: crate::font::cli::FontCommand,
+    },
+    /// Explain an interface: a per-component table (`index/type/textfont/colour/
+    /// ops/bounds/text`) plus its upward dependency closure (`requires:` fonts,
+    /// sprites, scripts, enums, …, child interfaces). Reads the runtime
+    /// interfaces `.js5` pack (no flat cache needed), or a raw group `.dat`.
+    ///
+    /// Example:
+    /// ```bash
+    /// cd tools/rs3-cache-rs
+    /// cargo run --release -- explain-interface 691
+    /// ```
+    #[command(name = "explain-interface")]
+    ExplainInterface {
+        /// Interface group id.
+        id: u32,
+        /// Emit the explanation as JSON instead of the human table.
+        #[arg(long)]
+        json: bool,
+        /// Runtime pack root holding `client.interfaces.js5`. READ-ONLY. When
+        /// the interface is absent here (a donor-only id), falls back to the
+        /// donor pack (`cache/rs3-cache/948-all/pack`) automatically.
+        #[arg(long, default_value = crate::explain::DEFAULT_PACK_ROOT)]
+        pack_root: PathBuf,
+        /// Decode a raw interface-group `.dat` (JS5 raw group) instead of the
+        /// runtime pack. The interface id is still taken from `id`.
+        #[arg(long)]
+        raw_dat: Option<PathBuf>,
+        /// Build number to decode interface components at.
+        #[arg(long, default_value_t = BUILD)]
+        decode_build: u32,
+        /// Also report the FULL transitive clientscript closure of the
+        /// interface's component-bound scripts and the count MISSING from the 910
+        /// base (the splice burden). Walks the donor (948) script call graph from
+        /// the flat cache at `--scripts-cache` (decoded at `--scripts-build`) and
+        /// compares against the 910-base roster at `--base-pack-root`.
+        #[arg(long)]
+        transitive: bool,
+        /// Flat cache dir holding the donor clientscripts (archive 12) to walk for
+        /// `--transitive`. Defaults to the global `--cache-dir`.
+        #[arg(long)]
+        scripts_cache: Option<PathBuf>,
+        /// Build to decode the donor scripts at for `--transitive`. Defaults to
+        /// the global `--build`.
+        #[arg(long)]
+        scripts_build: Option<u32>,
+        /// 910-base pack root holding the pristine `client.scripts.js5` roster used
+        /// to compute the splice burden for `--transitive`. READ-ONLY.
+        #[arg(long, default_value = crate::explain::DEFAULT_BASE_PACK_ROOT)]
+        base_pack_root: PathBuf,
+    },
+    /// Interface-group tooling. `interface transcode` downcodes a donor (948)
+    /// interface group's components to the 910 client wire format so a
+    /// newer-than-691 donor interface (e.g. the ritual selection UI 1224) mounts
+    /// on the 910 client instead of crashing.
+    Interface {
+        #[command(subcommand)]
+        command: InterfaceCommand,
+    },
+    /// Explain a loc: resolve its multivar surface (gating varbit/varp → per-value
+    /// child loc → ops), list each option, and reverse-match the candidate
+    /// interfaces each option opens (ranked by op/name text overlap plus reads of
+    /// the gating varbit's feature varp block). The loc→interface open is
+    /// server-side, so candidates are suggestions, summarised with their
+    /// `explain-interface` closure. Accepts a multivar parent or a child loc id.
+    /// Runs against the flat cache (`--cache-dir` / `--build`) since the gated
+    /// interface's onload/refresh scripts live in the donor cache.
+    ///
+    /// Example:
+    /// ```bash
+    /// cd tools/rs3-cache-rs
+    /// cargo run --release -- --cache-dir ../../cache/unpacked/948 --build 948 \
+    ///   --subbuild 1 explain-loc 115416
+    /// ```
+    #[command(name = "explain-loc")]
+    ExplainLoc {
+        /// Loc id (a multivar parent or one of its child locs).
+        id: u32,
+        /// Maximum number of candidate interfaces to report.
+        #[arg(long, default_value_t = 10)]
+        max_candidates: usize,
+        /// Emit the explanation as JSON instead of the human report.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Pretty-print any group in any known cache format, reading the runtime
+    /// `.js5` packs (replaces ad-hoc byte-probes). `--format auto` infers from
+    /// the archive id.
+    ///
+    /// Example:
+    /// ```bash
+    /// cd tools/rs3-cache-rs
+    /// cargo run --release -- decode --archive 13 --group 26
+    /// ```
+    Decode {
+        /// Cache archive id (used for `auto` inference + reporting).
+        #[arg(long)]
+        archive: u32,
+        /// Group id within the archive. For config formats packed by config
+        /// group (dbtable/dbrow/param) this is overridden by the canonical
+        /// config group, so any value works there.
+        #[arg(long)]
+        group: u32,
+        /// Output format: auto|sprite|fontmetrics|fontmetrics2|ttf|interface|
+        /// dbtable|dbrow|enum|struct|param|npc|obj. `auto` infers from the
+        /// 948 flat-cache archive id (e.g. 18→npc, 19→obj, 40→dbtable).
+        #[arg(long, default_value = "auto")]
+        format: String,
+        /// Runtime pack root holding the `client.*.js5` files. READ-ONLY. When
+        /// the group is absent here, falls back to the donor pack
+        /// (`cache/rs3-cache/948-all/pack`) automatically.
+        #[arg(long, default_value = crate::decode::DEFAULT_PACK_ROOT)]
+        pack_root: PathBuf,
+        /// Emit the dump as JSON instead of a human summary.
+        #[arg(long)]
+        json: bool,
+    },
     Varps {
         #[arg(long)]
         out_file: Option<PathBuf>,
@@ -107,11 +228,32 @@ pub enum Command {
         #[arg(long)]
         out_dir: Option<PathBuf>,
     },
+    /// Dump every clientscript (legacy: `cs2 --out-dir DIR --out-file FILE`), or
+    /// run a CS2 build-time subcommand (`cs2 lint-splice …`).
     Cs2 {
+        /// Optional CS2 subcommand. When omitted, runs the legacy dump using the
+        /// `--out-file` / `--out-dir` flags below.
+        #[command(subcommand)]
+        command: Option<Cs2Command>,
         #[arg(long)]
         out_file: Option<PathBuf>,
         #[arg(long)]
         out_dir: Option<PathBuf>,
+    },
+    /// Config-format tooling. `config transcode` re-encodes a donor config group
+    /// from its wire format to the base client's (DBTABLETYPE + DbTableIndex).
+    Config {
+        #[command(subcommand)]
+        command: ConfigCommand,
+    },
+    /// The semantic port layer's representability dry-run. `port plan --interface N
+    /// --from 948 --to 910` enumerates the full 948→910 delta the port will hit —
+    /// proc collisions, missing opcode families (cc_list/cc_radiogroup/dropdown),
+    /// arity drift, the stylesheet-colour stub, and the modern-font gap — each with
+    /// the named lowering that handles it or `Unhandled`.
+    Port {
+        #[command(subcommand)]
+        command: PortCommand,
     },
     Models {
         #[arg(long)]
@@ -323,6 +465,184 @@ pub enum Command {
         #[arg(long)]
         out_dir: PathBuf,
     },
+    /// Extract the canonical CS2 command registry from the client sources and data files.
+    ///
+    /// Reads `ScriptRunner.executeCommand` plus `ClientScriptCommand` and the
+    /// `opcodes-*`/`stack-effects`/`opcode-aliases` data files, writes a
+    /// name-keyed registry JSON and a discrepancy report. Reads only; never
+    /// touches the cache or any existing input file.
+    ///
+    /// Example:
+    /// ```bash
+    /// cd tools/rs3-cache-rs
+    /// cargo run --release -- --data-dir data extract-cs2-registry
+    /// ```
+    #[command(name = "extract-cs2-registry")]
+    ExtractCs2Registry {
+        /// Root of the client checkout (holds `client/src/main/java/...`).
+        #[arg(long, default_value = "../../client")]
+        client_root: PathBuf,
+        /// Registry output path (default: `<data-dir>/cs2/registry-910.json`).
+        #[arg(long)]
+        out_file: Option<PathBuf>,
+        /// Report output path (default: `<out-file dir>/registry-910.report.json`).
+        #[arg(long)]
+        report_file: Option<PathBuf>,
+    },
+    /// Generate the mechanical CS2 Java tables from the extracted registry.
+    ///
+    /// Emits `ClientScriptCommand.java`, `Cs2Dispatch.java`, and
+    /// `data/cs2/categories-910.json`. With `--check`, writes nothing and exits
+    /// with code 3 if any generated output differs from what is on disk.
+    ///
+    /// Example:
+    /// ```bash
+    /// cd tools/rs3-cache-rs
+    /// cargo run --release -- generate-cs2-java --check
+    /// ```
+    #[command(name = "generate-cs2-java")]
+    GenerateCs2Java {
+        /// Registry JSON path (default: `<data-dir>/cs2/registry-910.json`).
+        #[arg(long)]
+        registry: Option<PathBuf>,
+        /// Root of the client checkout (holds `client/src/main/java/...`).
+        #[arg(long, default_value = "../../client")]
+        client_root: PathBuf,
+        /// Java source root (default: `<client-root>/client/src/main/java`).
+        #[arg(long)]
+        out_dir: Option<PathBuf>,
+        /// Compare-only mode: write nothing; exit 3 on any difference.
+        #[arg(long)]
+        check: bool,
+    },
+    /// Regenerate the build-910 opcode txt files as views of the registry.
+    ///
+    /// Emits `opcodes-910.txt`, `opcodes-large-910.txt`, and
+    /// `opcode-aliases-910.txt` from `cs2/registry-910.json`. `opcodes-948.txt`
+    /// (and every other build) is left untouched — it carries donor-only opcodes
+    /// the 910-anchored registry cannot represent. With `--check`, writes nothing
+    /// and exits with code 3 if any generated view differs from disk.
+    ///
+    /// Example:
+    /// ```bash
+    /// cd tools/rs3-cache-rs
+    /// cargo run --release -- --data-dir data generate-cs2-data --check
+    /// ```
+    #[command(name = "generate-cs2-data")]
+    GenerateCs2Data {
+        /// Registry JSON path (default: `<data-dir>/cs2/registry-910.json`).
+        #[arg(long)]
+        registry: Option<PathBuf>,
+        /// Output directory for the views (default: `<data-dir>`).
+        #[arg(long)]
+        out_dir: Option<PathBuf>,
+        /// Compare-only mode: write nothing; exit 3 on any difference.
+        #[arg(long)]
+        check: bool,
+    },
+    /// Gate every CS2 opcode used by the runtime pack against the registry.
+    ///
+    /// Reads the runtime pack's single-file `client.scripts.js5`, decodes every
+    /// clientscript group with the 910 opcode book, and verifies each used
+    /// opcode maps to a registry command with a real dispatch handler. Writes a
+    /// coverage report and exits 4 when error-severity findings exist.
+    ///
+    /// Example:
+    /// ```bash
+    /// cd tools/rs3-cache-rs
+    /// cargo run --release -- --data-dir data cs2-coverage
+    /// ```
+    #[command(name = "cs2-coverage")]
+    Cs2Coverage {
+        /// Runtime pack root (holds `client.scripts.js5`).
+        #[arg(long, default_value = "../../server/data/pack-910-base-948-overlay")]
+        pack_root: PathBuf,
+        /// Override for the clientscript pack file (default: `<pack-root>/client.scripts.js5`).
+        #[arg(long)]
+        pack_file: Option<PathBuf>,
+        /// Registry JSON path (default: `<data-dir>/cs2/registry-910.json`).
+        #[arg(long)]
+        registry: Option<PathBuf>,
+        /// Report output path (default: `<data-dir>/cs2/coverage-910.report.json`).
+        #[arg(long)]
+        out_file: Option<PathBuf>,
+    },
+    /// Generate pack-validated named id constants (TS modules + manifest) for
+    /// the server from `data/names/910/*.json` joined with the runtime 948 pack.
+    /// Fails (exit 2) listing every named id missing or structurally wrong in the
+    /// pack; `--check` compares against disk and exits 3 on drift.
+    ///
+    /// Example:
+    /// ```bash
+    /// cd tools/rs3-cache-rs
+    /// cargo run --release -- generate-ts-ids
+    /// ```
+    #[command(name = "generate-ts-ids")]
+    GenerateTsIds {
+        /// Runtime pack root (holds the `client.*.js5` files). READ-ONLY.
+        #[arg(long, default_value = "../../server/data/pack-910-base-948-overlay")]
+        pack_root: PathBuf,
+        /// Curated name maps directory (default: `<data-dir>/names/910`).
+        #[arg(long)]
+        names_dir: Option<PathBuf>,
+        /// Output directory (default: `../../server/src/generated/cache`).
+        #[arg(long, default_value = "../../server/src/generated/cache")]
+        out_dir: PathBuf,
+        /// Compare-only: write nothing; exit 3 on any difference.
+        #[arg(long)]
+        check: bool,
+    },
+    /// Extract the canonical game-protocol schema from the client and diff the server.
+    ///
+    /// Parses the client's `ServerProt.java` / `ClientProt.java` / `LoginProt.java`
+    /// (the source of truth) into schema JSON, cross-diffs the server's three TS
+    /// mirrors (checks P1–P6), and writes a findings report plus a checked-in
+    /// divergence baseline. Read-only over both source trees.
+    ///
+    /// Example:
+    /// ```bash
+    /// cd tools/rs3-cache-rs
+    /// cargo run --release -- --data-dir data extract-protocol
+    /// ```
+    #[command(name = "extract-protocol")]
+    ExtractProtocol {
+        /// Root of the client checkout (holds `client/src/main/java/...`).
+        #[arg(long, default_value = "../../client")]
+        client_root: PathBuf,
+        /// Root of the server checkout (holds `src/jagex/network/protocol/...`).
+        #[arg(long, default_value = "../../server")]
+        server_root: PathBuf,
+        /// Output directory (default: `<data-dir>/protocol/910`).
+        #[arg(long)]
+        out_dir: Option<PathBuf>,
+    },
+    /// Generate the protocol parity-gate artifacts from the extracted schema.
+    ///
+    /// Emits `server/src/generated/protocol/protocol910.ts` and
+    /// `client/client/src/test/resources/protocol-910.tsv` from the schema +
+    /// divergence baseline. With `--check`, writes nothing and exits 3 if any
+    /// generated artifact differs from disk.
+    ///
+    /// Example:
+    /// ```bash
+    /// cd tools/rs3-cache-rs
+    /// cargo run --release -- --data-dir data generate-protocol --check
+    /// ```
+    #[command(name = "generate-protocol")]
+    GenerateProtocol {
+        /// Schema directory (default: `<data-dir>/protocol/910`).
+        #[arg(long)]
+        schema_dir: Option<PathBuf>,
+        /// Root of the server checkout.
+        #[arg(long, default_value = "../../server")]
+        server_root: PathBuf,
+        /// Root of the client checkout.
+        #[arg(long, default_value = "../../client")]
+        client_root: PathBuf,
+        /// Compare-only mode: write nothing; exit 3 on any difference.
+        #[arg(long)]
+        check: bool,
+    },
     /// Dump config text files (config/dump.{type}) for `CacheOverlay` compatibility.
     #[command(name = "dump-configs")]
     DumpConfigs {
@@ -383,6 +703,286 @@ pub enum Command {
         /// Target donor subbuild for proof metadata
         #[arg(long, default_value_t = 1)]
         donor_subbuild: u32,
+    },
+}
+
+/// CS2 build-time subcommands (`cs2 <sub>`).
+#[derive(Subcommand, Debug)]
+pub enum Cs2Command {
+    /// Diff spliced donor CS2 listings against a target opcode book and flag (or
+    /// `--fix`) the known port rewrites (`sub`→negate+`add`, `enum`→`_enum`,
+    /// db-field `>>4`, `db_find` arity, signature-drift stubs).
+    ///
+    /// Example:
+    /// ```bash
+    /// cd tools/rs3-cache-rs
+    /// cargo run --release -- cs2 lint-splice \
+    ///   --scripts ../../server/cache-patches/relic-system-948/scripts --target-book 910
+    /// ```
+    #[command(name = "lint-splice")]
+    LintSplice {
+        /// Directory of `*.asm.ts` listings to lint.
+        #[arg(long)]
+        scripts: PathBuf,
+        /// Target opcode book build (the base client's; 910).
+        #[arg(long, default_value_t = crate::cs2::lint::TARGET_BUILD)]
+        target_book: u32,
+        /// Donor opcode book build the listings were lifted from (948).
+        #[arg(long, default_value_t = crate::cs2::lint::DONOR_BUILD)]
+        donor_book: u32,
+        /// Apply the table-driven rewrites in place. WRITES the listing files.
+        #[arg(long)]
+        fix: bool,
+        /// Emit the report as JSON instead of the human table.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Semantic 948→910 CS2 port (the port layer, plan `semantic-port-layer.md`):
+    /// decode → typed IR → represent → lower(named passes) → encode(validating).
+    /// Today the `--closure-of-interface 1224` driver reproduces the committed
+    /// ritual `.asm.ts` byte-for-byte. The global `--cache-dir`/`--build` point at
+    /// the DONOR (948) flat cache (the source side).
+    ///
+    /// Example:
+    /// ```bash
+    /// cd tools/rs3-cache-rs
+    /// cargo run --release -- --cache-dir ../../cache/unpacked/948 --data-dir data \
+    ///   --build 948 --subbuild 1 cs2 port --from 948 --to 910 \
+    ///   --closure-of-interface 1224 --out-dir /tmp/ritual-port
+    /// ```
+    Port {
+        /// Donor build (948).
+        #[arg(long, default_value_t = 948)]
+        from: u32,
+        /// Target build (910).
+        #[arg(long, default_value_t = 910)]
+        to: u32,
+        /// Re-port the CS2 closure of this interface. Supported drivers: 1224
+        /// (ritual selection), 691 (relic powers), 660 (material storage), 1092
+        /// (lodestone).
+        #[arg(long = "closure-of-interface")]
+        closure_of_interface: u32,
+        /// 910-base flat cache dir, for ports that AUGMENT a base script (660's
+        /// 9239 grid-slot builder). Defaults to `../../cache/unpacked/910`.
+        #[arg(long)]
+        base_cache_dir: Option<PathBuf>,
+        /// Output dir for the `.asm.ts` listings. When omitted, only the byte-exact
+        /// diff vs the committed oracle is reported (no files written).
+        #[arg(long)]
+        out_dir: Option<PathBuf>,
+        /// Compare the produced listings against the committed oracle and report
+        /// the diff (default true; the regression gate).
+        #[arg(long, default_value_t = true)]
+        check_oracle: bool,
+        /// Emit a JSON summary instead of the human report.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+/// Config-format subcommands (`config <sub>`).
+#[derive(Subcommand, Debug)]
+pub enum ConfigCommand {
+    /// Re-encode a donor config group from its wire format to the base client's.
+    /// Today supports `--archive 2 --group 40 --from 948 --to 910` (the relic
+    /// DBTABLETYPE opcode-1 schemas + the DbTableIndex BaseVarType serial form).
+    ///
+    /// Example:
+    /// ```bash
+    /// cd tools/rs3-cache-rs
+    /// cargo run --release -- config transcode --archive 2 --group 40 --from 948 --to 910
+    /// ```
+    Transcode {
+        /// Config archive id (2 for DBTABLETYPE).
+        #[arg(long)]
+        archive: u32,
+        /// Group id (40 for DBTABLETYPE).
+        #[arg(long)]
+        group: u32,
+        /// Donor build (948).
+        #[arg(long)]
+        from: u32,
+        /// Target build (910).
+        #[arg(long)]
+        to: u32,
+        /// Donor semantic config dir (`dbtables.json` / `dbrows.json`). READ-ONLY.
+        #[arg(long, default_value = crate::config_transcode::DEFAULT_DONOR_SEMANTIC)]
+        donor_semantic: PathBuf,
+        /// Donor raw-flat root. READ-ONLY.
+        #[arg(long, default_value = crate::config_transcode::DEFAULT_DONOR_RAW)]
+        donor_raw: PathBuf,
+        /// Base (910) raw-flat root. READ-ONLY.
+        #[arg(long, default_value = crate::config_transcode::DEFAULT_BASE_RAW)]
+        base_raw: PathBuf,
+        /// Optional output dir for the re-encoded `.dat(+metadata)` files. Never
+        /// point this at the committed relic overlay (the regression oracle).
+        #[arg(long)]
+        out_dir: Option<PathBuf>,
+        /// Emit a JSON summary instead of the human report.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Port a donor (948) config group to the 910 client through the typed config
+    /// IR (plan §9 step 6): the relic DBTABLETYPE schemas + DbTableIndex re-encoded
+    /// via `DbTable` / `DbTableIndex` IR records. Same scope + byte-stable
+    /// (decompressed-body) contract as `config transcode`, routed through the IR.
+    ///
+    /// Example:
+    /// ```bash
+    /// cd tools/rs3-cache-rs
+    /// cargo run --release -- config port --archive 2 --group 40 --from 948 --to 910
+    /// ```
+    Port {
+        /// Config archive id (2 for DBTABLETYPE).
+        #[arg(long)]
+        archive: u32,
+        /// Group id (40 for DBTABLETYPE).
+        #[arg(long)]
+        group: u32,
+        /// Donor build (948).
+        #[arg(long, default_value_t = 948)]
+        from: u32,
+        /// Target build (910).
+        #[arg(long, default_value_t = 910)]
+        to: u32,
+        /// Donor semantic config dir (`dbtables.json` / `dbrows.json`). READ-ONLY.
+        #[arg(long, default_value = crate::config_transcode::DEFAULT_DONOR_SEMANTIC)]
+        donor_semantic: PathBuf,
+        /// Donor raw-flat root. READ-ONLY.
+        #[arg(long, default_value = crate::config_transcode::DEFAULT_DONOR_RAW)]
+        donor_raw: PathBuf,
+        /// Base (910) raw-flat root. READ-ONLY.
+        #[arg(long, default_value = crate::config_transcode::DEFAULT_BASE_RAW)]
+        base_raw: PathBuf,
+        /// Optional output dir for the re-encoded `.dat(+metadata)` files. Never
+        /// point this at the committed relic overlay (the regression oracle).
+        #[arg(long)]
+        out_dir: Option<PathBuf>,
+        /// Emit a JSON summary instead of the human report.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+/// Port-layer subcommands (`port <sub>`).
+#[derive(Subcommand, Debug)]
+pub enum PortCommand {
+    /// The representability dry-run (plan §6/§10): enumerate every construct the
+    /// 948→910 port of an interface's CS2 closure will hit, classified, with the
+    /// named lowering that bridges each (or `Unhandled`). Subsumes the manual
+    /// `--transitive` closure + collision + component-type + cc-model analysis.
+    ///
+    /// Example:
+    /// ```bash
+    /// cd tools/rs3-cache-rs
+    /// cargo run --release -- --cache-dir ../../cache/unpacked/948 --data-dir data \
+    ///   --build 948 --subbuild 1 port plan --interface 1224 --from 948 --to 910
+    /// ```
+    Plan {
+        /// The interface whose CS2 closure to analyse (1224 = ritual selection).
+        #[arg(long)]
+        interface: u32,
+        /// Donor build (948).
+        #[arg(long, default_value_t = 948)]
+        from: u32,
+        /// Target build (910).
+        #[arg(long, default_value_t = 910)]
+        to: u32,
+        /// Emit the findings as JSON instead of the human report.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+/// Interface-group subcommands (`interface <sub>`).
+#[derive(Subcommand, Debug)]
+pub enum InterfaceCommand {
+    /// Downcode a donor (948) interface group to the 910 client wire format. The
+    /// 910 `Component.decode` only has bodies for the primitive component types
+    /// {layer, rectangle, text, graphic, model, line}; a newer donor interface
+    /// also uses composite widgets (button/check/…) whose bodies the 910 decoder
+    /// skips, misaligning the stream into an `AIOOBE` at `Component.decode:973`.
+    /// This rewrites each unsupported widget to a 910-decodable equivalent
+    /// (preserving its ops/hooks/label), keeps every primitive component, and
+    /// VALIDATES every output through a faithful Rust mirror of the 910 decoder.
+    ///
+    /// Example:
+    /// ```bash
+    /// cd tools/rs3-cache-rs
+    /// cargo run --release -- interface transcode --group 1224 --from 948 --to 910 \
+    ///   --raw-dat ../../server/cache-patches/ritual-pedestal-948/interfaces/1224.dat \
+    ///   --out-dir /tmp/transcoded
+    /// ```
+    Transcode {
+        /// Interface group id (used for the pack lookup, output filename, report).
+        #[arg(long)]
+        group: u32,
+        /// Donor build (948).
+        #[arg(long)]
+        from: u32,
+        /// Target build (910).
+        #[arg(long)]
+        to: u32,
+        /// Build number the donor components decode at (the 948/947 layout).
+        #[arg(long, default_value_t = BUILD)]
+        decode_build: u32,
+        /// Read the donor group from a raw group `.dat` (gzip JS5 container + 2-byte
+        /// version trailer) instead of the runtime pack. READ-ONLY.
+        #[arg(long)]
+        raw_dat: Option<PathBuf>,
+        /// Runtime pack root holding `client.interfaces.js5` (when `--raw-dat` is
+        /// not given). READ-ONLY.
+        #[arg(long, default_value = crate::interface::transcode::DEFAULT_PACK_ROOT_STR)]
+        pack_root: PathBuf,
+        /// Optional output dir; writes `interfaces/<group>-948.dat`. Never point
+        /// this at a protected oracle dir.
+        #[arg(long)]
+        out_dir: Option<PathBuf>,
+        /// Emit a JSON summary instead of the human report.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Port a donor (948) interface group to the 910 client through the typed
+    /// interface IR (plan §9 step 5): decode → represent → lower
+    /// (`list_to_server_driven`) → encode, validating representability at encode
+    /// time (the composite-widget downcode the old `interface transcode` did, now a
+    /// named IR pass). Reproduces the committed `1224-910.dat` byte-for-byte.
+    ///
+    /// Example:
+    /// ```bash
+    /// cd tools/rs3-cache-rs
+    /// cargo run --release -- interface port --group 1224 --from 948 --to 910 \
+    ///   --raw-dat ../../server/cache-patches/ritual-pedestal-948/interfaces/1224.dat \
+    ///   --out-dir /tmp/ported
+    /// ```
+    Port {
+        /// Interface group id (used for the pack lookup, output filename, report).
+        #[arg(long)]
+        group: u32,
+        /// Donor build (948).
+        #[arg(long, default_value_t = 948)]
+        from: u32,
+        /// Target build (910).
+        #[arg(long, default_value_t = 910)]
+        to: u32,
+        /// Build number the donor components decode at (the 948/947 layout).
+        #[arg(long, default_value_t = BUILD)]
+        decode_build: u32,
+        /// Read the donor group from a raw group `.dat` instead of the runtime
+        /// pack. READ-ONLY.
+        #[arg(long)]
+        raw_dat: Option<PathBuf>,
+        /// Runtime pack root holding `client.interfaces.js5` (when `--raw-dat` is
+        /// not given). READ-ONLY.
+        #[arg(long, default_value = crate::interface::transcode::DEFAULT_PACK_ROOT_STR)]
+        pack_root: PathBuf,
+        /// Optional output dir; writes `interfaces/<group>-910.dat`. Never point
+        /// this at a protected oracle dir.
+        #[arg(long)]
+        out_dir: Option<PathBuf>,
+        /// Emit a JSON summary instead of the human report.
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -740,6 +1340,124 @@ pub fn run(cli: Cli) -> Result<()> {
             },
         );
     }
+    if let Command::ExtractCs2Registry {
+        client_root,
+        out_file,
+        report_file,
+    } = &cli.command
+    {
+        crate::cs2_registry::run(&crate::cs2_registry::Cs2RegistryOpts {
+            client_root,
+            data_dir: &cli.data_dir,
+            out_file: out_file.as_deref(),
+            report_file: report_file.as_deref(),
+        })?;
+        return Ok(());
+    }
+    if let Command::GenerateCs2Java {
+        registry,
+        client_root,
+        out_dir,
+        check,
+    } = &cli.command
+    {
+        crate::cs2_javagen::run(&crate::cs2_javagen::Cs2JavaGenOpts {
+            registry: registry.as_deref(),
+            client_root,
+            out_dir: out_dir.as_deref(),
+            data_dir: &cli.data_dir,
+            check: *check,
+        })?;
+        return Ok(());
+    }
+    if let Command::GenerateCs2Data {
+        registry,
+        out_dir,
+        check,
+    } = &cli.command
+    {
+        let drift = crate::cs2_datagen::run(&crate::cs2_datagen::Cs2DataGenOpts {
+            registry: registry.as_deref(),
+            out_dir: out_dir.as_deref(),
+            data_dir: &cli.data_dir,
+            check: *check,
+        })?;
+        if drift {
+            std::process::exit(3);
+        }
+        return Ok(());
+    }
+    if let Command::Cs2Coverage {
+        pack_root,
+        pack_file,
+        registry,
+        out_file,
+    } = &cli.command
+    {
+        let has_findings = crate::cs2_coverage::run(&crate::cs2_coverage::Cs2CoverageOpts {
+            pack_root,
+            pack_file: pack_file.as_deref(),
+            registry: registry.as_deref(),
+            out_file: out_file.as_deref(),
+            data_dir: &cli.data_dir,
+        })?;
+        if has_findings {
+            std::process::exit(4);
+        }
+        return Ok(());
+    }
+    if let Command::GenerateTsIds {
+        pack_root,
+        names_dir,
+        out_dir,
+        check,
+    } = &cli.command
+    {
+        let default_names = cli.data_dir.join("names").join("910");
+        let drift = crate::ts_idgen::run(&crate::ts_idgen::GenerateTsIdsOpts {
+            pack_root,
+            names_dir: names_dir.as_deref().unwrap_or(&default_names),
+            out_dir,
+            check: *check,
+        })?;
+        if drift {
+            std::process::exit(3);
+        }
+        return Ok(());
+    }
+    if let Command::ExtractProtocol {
+        client_root,
+        server_root,
+        out_dir,
+    } = &cli.command
+    {
+        let default_out = cli.data_dir.join("protocol").join("910");
+        crate::protocol_registry::run_extract(&crate::protocol_registry::ExtractProtocolOpts {
+            client_root,
+            server_root,
+            out_dir: out_dir.as_deref().unwrap_or(&default_out),
+        })?;
+        return Ok(());
+    }
+    if let Command::GenerateProtocol {
+        schema_dir,
+        server_root,
+        client_root,
+        check,
+    } = &cli.command
+    {
+        let default_schema = cli.data_dir.join("protocol").join("910");
+        let drift = crate::protocol_registry::run_generate(&crate::protocol_registry::GenerateProtocolOpts {
+            schema_dir: schema_dir.as_deref().unwrap_or(&default_schema),
+            server_root,
+            client_root,
+            check: *check,
+        })?;
+        if drift {
+            std::process::exit(3);
+        }
+        return Ok(());
+    }
     if let Command::AssembleScriptBatch { manifest, out_dir } = &cli.command {
         return run_assemble_script_batch(
             &cli.data_dir,
@@ -750,6 +1468,226 @@ pub fn run(cli: Cli) -> Result<()> {
                 subbuild: cli.subbuild,
             },
         );
+    }
+    if let Command::Font { command } = &cli.command {
+        return Ok(crate::font::cli::run(command)?);
+    }
+    if let Command::ExplainInterface {
+        id,
+        json,
+        pack_root,
+        raw_dat,
+        decode_build,
+        transitive,
+        scripts_cache,
+        scripts_build,
+        base_pack_root,
+    } = &cli.command
+    {
+        let source = raw_dat.as_deref().map_or_else(
+            || crate::explain::InterfaceSource::Pack(pack_root.as_path()),
+            crate::explain::InterfaceSource::RawDat,
+        );
+        // `--transitive` walks the donor clientscript graph from a flat cache
+        // (defaulting to the global `--cache-dir`/`--build`) and scores it against
+        // the 910-base roster. The donor cache holds the un-down-coded bodies, so
+        // it — not the runtime overlay pack — is the source of the splice burden.
+        let scripts_cache_path = scripts_cache
+            .as_deref()
+            .or(cli.cache_dir.as_deref())
+            .unwrap_or_else(|| Path::new("../../cache/unpacked/948"));
+        let transitive_opts = transitive.then(|| crate::explain::TransitiveOptions {
+            scripts_cache: scripts_cache_path,
+            scripts_build: scripts_build.unwrap_or(cli.build),
+            scripts_subbuild: cli.subbuild,
+            data_dir: cli.data_dir.as_path(),
+            base_pack_root: base_pack_root.as_path(),
+        });
+        return Ok(crate::explain::run(&crate::explain::ExplainInterfaceOptions {
+            interface: *id,
+            build: *decode_build,
+            source,
+            json: *json,
+            transitive: transitive_opts,
+        })?);
+    }
+    if let Command::Decode {
+        archive,
+        group,
+        format,
+        pack_root,
+        json,
+    } = &cli.command
+    {
+        let format = format.parse::<crate::decode::Format>()?;
+        return Ok(crate::decode::run(&crate::decode::DecodeOptions {
+            archive: *archive,
+            group: *group,
+            format,
+            pack_root: pack_root.as_path(),
+            json: *json,
+        })?);
+    }
+    // `cs2 lint-splice` operates on text listings + the opcode-book registries;
+    // it needs no flat cache, so intercept it before `open_cache` (like font /
+    // decode / explain-interface). The legacy `cs2` dump (no subcommand) falls
+    // through to the cache-backed match below.
+    if let Command::Cs2 {
+        command: Some(Cs2Command::LintSplice { .. }),
+        ..
+    } = &cli.command
+    {
+        let Command::Cs2 {
+            command: Some(Cs2Command::LintSplice {
+                scripts,
+                target_book,
+                donor_book,
+                fix,
+                json,
+            }),
+            ..
+        } = &cli.command
+        else {
+            unreachable!("guarded by the outer match")
+        };
+        return Ok(crate::cs2::lint::run(&crate::cs2::lint::LintOptions {
+            scripts_dir: scripts.as_path(),
+            data_dir: cli.data_dir.as_path(),
+            target_book: *target_book,
+            donor_book: *donor_book,
+            fix: *fix,
+            json: *json,
+        })?);
+    }
+    // `config transcode` reads donor semantic JSON + raw-flat caches directly; no
+    // flat cache needed.
+    if let Command::Config {
+        command:
+            ConfigCommand::Transcode {
+                archive,
+                group,
+                from,
+                to,
+                donor_semantic,
+                donor_raw,
+                base_raw,
+                out_dir,
+                json,
+            },
+    } = &cli.command
+    {
+        return Ok(crate::config_transcode::run(
+            &crate::config_transcode::TranscodeOptions {
+                archive: *archive,
+                group: *group,
+                from: *from,
+                to: *to,
+                donor_semantic: donor_semantic.as_path(),
+                donor_raw: donor_raw.as_path(),
+                base_raw: base_raw.as_path(),
+                out_dir: out_dir.as_deref(),
+                json: *json,
+            },
+        )?);
+    }
+    // `config port` reads donor semantic JSON + raw-flat caches directly through the
+    // typed config IR; like `config transcode` no flat cache is needed, so intercept
+    // it before `open_cache`.
+    if let Command::Config {
+        command:
+            ConfigCommand::Port {
+                archive,
+                group,
+                from,
+                to,
+                donor_semantic,
+                donor_raw,
+                base_raw,
+                out_dir,
+                json,
+            },
+    } = &cli.command
+    {
+        return Ok(crate::port::config::run(&crate::port::config::ConfigPortOptions {
+            archive: *archive,
+            group: *group,
+            from: *from,
+            to: *to,
+            donor_semantic: donor_semantic.as_path(),
+            donor_raw: donor_raw.as_path(),
+            base_raw: base_raw.as_path(),
+            data_dir: cli.data_dir.as_path(),
+            out_dir: out_dir.as_deref(),
+            json: *json,
+        })?);
+    }
+    // `interface transcode` reads the donor group from a raw `.dat` or the runtime
+    // pack directly and validates through the in-process 910 mirror; no flat cache
+    // needed, so intercept it before `open_cache` (like `config transcode`).
+    if let Command::Interface {
+        command:
+            InterfaceCommand::Transcode {
+                group,
+                from,
+                to,
+                decode_build,
+                raw_dat,
+                pack_root,
+                out_dir,
+                json,
+            },
+    } = &cli.command
+    {
+        let source = raw_dat.as_deref().map_or_else(
+            || crate::interface::transcode::GroupSource::Pack(pack_root.as_path()),
+            crate::interface::transcode::GroupSource::RawDat,
+        );
+        return Ok(crate::interface::transcode::run(
+            &crate::interface::transcode::InterfaceTranscodeOptions {
+                group: *group,
+                from: *from,
+                to: *to,
+                decode_build: *decode_build,
+                source,
+                out_dir: out_dir.as_deref(),
+                json: *json,
+            },
+        )?);
+    }
+    // `interface port` runs the donor group through the typed interface IR (decode
+    // → lower → encode); like `interface transcode` it reads a raw `.dat` or the
+    // runtime pack and validates through the 910 mirror, so intercept it before the
+    // cache is opened.
+    if let Command::Interface {
+        command:
+            InterfaceCommand::Port {
+                group,
+                from,
+                to,
+                decode_build,
+                raw_dat,
+                pack_root,
+                out_dir,
+                json,
+            },
+    } = &cli.command
+    {
+        let source = raw_dat.as_deref().map_or_else(
+            || crate::interface::transcode::GroupSource::Pack(pack_root.as_path()),
+            crate::interface::transcode::GroupSource::RawDat,
+        );
+        return Ok(crate::port::interface::run(
+            &crate::port::interface::InterfacePortOptions {
+                group: *group,
+                from: *from,
+                to: *to,
+                decode_build: *decode_build,
+                source,
+                data_dir: cli.data_dir.as_path(),
+                out_dir: out_dir.as_deref(),
+                json: *json,
+            },
+        )?);
     }
 
     let tar_path = cli.cache_tar.unwrap_or_else(default_tar_path);
@@ -770,14 +1708,51 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::Configs { out_dir } => {
             run_configs(&cache, &tar_path, out_dir.as_deref(), version.build)
         }
-        Command::Cs2 { out_file, out_dir } => run_cs2(
-            &cache,
-            &tar_path,
-            &cli.data_dir,
-            out_file.as_deref(),
-            out_dir.as_deref(),
-            version,
-        ),
+        Command::Cs2 {
+            command,
+            out_file,
+            out_dir,
+        } => {
+            // `lint-splice` is intercepted before the cache is opened; `port` needs
+            // the donor cache (decoded here). No subcommand = the legacy dump.
+            match command {
+                Some(Cs2Command::Port {
+                    from,
+                    to,
+                    closure_of_interface,
+                    base_cache_dir,
+                    out_dir: port_out_dir,
+                    check_oracle,
+                    json,
+                }) => run_cs2_port(
+                    &cache,
+                    &cli.data_dir,
+                    from,
+                    to,
+                    closure_of_interface,
+                    base_cache_dir.as_deref(),
+                    port_out_dir.as_deref(),
+                    check_oracle,
+                    json,
+                ),
+                Some(Cs2Command::LintSplice { .. }) => {
+                    bail!("cs2 lint-splice should have been dispatched before cache open")
+                }
+                None => run_cs2(
+                    &cache,
+                    &tar_path,
+                    &cli.data_dir,
+                    out_file.as_deref(),
+                    out_dir.as_deref(),
+                    version,
+                ),
+            }
+        }
+        Command::Port { command } => run_port_command(&cache, &cli.data_dir, command),
+        // `config transcode` is intercepted before the cache is opened.
+        Command::Config { .. } => {
+            bail!("config subcommand should have been dispatched before cache open")
+        }
         Command::Models {
             out_file,
             out_dir,
@@ -866,6 +1841,22 @@ pub fn run(cli: Cli) -> Result<()> {
             &out_file,
             version,
         ),
+        Command::ExplainLoc {
+            id,
+            max_candidates,
+            json,
+        } => Ok(crate::explain_loc::run(
+            &cache,
+            &tar_path,
+            &cli.data_dir,
+            &crate::explain_loc::ExplainLocOptions {
+                loc: id,
+                build: version.build,
+                subbuild: version.subbuild,
+                max_candidates,
+                json,
+            },
+        )?),
         Command::DepTreeConfig {
             kind,
             id,
@@ -998,6 +1989,17 @@ pub fn run(cli: Cli) -> Result<()> {
             version,
         ),
         Command::AssembleScriptBatch { .. } => unreachable!("handled before cache open"),
+        Command::Font { .. } => unreachable!("handled before cache open"),
+        Command::ExplainInterface { .. } => unreachable!("handled before cache open"),
+        Command::Interface { .. } => unreachable!("handled before cache open"),
+        Command::Decode { .. } => unreachable!("handled before cache open"),
+        Command::ExtractCs2Registry { .. } => unreachable!("handled before cache open"),
+        Command::GenerateCs2Java { .. } => unreachable!("handled before cache open"),
+        Command::ExtractProtocol { .. } => unreachable!("handled before cache open"),
+        Command::GenerateProtocol { .. } => unreachable!("handled before cache open"),
+        Command::GenerateCs2Data { .. } => unreachable!("handled before cache open"),
+        Command::Cs2Coverage { .. } => unreachable!("handled before cache open"),
+        Command::GenerateTsIds { .. } => unreachable!("handled before cache open"),
         Command::DumpRawFlat { out_dir, archives } => {
             run_dump_raw_flat(&cache, &tar_path, &out_dir, archives.as_deref())
         }
@@ -1944,6 +2946,181 @@ fn run_configs(
         textures: textures.len(),
         stylesheets: stylesheets.len(),
     })
+}
+
+/// `cs2 port` — the semantic 948→910 CS2 port (plan §9/§10). Decodes the donor
+/// closure from `cache` (the 948 flat cache), runs it through the port layer, and
+/// (optionally) writes the `.asm.ts` listings + checks them byte-for-byte against
+/// the committed oracle. Today only `--closure-of-interface 1224` is wired (the
+/// ritual driver, the byte-exact oracle).
+fn run_cs2_port(
+    cache: &FlatCache,
+    data_dir: &Path,
+    from: u32,
+    to: u32,
+    closure_of_interface: u32,
+    base_cache_dir: Option<&Path>,
+    out_dir: Option<&Path>,
+    check_oracle: bool,
+    json: bool,
+) -> Result<()> {
+    use crate::port::book::BuildDescriptor;
+    use crate::port::{lodestone, material_storage, relic, ritual};
+
+    ensure!(
+        from == 948 && to == 910,
+        "cs2 port currently supports only --from 948 --to 910 (got {from} → {to})"
+    );
+    ensure!(
+        matches!(closure_of_interface, 1224 | 691 | 660 | 1092),
+        "cs2 port currently supports --closure-of-interface 1224 (ritual selection), 691 \
+         (relic powers), 660 (material storage), or 1092 (lodestone); got {closure_of_interface}"
+    );
+
+    let index = cache.archive_index(ARCHIVE_CLIENTSCRIPTS)?;
+    let book_948 = OpcodeBook::load(data_dir, 948, 1)?;
+    let d948 = BuildDescriptor::load(data_dir, 948)?;
+    let d910 = BuildDescriptor::load(data_dir, 910)?;
+    let source = ritual::cache_source(cache, &index, &book_948);
+    let ported = match closure_of_interface {
+        1224 => ritual::port_ritual_scripts(&source, &d948, &d910)?,
+        691 => relic::port_relic_scripts(&source, &d948, &d910)?,
+        660 => {
+            // The 9239 base augmentation needs a 910-base cache.
+            let base_dir = base_cache_dir
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| PathBuf::from("../../cache/unpacked/910"));
+            let base_cache = FlatCache::open(&base_dir)?;
+            let base_index = base_cache.archive_index(ARCHIVE_CLIENTSCRIPTS)?;
+            let book_910 = OpcodeBook::load(data_dir, 910, 0)?;
+            let base_source =
+                ritual::flat_cache_source(&base_cache, &base_index, &book_910, 910);
+            material_storage::port_material_storage_scripts(&source, &base_source, &d948, &d910)?
+        }
+        1092 => {
+            // Lodestone patches augment 910-base scripts only.
+            let base_dir = base_cache_dir
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| PathBuf::from("../../cache/unpacked/910"));
+            let base_cache = FlatCache::open(&base_dir)?;
+            let base_index = base_cache.archive_index(ARCHIVE_CLIENTSCRIPTS)?;
+            let book_910 = OpcodeBook::load(data_dir, 910, 0)?;
+            let base_source =
+                ritual::flat_cache_source(&base_cache, &base_index, &book_910, 910);
+            lodestone::port_lodestone_scripts(&base_source, &d910)?
+        }
+        other => bail!("unsupported interface {other}"),
+    };
+
+    // Optionally write the listings.
+    if let Some(dir) = out_dir {
+        std::fs::create_dir_all(dir)
+            .with_context(|| format!("create out dir {}", dir.display()))?;
+        for p in &ported {
+            let path = dir.join(format!("script{}.asm.ts", p.out_id));
+            std::fs::write(&path, &p.text)
+                .with_context(|| format!("write {}", path.display()))?;
+        }
+    }
+
+    // The byte-exact oracle: diff each produced listing against the committed one.
+    let mut mismatches: Vec<i32> = Vec::new();
+    let mut checked = 0_usize;
+    if check_oracle {
+        let oracle_family = match closure_of_interface {
+            1224 => "ritual-pedestal-948",
+            691 => "relic-system-948",
+            660 => "material-storage-948",
+            1092 => "lodestone-948",
+            other => bail!("no committed oracle for interface {other}"),
+        };
+        let oracle_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../server/cache-patches")
+            .join(oracle_family)
+            .join("scripts");
+        for p in &ported {
+            let committed_path = oracle_dir.join(format!("script{}.asm.ts", p.out_id));
+            match std::fs::read_to_string(&committed_path) {
+                Ok(committed) => {
+                    checked += 1;
+                    if committed != p.text {
+                        mismatches.push(p.out_id);
+                    }
+                }
+                Err(_) => mismatches.push(p.out_id),
+            }
+        }
+    }
+
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "event": "cs2_port",
+                "from": from,
+                "to": to,
+                "interface": closure_of_interface,
+                "listings": ported.len(),
+                "out_dir": out_dir.map(|p| p.display().to_string()),
+                "oracle_checked": checked,
+                "oracle_mismatches": mismatches,
+                "byte_exact": mismatches.is_empty(),
+            }))?
+        );
+    } else {
+        println!(
+            "cs2 port — interface {closure_of_interface} ({from}→{to}): {} listing(s)",
+            ported.len()
+        );
+        if let Some(dir) = out_dir {
+            println!("  wrote to {}", dir.display());
+        }
+        if check_oracle {
+            if mismatches.is_empty() {
+                println!("  oracle: BYTE-EXACT ({checked} listing(s) match the committed artifacts)");
+            } else {
+                println!(
+                    "  oracle: {} of {} listing(s) DIFFER: {:?}",
+                    mismatches.len(),
+                    checked,
+                    mismatches
+                );
+            }
+        }
+    }
+
+    if check_oracle && !mismatches.is_empty() {
+        bail!(
+            "cs2 port is not byte-exact against the committed oracle ({} mismatch(es))",
+            mismatches.len()
+        );
+    }
+    Ok(())
+}
+
+/// `port <sub>` dispatch (currently `plan`).
+fn run_port_command(cache: &FlatCache, data_dir: &Path, command: PortCommand) -> Result<()> {
+    match command {
+        PortCommand::Plan {
+            interface,
+            from,
+            to,
+            json,
+        } => {
+            let donor_pack_root = PathBuf::from(crate::pack_root::DONOR_PACK_ROOT);
+            let base_pack_root = crate::explain::default_base_pack_root();
+            Ok(crate::port::plan::run(&crate::port::plan::PlanOptions {
+                interface,
+                from,
+                to,
+                donor_cache: cache,
+                donor_pack_root: &donor_pack_root,
+                base_pack_root: &base_pack_root,
+                data_dir,
+                json,
+            })?)
+        }
+    }
 }
 
 fn run_cs2(
@@ -4592,7 +5769,14 @@ fn finalize_reversible_transpile_output(
         return Ok(source);
     }
 
-    let parsed = parse_reversible_source(&source)?;
+    let mut parsed = parse_reversible_source(&source)?;
+    // G3: annotate local declarations with inferred semantic types (opt-in). Applied
+    // before the fidelity gate so the gate validates the annotated form — annotations
+    // are byte-irrelevant (the reverse compiler recovers a local's slot/domain from its
+    // name), so this never changes the recompile result.
+    if std::env::var_os("RS3_INFER_LOCAL_TYPES").is_some() {
+        annotate_parsed_local_types(&mut parsed, reverse_ctx);
+    }
     let mut metadata = parsed.metadata.clone();
     if metadata.editable_structured
         && let Err(block) = recompile_fidelity_check(&parsed, &metadata, reverse_ctx, opcode_book)
@@ -4615,6 +5799,32 @@ fn finalize_reversible_transpile_output(
         diagnostics.warning(block.message);
     }
 
+    // G1.4: the RuneScript-surface byte gate (opt-in, informational). Runs whenever the structured
+    // TS surface is itself byte-exact (`editable_structured`); it gates whichever build is being
+    // transpiled (driven by `--build`). It records a `runescript_gate` diagnostic on failure but
+    // NEVER flips `editable_structured` — the TS editing surface is unaffected. This is the
+    // authoritative proof that the RuneScript round-trip (`render_runescript` → `parse_runescript`
+    // → encode) reproduces the original bytes.
+    if std::env::var_os("RS3_RUNESCRIPT_GATE").is_some()
+        && metadata.editable_structured
+        && let Err(block) =
+            recompile_fidelity_check_runescript(&parsed, &metadata, reverse_ctx, opcode_book)
+    {
+        push_unique_diagnostic(&mut metadata.blocking_diagnostics, "runescript_gate".to_string());
+        if let Some(cause) = block.cause {
+            push_unique_diagnostic(
+                &mut metadata.blocking_diagnostics,
+                format!("runescript_gate_cause:{cause}"),
+            );
+        }
+        // Diagnostic visibility (opt-in): record the sanitized failure message so the opaque
+        // `other`/`ui_method`/`array` buckets can be sub-classified by the actual `bail!` reason.
+        push_unique_diagnostic(
+            &mut metadata.blocking_diagnostics,
+            format!("runescript_gate_msg:{}", gate_message_head(&block.message)),
+        );
+    }
+
     *editable_structured = metadata.editable_structured;
     blocking_diagnostics.clone_from(&metadata.blocking_diagnostics);
     Ok(render_reversible_source(
@@ -4622,6 +5832,46 @@ fn finalize_reversible_transpile_output(
         &metadata,
         &parsed.asm_trailer,
     )?)
+}
+
+/// Rewrite local-declaration annotations in a parsed reversible source with G3's
+/// inferred semantic types. Gosub callee arities come from the reverse context's
+/// cross-script signatures, so gosub-calling scripts model too. Byte-irrelevant
+/// (the semantic annotation maps to the same base as today's), so the fidelity gate
+/// is unaffected — proven by the corpus run staying `blocked:0`.
+fn annotate_parsed_local_types(
+    parsed: &mut crate::transpile::ParsedReversibleSource,
+    reverse_ctx: &ReverseCompileContext,
+) {
+    use crate::transpile::ScriptId;
+    use crate::transpile::type_constraints::{
+        CalleeSig, SignatureTable, annotate_local_declarations, infer_program,
+    };
+    let Ok(script) = crate::script::parse_cs2_asm(&parsed.asm_trailer) else {
+        return;
+    };
+    let sigs = SignatureTable::embedded(parsed.metadata.build);
+    // `script_signatures` is keyed by the *packed* script id (group << 16), while a
+    // `gosub_with_params` operand is the bare group id — try the packed form first,
+    // then the raw id in case a caller already holds a packed reference.
+    let callee = |id: i32| {
+        let sig = reverse_ctx
+            .script_signatures
+            .get(&ScriptId(id << 16))
+            .or_else(|| reverse_ctx.script_signatures.get(&ScriptId(id)))?;
+        Some(CalleeSig {
+            arg_int: sig.arg_count_int,
+            arg_obj: sig.arg_count_obj,
+            arg_long: sig.arg_count_long,
+            ret_int: sig.return_count_int,
+            ret_obj: sig.return_count_obj,
+            ret_long: sig.return_count_long,
+        })
+    };
+    let inferred = infer_program(&[(0, &script)], sigs, &callee);
+    if let Some(locals) = inferred.get(&0) {
+        parsed.structured_source = annotate_local_declarations(&parsed.structured_source, locals);
+    }
 }
 
 struct FinalizedTranspileOutput {
@@ -4911,6 +6161,129 @@ fn recompile_fidelity_check(
         });
     }
     Ok(())
+}
+
+/// Reduce a gate failure message to a low-cardinality head for histogramming (diagnostic-only):
+/// strip the `… failed: ` wrapper and collapse digit runs to `#`, so the opaque buckets group by
+/// their actual `bail!` reason instead of per-script operand noise.
+fn gate_message_head(message: &str) -> String {
+    const PREFIXES: [&str; 6] = [
+        "runescript lowering failed: ",
+        "runescript parse failed: ",
+        "structured parse failed: ",
+        "embedded ASM parse failed: ",
+        "encoding original failed: ",
+        "encoding runescript failed: ",
+    ];
+    let mut body = message;
+    for prefix in PREFIXES {
+        if let Some(rest) = body.strip_prefix(prefix) {
+            body = rest;
+            break;
+        }
+    }
+    let mut out = String::new();
+    let mut last_digit = false;
+    for c in body.chars() {
+        if c.is_ascii_digit() {
+            if !last_digit {
+                out.push('#');
+                last_digit = true;
+            }
+        } else {
+            last_digit = false;
+            out.push(c);
+        }
+        if out.len() >= 200 {
+            break;
+        }
+    }
+    out
+}
+
+/// The byte gate over the **RuneScript** surface (G1.4): render the structured form to RuneScript,
+/// parse it back, lower the result, and compare bytes against the original — proving the RuneScript
+/// editing surface round-trips byte-exactly. Reuses the same `reverse_ctx`/`opcode_book` and the same
+/// `expected` bytes as the TS gate; the only inserted steps are `render_runescript` + `parse_runescript`.
+/// Build-948-only (the gate context's command registry is 948).
+fn recompile_fidelity_check_runescript(
+    parsed: &crate::transpile::ParsedReversibleSource,
+    metadata: &crate::transpile::ReversibleMetadata,
+    reverse_ctx: &ReverseCompileContext,
+    opcode_book: &OpcodeBook,
+) -> std::result::Result<(), RecompileBlock> {
+    let build = metadata.build;
+    let original = parse_cs2_asm(&parsed.asm_trailer).map_err(|e| {
+        RecompileBlock::reverse_unsupported(format!("embedded ASM parse failed: {e}"))
+    })?;
+    let expected = encode_script(&original, opcode_book, build).map_err(|e| {
+        RecompileBlock::reverse_unsupported(format!("encoding original failed: {e}"))
+    })?;
+
+    let structured = parse_structured_typescript(&parsed.structured_source).map_err(|e| {
+        RecompileBlock::reverse_unsupported(format!("structured parse failed: {e}"))
+    })?;
+    let ctx = runescript_gate_context(reverse_ctx);
+    let rendered = crate::transpile::render_runescript(&structured, ctx);
+    let reparsed = crate::transpile::parse_runescript(&rendered, ctx).map_err(|e| {
+        RecompileBlock::reverse_unsupported(format!("runescript parse failed: {e}"))
+    })?;
+    let compiled = lower_structured_script(&reparsed, metadata, reverse_ctx).map_err(|e| {
+        RecompileBlock::reverse_unsupported(format!("runescript lowering failed: {e}"))
+    })?;
+    let actual = encode_script(&compiled, opcode_book, build).map_err(|e| {
+        RecompileBlock::reverse_unsupported(format!("encoding runescript failed: {e}"))
+    })?;
+
+    // Deep-dive diagnostic: dump the original vs round-tripped instruction streams for a named script
+    // (RS3_RS_DUMP=<substring of the structured source>) so ALL divergences are visible, not just the
+    // first one `recompile_divergence` reports.
+    if let Ok(target) = std::env::var("RS3_RS_DUMP")
+        && !target.is_empty()
+        && parsed.structured_source.contains(&target)
+    {
+        let dump = |s: &crate::script::CompiledScript| -> String {
+            s.code
+                .iter()
+                .enumerate()
+                .map(|(i, ins)| format!("{i}: {} {:?}", ins.command, ins.operand))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        std::fs::write("/tmp/rs-orig.asm", dump(&original)).ok();
+        std::fs::write("/tmp/rs-roundtrip.asm", dump(&compiled)).ok();
+        std::fs::write("/tmp/rs-rendered.rs", &rendered).ok();
+    }
+
+    if actual != expected {
+        let (cause, message) = recompile_divergence(&original, &compiled);
+        return Err(RecompileBlock {
+            blocker: "runescript_mismatch",
+            cause: Some(cause),
+            message,
+        });
+    }
+    Ok(())
+}
+
+/// The shared `RuneScriptContext` for the byte gate, built once from the script catalog. The gosub
+/// name-set is **not** cosmetic for byte fidelity: a gosub whose script name collides with a command
+/// name (`date_runeday`, `error`, …) or contains underscores must render with `~` so it parses back
+/// as a gosub rather than re-lowering as that command. The catalog is the same for every script in a
+/// build run, so the first call populates the set.
+fn runescript_gate_context(
+    reverse_ctx: &ReverseCompileContext,
+) -> &'static crate::transpile::RuneScriptContext {
+    use std::sync::OnceLock;
+    static CTX: OnceLock<crate::transpile::RuneScriptContext> = OnceLock::new();
+    CTX.get_or_init(|| {
+        let scripts = reverse_ctx
+            .script_catalog
+            .export_name_map()
+            .into_values()
+            .collect();
+        crate::transpile::RuneScriptContext::new(scripts)
+    })
 }
 
 /// Describe the first instruction-level divergence between the original script

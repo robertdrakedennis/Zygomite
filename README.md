@@ -19,7 +19,12 @@ Supported native base revisions:
    --new-cache .../unpacked/<build> --old-book data/opcodes-947.txt
    --out data/opcodes-<build>.txt` (aligns unchanged scripts across caches;
    948: 20,416 scripts aligned, 1,230 commands, 0 conflicts, all 20,621
-   scripts then decode under code-length validation).
+   scripts then decode under code-length validation). `opcodes-948.txt` was
+   later replaced wholesale by the richer upstream **zwyz/rs3-cache**
+   `data/opcodes-948.txt` (2,244 names — a verified strict superset of the
+   1,230 derived names: 0 id conflicts, +1,014 engine commands with no 910
+   counterpart). It carries a `// Synced from …` provenance header and is a
+   hand-synced upstream INPUT, never regenerated from the registry.
 3. Fix format drift surfaced by consume-full-payload errors. 948 needed two:
    material v0 gained flag bit 23 → one BE float (`parse_material_v0`), and
    VFX flow shape kind 8 (3 BE floats, `decode_flow_shape`) — both validated
@@ -28,9 +33,10 @@ Supported native base revisions:
    `../../cache/rs3-cache/<build>-all`, plus `cs2 --out-dir .../cs2`.
 
 948 known follow-ups: 2,230/141,575 mapsquare groups have parse errors under
-`--best-effort-maps` (not yet compared against a 947 baseline), and 1,014
-book commands are unused by any live script so cannot be derived from cache
-alignment (only matter if future scripts use them).
+`--best-effort-maps` (not yet compared against a 947 baseline). The 1,014
+upstream-only commands (now present in `opcodes-948.txt`) are unused by any
+live script and have no 910 counterpart, so they never enter the registry —
+they only matter if future scripts use them.
 
 ## What it does
 
@@ -52,6 +58,10 @@ alignment (only matter if future scripts use them).
   - extracted flat cache dir (default: `../eval/cache-flat/cache`)
   - OpenRS2 tar (default: `../cache-runescape-live-en-b947.1-2026-04-20-10-45-34-openrs2#2519.tar`)
 - Opcode/name tables in `data/` (default `--data-dir data` when run from this crate; Alerion: `tools/rs3-cache-rs/data`)
+
+### Opcode data sources
+
+`data/cs2/registry-910.json` (extracted from the client by `extract-cs2-registry`) is the canonical opcode truth for build **910**. Its three 910 txt files — `opcodes-910.txt`, `opcodes-large-910.txt`, `opcode-aliases-910.txt` — are **generated views** of that registry: run `generate-cs2-data` after `extract-cs2-registry`, or `generate-cs2-data --check` to gate drift. The registry also carries an `id_948` column, but `opcodes-948.txt` is **not** generated and stays hand-derived: the registry is anchored to the 1,432-case 910 dispatch switch and cannot represent the donor-only opcodes 948 adds (e.g. `sub` at id 824), which are used when decoding the live 948 cache. **947, 948, and every other build remain hand-derived txt** (`scripts/derive-opcode-book.py` / `sync-legacy-data.sh`).
 
 ## Build
 

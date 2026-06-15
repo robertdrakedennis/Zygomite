@@ -434,11 +434,23 @@ fn escape_string(value: &str) -> String {
 }
 
 pub fn parse_type_annotation(value: &str) -> TypeAnnotation {
-    match value.trim() {
+    let name = value.trim();
+    match name {
         "number" => TypeAnnotation::Number,
         "bigint" => TypeAnnotation::BigInt,
         "string" => TypeAnnotation::String,
         "boolean" => TypeAnnotation::Boolean,
-        _ => TypeAnnotation::Unknown,
+        // G3 semantic type annotations (`component`, `loc`, …) collapse to their base
+        // VM annotation so local counting + reference-domain recovery are unchanged
+        // (a `component` local counts and lowers exactly like a `number` one).
+        _ => {
+            use super::types::{BaseVarType, lattice};
+            match lattice().by_name(name).base() {
+                Some(BaseVarType::Long) => TypeAnnotation::BigInt,
+                Some(BaseVarType::String | BaseVarType::CoordFine) => TypeAnnotation::String,
+                Some(BaseVarType::Integer) => TypeAnnotation::Number,
+                None => TypeAnnotation::Unknown,
+            }
+        }
     }
 }

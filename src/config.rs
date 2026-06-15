@@ -4107,7 +4107,7 @@ fn push_dbtable_default(
 fn read_tuple(packet: &mut Packet<'_>, tuple_types: &[u16]) -> Result<Vec<ScalarValue>> {
     let mut values = Vec::with_capacity(tuple_types.len());
     for type_id in tuple_types {
-        let value = match type_base(*type_id) {
+        let value = match dbtype_base(*type_id) {
             DbTypeBase::Int => ScalarValue::Int(packet.g4s()?),
             DbTypeBase::Long => ScalarValue::Long(packet.g8s()?),
             DbTypeBase::String => ScalarValue::Str(packet.gjstr()?),
@@ -4117,14 +4117,24 @@ fn read_tuple(packet: &mut Packet<'_>, tuple_types: &[u16]) -> Result<Vec<Scalar
     Ok(values)
 }
 
-#[derive(Clone, Copy)]
-enum DbTypeBase {
+/// Storage base of a `ScriptVarType` id, as the dbtable/dbrow wire format reads
+/// and writes it. Exposed so the config transcoder encodes scalars by the same
+/// classification the reader decodes them with (the client's
+/// `ScriptVarType.baseType`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DbTypeBase {
+    /// 32-bit signed integer scalar.
     Int,
+    /// 64-bit signed long scalar.
     Long,
+    /// Null-terminated Windows-1252 string scalar.
     String,
 }
 
-fn type_base(type_id: u16) -> DbTypeBase {
+/// Classify a `ScriptVarType` id into its storage [`DbTypeBase`]. Shared by the
+/// dbtable reader ([`parse_dbtable`]) and the config transcoder's encoder.
+#[must_use]
+pub fn dbtype_base(type_id: u16) -> DbTypeBase {
     match type_id {
         36 => DbTypeBase::String,
         35 | 49 | 56 | 71 | 110 | 115 | 116 | 118 => DbTypeBase::Long,

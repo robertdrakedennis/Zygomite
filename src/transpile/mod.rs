@@ -4,12 +4,17 @@ pub mod codegen;
 pub mod diagnostics;
 pub mod expr_recovery;
 pub mod reversible_format;
+pub mod rs_parse;
+pub mod runescript;
 pub mod scope;
 pub mod structured;
 pub mod structured_writer;
 pub mod structurer;
 pub mod ts_lower;
 pub mod ts_parse;
+pub mod type_constraints;
+pub mod type_infer;
+pub mod types;
 
 pub use ast::*;
 pub use cfg::{Block, build_cfg, detect_return_type, emit_structured};
@@ -25,6 +30,8 @@ pub use reversible_format::{
     append_reversible_footer, blocking_diagnostics, editable_structured, is_reversible_source,
     parse_reversible_source, render_reversible_source, structured_digest,
 };
+pub use rs_parse::parse_runescript;
+pub use runescript::{RuneScriptContext, render_runescript};
 pub use scope::{LocalType, Scope, Scopes, Symbol, SymbolKind, SymbolTable};
 pub use structured::{AssignmentTarget, StructuredScript, StructuredStmt, SwitchCaseStmt};
 pub use structured_writer::{BuiltStructuredScript, StructuredWriter};

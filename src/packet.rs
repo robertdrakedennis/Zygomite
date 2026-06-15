@@ -366,4 +366,37 @@ impl ByteWriter {
             Some(s) => self.pjstr(s),
         }
     }
+
+    /// Inverse of [`Packet::gsmart1or2`]: values `< 128` write one byte; larger
+    /// values write two bytes with the high bit set (`value | 0x8000`). Matches
+    /// the client's `pSmart1or2` (used for DBTABLETYPE type ids and counts).
+    pub fn psmart1or2(&mut self, value: u16) -> Result<()> {
+        if value < 128 {
+            self.p1(value as u8);
+            Ok(())
+        } else if value < 0x8000 {
+            self.p2(value | 0x8000);
+            Ok(())
+        } else {
+            bail!("psmart1or2 value out of range (>= 0x8000): {value}");
+        }
+    }
+
+    /// LEB128-style varint used by the 910 `DbTableIndex` encoding
+    /// (`pVarInt2` in `build-relic-db-910.ts`): 7 data bits per byte, high bit
+    /// set on every byte but the last, little-endian group order.
+    pub fn pvarint2(&mut self, value: u32) {
+        let mut v = value;
+        loop {
+            let mut byte = (v & 0x7f) as u8;
+            v >>= 7;
+            if v != 0 {
+                byte |= 0x80;
+            }
+            self.p1(byte);
+            if v == 0 {
+                break;
+            }
+        }
+    }
 }

@@ -2,10 +2,33 @@ use crate::cache_bail as bail;
 use crate::error::{Context, Result};
 use crate::packet::{ByteWriter, Packet};
 use crate::vars::VarDomain;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
+
+/// Schema string the registry-backed [`OpcodeBook::from_registry`] accepts.
+const REGISTRY_SCHEMA: &str = "cs2-registry/v3";
+
+/// Minimal projection of `cs2/registry-910.json` consumed by [`OpcodeBook::from_registry`].
+#[derive(Debug, Deserialize)]
+struct RegistryDoc {
+    schema: String,
+    commands: Vec<RegistryCommand>,
+}
+
+/// The single command fields the opcode book needs from the registry.
+#[derive(Debug, Deserialize)]
+struct RegistryCommand {
+    name: String,
+    id_910: u16,
+    large_operand: bool,
+    aliases: Vec<String>,
+    id_948: Option<u32>,
+    /// Exact name the row carried in `opcodes-948.txt` (the alias when the 948
+    /// match came through one, else `name`); `None` when `id_948` is null.
+    id_948_name: Option<String>,
+}
 
 // ── Build compatibility ──
 //
@@ -34,6 +57,114 @@ pub struct OpcodeBook {
 
 impl OpcodeBook {
     pub fn load(data_dir: &Path, version: u32, subversion: u32) -> Result<Self> {
+        // Build 910 is served from the extracted CS2 registry (the proven,
+        // drift-gated mirror of the client's opcode truth) when it is present.
+        //
+        // Build 948 deliberately stays on the txt path: the registry is anchored
+        // to the 1,432-case 910 dispatch switch and therefore cannot represent
+        // the 868 donor-only opcodes that exist in `opcodes-948.txt` but have no
+        // 910 command (e.g. `sub` at id 824). Every one of those 868 is used when
+        // decoding the live 948 cache, so routing 948 through the registry would
+        // silently mis-decode them as `cmd_NNNN`. This is the same structural
+        // reason the legacy 947 donor is txt-driven. See `from_registry` and the
+        // equivalence gate (`tests/cs2_opcode_registry_equiv.rs`) for the proof.
+        if version == 910 {
+            let registry = data_dir.join("cs2").join("registry-910.json");
+            if registry.is_file() {
+                return Self::from_registry(&registry, version);
+            }
+        }
+        Self::load_from_txt(data_dir, version, subversion)
+    }
+
+    /// Build the opcode book from the CS2 registry for build 910 or 948.
+    ///
+    /// Reproduces the txt-driven book exactly (see the §4 equivalence gate):
+    /// for 910 the alias map and large-operand flags come from the registry; for
+    /// 948 `large_by_id` stays all-false and there are no aliases, and each
+    /// command is keyed by the name it carried in `opcodes-948.txt`.
+    pub fn from_registry(registry_path: &Path, build: u32) -> Result<Self> {
+        if build != 910 && build != 948 {
+            bail!("from_registry only supports builds 910 and 948, got {build}");
+        }
+        let content = fs::read_to_string(registry_path).with_context(|| {
+            format!("failed reading registry file {}", registry_path.display())
+        })?;
+        let doc: RegistryDoc = serde_json::from_str(&content)
+            .with_context(|| format!("failed parsing registry file {}", registry_path.display()))?;
+        if doc.schema != REGISTRY_SCHEMA {
+            bail!(
+                "registry {} has schema '{}', expected '{REGISTRY_SCHEMA}'",
+                registry_path.display(),
+                doc.schema
+            );
+        }
+
+        let mut by_name = BTreeMap::<String, u16>::new();
+        let mut aliases = BTreeMap::<String, String>::new();
+        // large flags collected keyed by id; the full vector is sized after the
+        // max id is known, mirroring `load_from_txt`.
+        let mut large_flags: Vec<(u16, bool)> = Vec::new();
+
+        for cmd in &doc.commands {
+            if build == 910 {
+                by_name.insert(cmd.name.clone(), cmd.id_910);
+                if cmd.large_operand {
+                    large_flags.push((cmd.id_910, true));
+                }
+                for alt in &cmd.aliases {
+                    aliases.insert(alt.clone(), cmd.name.clone());
+                }
+            } else {
+                // build == 948
+                if let Some(id_948) = cmd.id_948 {
+                    let id = u16::try_from(id_948).with_context(|| {
+                        format!("948 opcode id {id_948} for `{}` exceeds u16", cmd.name)
+                    })?;
+                    // Key by the donor-file name so the book matches the txt
+                    // book byte-for-byte even when the 948 match came via an
+                    // alias (e.g. `enum` for canonical `_enum`).
+                    let key = cmd.id_948_name.clone().unwrap_or_else(|| cmd.name.clone());
+                    by_name.insert(key, id);
+                }
+                // 948 has no large file and no alias file: large_by_id all-false,
+                // aliases empty (reproduce current behavior).
+            }
+        }
+
+        let max_id = by_name
+            .values()
+            .copied()
+            .max()
+            .map(usize::from)
+            .unwrap_or(0);
+        let mut by_id = vec![None; max_id.saturating_add(1)];
+        for (name, id) in &by_name {
+            by_id[usize::from(*id)] = Some(name.clone());
+        }
+
+        let mut large_by_id = vec![false; by_id.len()];
+        for (id, flag) in large_flags {
+            let idx = usize::from(id);
+            if idx >= large_by_id.len() {
+                large_by_id.resize(idx + 1, false);
+            }
+            large_by_id[idx] = flag;
+        }
+
+        Ok(Self {
+            by_id,
+            by_name,
+            large_by_id,
+            aliases,
+        })
+    }
+
+    /// Build the opcode book purely from the hand-maintained `data/` txt files,
+    /// bypassing the registry-first path in [`OpcodeBook::load`]. This is the
+    /// path used for every build without registry coverage; it is also the
+    /// reference side of the registry/txt equivalence gate.
+    pub fn load_from_txt(data_dir: &Path, version: u32, subversion: u32) -> Result<Self> {
         // Build-specific opcode file (e.g. opcodes-910.txt, opcodes-947.txt).
         // Falls back to opcodes-unscrambled.txt if no version-specific file exists.
         let path = scoped_data_file(data_dir, "opcodes", version, subversion)
@@ -150,6 +281,24 @@ impl OpcodeBook {
             .with_context(|| format!("missing opcode mapping for id {opcode}"))
     }
 
+    /// `canonical name → id` map. Exposed for the equivalence gate.
+    #[must_use]
+    pub fn by_name(&self) -> &BTreeMap<String, u16> {
+        &self.by_name
+    }
+
+    /// `id → large-operand flag` table. Exposed for the equivalence gate.
+    #[must_use]
+    pub fn large_by_id(&self) -> &[bool] {
+        &self.large_by_id
+    }
+
+    /// Encode-only `alt name → canonical name` map. Exposed for the equivalence gate.
+    #[must_use]
+    pub fn aliases(&self) -> &BTreeMap<String, String> {
+        &self.aliases
+    }
+
     pub fn opcode_for(&self, name: &str) -> Result<u16> {
         if let Some(id) = self.by_name.get(name) {
             return Ok(*id);
@@ -203,6 +352,81 @@ pub struct CompiledScript {
     pub code: Vec<Instruction>,
 }
 
+/// A script's declared argument signature — the `(int, object, long)` argument
+/// counts from its header. This is the arity `gosub_with_params` transfers off
+/// the operand stack when calling the script, so two scripts at the same id with
+/// different signatures are NOT interchangeable: calling one with the other's
+/// arity underflows/overflows the interpreter stack. Used to detect donor↔910
+/// proc-id collisions in the transitive splice analysis.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
+pub struct ScriptArgSignature {
+    pub int: u16,
+    pub obj: u16,
+    pub long: u16,
+}
+
+impl ScriptArgSignature {
+    /// Compact `(Ni,No,Nl)` form for diagnostics, e.g. `(2i,0o,0l)`.
+    #[must_use]
+    pub fn display(&self) -> String {
+        format!("({}i,{}o,{}l)", self.int, self.obj, self.long)
+    }
+}
+
+impl CompiledScript {
+    /// This script's declared argument signature.
+    #[must_use]
+    pub fn arg_signature(&self) -> ScriptArgSignature {
+        ScriptArgSignature {
+            int: self.argument_count_int,
+            obj: self.argument_count_object,
+            long: self.argument_count_long,
+        }
+    }
+}
+
+/// Read ONLY a script's declared argument signature from its raw bytes, without
+/// an opcode book or decoding the instruction stream.
+///
+/// The argument counts live in the fixed-layout script header (read positionally
+/// from the end of the group), independent of the opcode table — so this works
+/// for any build ≥ 642 (where the long-arg field is present) regardless of
+/// whether the caller has that build's full opcode book. This is the cheap,
+/// book-free primitive the donor↔910 collision check compares both sides with.
+pub fn decode_script_arg_signature(data: &[u8], version: u32) -> Result<ScriptArgSignature> {
+    let mut packet = Packet::new(data);
+    let mut header_size = 12_usize;
+    if version >= 642 {
+        header_size = header_size.checked_add(4).context("header size overflow")?;
+    }
+    if version >= 488 {
+        packet.set_pos(data.len().saturating_sub(2))?;
+        let trailer_size = usize::from(packet.g2()?);
+        header_size = header_size
+            .checked_add(2)
+            .and_then(|v| v.checked_add(trailer_size))
+            .context("header size overflow")?;
+    }
+    let header_pos = data
+        .len()
+        .checked_sub(header_size)
+        .context("invalid script header size")?;
+
+    packet.set_pos(header_pos)?;
+    let _code_len = packet.g4s()?;
+    let _local_count_int = packet.g2()?;
+    let _local_count_object = packet.g2()?;
+    let _local_count_long = if version >= 642 { packet.g2()? } else { 0 };
+    let argument_count_int = packet.g2()?;
+    let argument_count_object = packet.g2()?;
+    let argument_count_long = if version >= 642 { packet.g2()? } else { 0 };
+    Ok(ScriptArgSignature {
+        int: argument_count_int,
+        obj: argument_count_object,
+        long: argument_count_long,
+    })
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct Instruction {
     pub opcode: u16,
@@ -227,20 +451,20 @@ pub enum Operand {
     Byte(u8),
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 pub struct VarRef {
     pub domain: VarDomain,
     pub id: u16,
     pub transmog: bool,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 pub struct VarBitRef {
     pub id: u16,
     pub transmog: bool,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 pub struct SwitchCase {
     pub value: i32,
     pub target: i32,
@@ -1370,6 +1594,43 @@ mod tests {
         assert_eq!(opcode_book.name(1144)?, "field5245");
         assert!(opcode_book.has_large_operand(1376));
         assert!(!opcode_book.has_large_operand(842));
+        Ok(())
+    }
+
+    #[test]
+    fn arg_signature_reads_header_arg_counts_book_free() -> Result<()> {
+        // Encode a script with distinct (int,obj,long) arg counts, then read the
+        // signature back with the book-free header reader — it must match without
+        // any opcode book, proving the collision check's primitive is correct.
+        let opcode_book = OpcodeBook::load(&test_data_dir(), 910, 0)?;
+        let script = CompiledScript {
+            name: Some("sig_probe".to_string()),
+            local_count_int: 4,
+            local_count_object: 2,
+            local_count_long: 1,
+            argument_count_int: 2,
+            argument_count_object: 0,
+            argument_count_long: 0,
+            code: Vec::new(),
+        };
+        let bytes = encode_script(&script, &opcode_book, MIN_SCRIPT_BUILD)?;
+        let sig = decode_script_arg_signature(&bytes, MIN_SCRIPT_BUILD)?;
+        assert_eq!(sig, ScriptArgSignature { int: 2, obj: 0, long: 0 });
+        assert_eq!(sig.display(), "(2i,0o,0l)");
+        assert_eq!(script.arg_signature(), sig);
+
+        // A differently-signed script (the 910-side of a collision) reads back
+        // its own distinct signature.
+        let other = CompiledScript {
+            argument_count_int: 5,
+            argument_count_object: 1,
+            argument_count_long: 0,
+            ..script.clone()
+        };
+        let other_bytes = encode_script(&other, &opcode_book, MIN_SCRIPT_BUILD)?;
+        let other_sig = decode_script_arg_signature(&other_bytes, MIN_SCRIPT_BUILD)?;
+        assert_eq!(other_sig, ScriptArgSignature { int: 5, obj: 1, long: 0 });
+        assert_ne!(sig, other_sig, "differing arg counts must compare unequal");
         Ok(())
     }
 

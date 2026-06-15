@@ -1,0 +1,5726 @@
+{
+  "schema": "cs2-coverage/v1",
+  "pack_file": "../../server/data/pack-910-base-948-overlay/client.scripts.js5",
+  "registry": "data/cs2/registry-910.json",
+  "summary": {
+    "groups_indexed": 14313,
+    "groups_present": 14313,
+    "groups_decoded": 14313,
+    "decode_failures": 0,
+    "unassigned_opcode_findings": 6,
+    "unknown_opcode_findings": 0,
+    "distinct_opcodes_used": 1055,
+    "implemented_unused": 376
+  },
+  "findings": [
+    {
+      "kind": "unassigned_opcode",
+      "group": 1258,
+      "script_name": "",
+      "opcode": 79,
+      "name": "field5283",
+      "instruction_index": 28,
+      "message": null
+    },
+    {
+      "kind": "unassigned_opcode",
+      "group": 2581,
+      "script_name": "",
+      "opcode": 250,
+      "name": "field6392",
+      "instruction_index": 186,
+      "message": null
+    },
+    {
+      "kind": "unassigned_opcode",
+      "group": 2581,
+      "script_name": "",
+      "opcode": 393,
+      "name": "field6354",
+      "instruction_index": 204,
+      "message": null
+    },
+    {
+      "kind": "unassigned_opcode",
+      "group": 2582,
+      "script_name": "",
+      "opcode": 79,
+      "name": "field5283",
+      "instruction_index": 246,
+      "message": null
+    },
+    {
+      "kind": "unassigned_opcode",
+      "group": 2582,
+      "script_name": "",
+      "opcode": 247,
+      "name": "field6317",
+      "instruction_index": 253,
+      "message": null
+    },
+    {
+      "kind": "unassigned_opcode",
+      "group": 2582,
+      "script_name": "",
+      "opcode": 250,
+      "name": "field6392",
+      "instruction_index": 242,
+      "message": null
+    }
+  ],
+  "opcode_usage": [
+    {
+      "id": 0,
+      "name": "telemetry_get_group_count",
+      "scripts": 1
+    },
+    {
+      "id": 1,
+      "name": "targetmode_active",
+      "scripts": 2
+    },
+    {
+      "id": 2,
+      "name": "if_setoptkey",
+      "scripts": 1
+    },
+    {
+      "id": 4,
+      "name": "chatphrase_gettext",
+      "scripts": 7
+    },
+    {
+      "id": 5,
+      "name": "detail_anisotropicfiltering",
+      "scripts": 2
+    },
+    {
+      "id": 6,
+      "name": "sound_synth",
+      "scripts": 54
+    },
+    {
+      "id": 8,
+      "name": "abort_dialog",
+      "scripts": 3
+    },
+    {
+      "id": 10,
+      "name": "worldmap_getdisplayposition",
+      "scripts": 4
+    },
+    {
+      "id": 12,
+      "name": "if_sendtofront",
+      "scripts": 29
+    },
+    {
+      "id": 13,
+      "name": "cc_setheld",
+      "scripts": 2
+    },
+    {
+      "id": 14,
+      "name": "clan_getchatminkick",
+      "scripts": 4
+    },
+    {
+      "id": 15,
+      "name": "cc_getx",
+      "scripts": 205
+    },
+    {
+      "id": 17,
+      "name": "scale",
+      "scripts": 374
+    },
+    {
+      "id": 18,
+      "name": "if_setonhorizontalpinch",
+      "scripts": 2
+    },
+    {
+      "id": 19,
+      "name": "cc_find",
+      "scripts": 1102
+    },
+    {
+      "id": 20,
+      "name": "detailget_maxforegroundfps",
+      "scripts": 2
+    },
+    {
+      "id": 23,
+      "name": "cc_setontargetenter",
+      "scripts": 9
+    },
+    {
+      "id": 24,
+      "name": "activeclansettings_getaffinedcount",
+      "scripts": 9
+    },
+    {
+      "id": 25,
+      "name": "autosetup_dosetupstatus",
+      "scripts": 1
+    },
+    {
+      "id": 26,
+      "name": "cam2_setlookatmaxspeed_axis",
+      "scripts": 1
+    },
+    {
+      "id": 27,
+      "name": "char_isnumeric",
+      "scripts": 3
+    },
+    {
+      "id": 31,
+      "name": "cc_setopbase",
+      "scripts": 109
+    },
+    {
+      "id": 32,
+      "name": "map_members",
+      "scripts": 138
+    },
+    {
+      "id": 33,
+      "name": "preload_percent",
+      "scripts": 1
+    },
+    {
+      "id": 35,
+      "name": "cam_dec_x",
+      "scripts": 1
+    },
+    {
+      "id": 37,
+      "name": "chat_setmode",
+      "scripts": 11
+    },
+    {
+      "id": 38,
+      "name": "minimenu_close",
+      "scripts": 3
+    },
+    {
+      "id": 39,
+      "name": "struct_param",
+      "scripts": 1138
+    },
+    {
+      "id": 42,
+      "name": "detailget_maxscreensize",
+      "scripts": 11
+    },
+    {
+      "id": 43,
+      "name": "if_getgraphic",
+      "scripts": 67
+    },
+    {
+      "id": 44,
+      "name": "if_getmodelangle_x",
+      "scripts": 11
+    },
+    {
+      "id": 45,
+      "name": "random_sound_pitch",
+      "scripts": 32
+    },
+    {
+      "id": 46,
+      "name": "getclipboard",
+      "scripts": 1
+    },
+    {
+      "id": 47,
+      "name": "cam_smoothreset",
+      "scripts": 22
+    },
+    {
+      "id": 49,
+      "name": "gosub_with_params",
+      "scripts": 8460
+    },
+    {
+      "id": 50,
+      "name": "define_array",
+      "scripts": 105
+    },
+    {
+      "id": 51,
+      "name": "if_settextantimacro",
+      "scripts": 1
+    },
+    {
+      "id": 52,
+      "name": "map_loadingscreen_isopen",
+      "scripts": 2
+    },
+    {
+      "id": 53,
+      "name": "cam2_updateeffect_ztilt",
+      "scripts": 1
+    },
+    {
+      "id": 54,
+      "name": "if_setontimer",
+      "scripts": 1114
+    },
+    {
+      "id": 55,
+      "name": "activeclanchannel_getusercount",
+      "scripts": 4
+    },
+    {
+      "id": 56,
+      "name": "cam2_setlookatorientation_xrotation",
+      "scripts": 3
+    },
+    {
+      "id": 58,
+      "name": "tostring",
+      "scripts": 1054
+    },
+    {
+      "id": 61,
+      "name": "os_iswindows",
+      "scripts": 2
+    },
+    {
+      "id": 62,
+      "name": "ignore_del",
+      "scripts": 9
+    },
+    {
+      "id": 63,
+      "name": "map_preload",
+      "scripts": 3
+    },
+    {
+      "id": 64,
+      "name": "baseidkit",
+      "scripts": 3
+    },
+    {
+      "id": 65,
+      "name": "cc_getgraphicdimensions",
+      "scripts": 2
+    },
+    {
+      "id": 66,
+      "name": "if_find",
+      "scripts": 529
+    },
+    {
+      "id": 68,
+      "name": "join_string",
+      "scripts": 1264
+    },
+    {
+      "id": 70,
+      "name": "if_getmodelangle_z",
+      "scripts": 9
+    },
+    {
+      "id": 71,
+      "name": "detailget_lightingquality",
+      "scripts": 2
+    },
+    {
+      "id": 73,
+      "name": "cam2_setpositionpointcollision",
+      "scripts": 2
+    },
+    {
+      "id": 74,
+      "name": "worldmap_getzoom",
+      "scripts": 1
+    },
+    {
+      "id": 76,
+      "name": "if_setonhorizontalswipe",
+      "scripts": 8
+    },
+    {
+      "id": 77,
+      "name": "detailcanmod_vsync",
+      "scripts": 1
+    },
+    {
+      "id": 78,
+      "name": "detailcanmod_skydetail",
+      "scripts": 2
+    },
+    {
+      "id": 79,
+      "name": "field5283",
+      "scripts": 2
+    },
+    {
+      "id": 80,
+      "name": "detail_antialiasing",
+      "scripts": 2
+    },
+    {
+      "id": 81,
+      "name": "detailget_bloom",
+      "scripts": 2
+    },
+    {
+      "id": 82,
+      "name": "cc_setonstattransmit",
+      "scripts": 10
+    },
+    {
+      "id": 83,
+      "name": "if_setoutline",
+      "scripts": 12
+    },
+    {
+      "id": 84,
+      "name": "worldmap_getdisplaycoord",
+      "scripts": 4
+    },
+    {
+      "id": 86,
+      "name": "get_currentcursor",
+      "scripts": 1
+    },
+    {
+      "id": 87,
+      "name": "nc_param",
+      "scripts": 28
+    },
+    {
+      "id": 88,
+      "name": "cc_setlinedirection",
+      "scripts": 2
+    },
+    {
+      "id": 89,
+      "name": "oc_tradeable",
+      "scripts": 4
+    },
+    {
+      "id": 90,
+      "name": "detailget_antialiasing",
+      "scripts": 2
+    },
+    {
+      "id": 91,
+      "name": "if_resetmodellighting",
+      "scripts": 2
+    },
+    {
+      "id": 92,
+      "name": "ttv_webcam_supported",
+      "scripts": 1
+    },
+    {
+      "id": 93,
+      "name": "oc_name",
+      "scripts": 242
+    },
+    {
+      "id": 94,
+      "name": "player_group_member_is_owner",
+      "scripts": 5
+    },
+    {
+      "id": 95,
+      "name": "lobby_enterlobby",
+      "scripts": 1
+    },
+    {
+      "id": 96,
+      "name": "if_getx",
+      "scripts": 218
+    },
+    {
+      "id": 97,
+      "name": "notifications_sendgroupedlocal",
+      "scripts": 1
+    },
+    {
+      "id": 98,
+      "name": "pushUnsupportedCommandDefaults",
+      "scripts": 3
+    },
+    {
+      "id": 99,
+      "name": "detailget_removeroofs_option",
+      "scripts": 2
+    },
+    {
+      "id": 100,
+      "name": "urlencode",
+      "scripts": 2
+    },
+    {
+      "id": 101,
+      "name": "if_setondragcomplete",
+      "scripts": 20
+    },
+    {
+      "id": 104,
+      "name": "date_runeday_todate",
+      "scripts": 14
+    },
+    {
+      "id": 106,
+      "name": "cam2_getcontrolmode",
+      "scripts": 14
+    },
+    {
+      "id": 107,
+      "name": "if_setvflip",
+      "scripts": 12
+    },
+    {
+      "id": 108,
+      "name": "if_getop",
+      "scripts": 2
+    },
+    {
+      "id": 109,
+      "name": "cc_getmodelangle_x",
+      "scripts": 9
+    },
+    {
+      "id": 110,
+      "name": "player_group_get_owner_slot",
+      "scripts": 3
+    },
+    {
+      "id": 111,
+      "name": "userdetail_lobby_graceexpiry",
+      "scripts": 1
+    },
+    {
+      "id": 112,
+      "name": "date_minutes_fromruneday",
+      "scripts": 20
+    },
+    {
+      "id": 113,
+      "name": "stockmarket_getoffercount",
+      "scripts": 4
+    },
+    {
+      "id": 115,
+      "name": "stat_visible_xp_actual",
+      "scripts": 21
+    },
+    {
+      "id": 116,
+      "name": "activechatphrase_prepare",
+      "scripts": 1
+    },
+    {
+      "id": 118,
+      "name": "cc_setonscrollwheel",
+      "scripts": 3
+    },
+    {
+      "id": 119,
+      "name": "fullscreen_enter",
+      "scripts": 2
+    },
+    {
+      "id": 120,
+      "name": "cc_settext",
+      "scripts": 457
+    },
+    {
+      "id": 121,
+      "name": "oc_wearpos2",
+      "scripts": 12
+    },
+    {
+      "id": 122,
+      "name": "paraline",
+      "scripts": 2
+    },
+    {
+      "id": 123,
+      "name": "detail_vsync",
+      "scripts": 1
+    },
+    {
+      "id": 124,
+      "name": "if_setsize",
+      "scripts": 757
+    },
+    {
+      "id": 126,
+      "name": "clan_getchatrank",
+      "scripts": 4
+    },
+    {
+      "id": 128,
+      "name": "if_getnextsubid",
+      "scripts": 401
+    },
+    {
+      "id": 130,
+      "name": "cam2_getpositionpoint_point",
+      "scripts": 3
+    },
+    {
+      "id": 131,
+      "name": "if_setmodelzoom",
+      "scripts": 20
+    },
+    {
+      "id": 132,
+      "name": "cc_setmouseovercursor",
+      "scripts": 17
+    },
+    {
+      "id": 133,
+      "name": "inv_totalcat",
+      "scripts": 6
+    },
+    {
+      "id": 134,
+      "name": "clearbit_range",
+      "scripts": 1
+    },
+    {
+      "id": 135,
+      "name": "activeclansettings_getaffinedextrainfo",
+      "scripts": 3
+    },
+    {
+      "id": 136,
+      "name": "friend_count",
+      "scripts": 11
+    },
+    {
+      "id": 138,
+      "name": "cam2_isenabled",
+      "scripts": 1
+    },
+    {
+      "id": 140,
+      "name": "worldmap_3dview_enable",
+      "scripts": 1
+    },
+    {
+      "id": 142,
+      "name": "activechatphrase_sendprivate",
+      "scripts": 1
+    },
+    {
+      "id": 143,
+      "name": "pushUnsupportedPairFalseFifth",
+      "scripts": 1
+    },
+    {
+      "id": 145,
+      "name": "date_minutes",
+      "scripts": 52
+    },
+    {
+      "id": 146,
+      "name": "detail_antialiasingmode",
+      "scripts": 2
+    },
+    {
+      "id": 148,
+      "name": "activeclansettings_find_listened",
+      "scripts": 11
+    },
+    {
+      "id": 150,
+      "name": "pushUnsupportedCommandTriple",
+      "scripts": 6
+    },
+    {
+      "id": 151,
+      "name": "ignore_add",
+      "scripts": 11
+    },
+    {
+      "id": 152,
+      "name": "stockmarket_getoffercompletedcount",
+      "scripts": 3
+    },
+    {
+      "id": 153,
+      "name": "cc_setonmisctransmit",
+      "scripts": 1
+    },
+    {
+      "id": 154,
+      "name": "stringwidth",
+      "scripts": 96
+    },
+    {
+      "id": 155,
+      "name": "cc_setonclick",
+      "scripts": 64
+    },
+    {
+      "id": 156,
+      "name": "create_reply",
+      "scripts": 5
+    },
+    {
+      "id": 159,
+      "name": "sound_vorbis_volume_rate_group",
+      "scripts": 2
+    },
+    {
+      "id": 161,
+      "name": "cam_getangle_ya",
+      "scripts": 3
+    },
+    {
+      "id": 162,
+      "name": "if_setonop",
+      "scripts": 128
+    },
+    {
+      "id": 163,
+      "name": "cc_param",
+      "scripts": 263
+    },
+    {
+      "id": 164,
+      "name": "login_queue_position",
+      "scripts": 2
+    },
+    {
+      "id": 165,
+      "name": "add",
+      "scripts": 3093
+    },
+    {
+      "id": 166,
+      "name": "detailcanmod_antialiasingmode",
+      "scripts": 1
+    },
+    {
+      "id": 169,
+      "name": "worldmap_isloaded",
+      "scripts": 6
+    },
+    {
+      "id": 170,
+      "name": "if_setonstocktransmit",
+      "scripts": 2
+    },
+    {
+      "id": 171,
+      "name": "clan_kickuser",
+      "scripts": 1
+    },
+    {
+      "id": 172,
+      "name": "activeclansettings_getaffineddisplayname",
+      "scripts": 2
+    },
+    {
+      "id": 173,
+      "name": "worldlist_start",
+      "scripts": 3
+    },
+    {
+      "id": 175,
+      "name": "get_obj_overlay_height",
+      "scripts": 4
+    },
+    {
+      "id": 176,
+      "name": "cc_setclickmask",
+      "scripts": 2
+    },
+    {
+      "id": 177,
+      "name": "cc_setoptkeyignoreheld",
+      "scripts": 2
+    },
+    {
+      "id": 179,
+      "name": "if_setonsubchange",
+      "scripts": 3
+    },
+    {
+      "id": 182,
+      "name": "oc_findnext",
+      "scripts": 4
+    },
+    {
+      "id": 183,
+      "name": "detail_particles",
+      "scripts": 1
+    },
+    {
+      "id": 185,
+      "name": "if_settiling",
+      "scripts": 2
+    },
+    {
+      "id": 186,
+      "name": "push_array_int",
+      "scripts": 124
+    },
+    {
+      "id": 187,
+      "name": "telemetry_get_column_count",
+      "scripts": 1
+    },
+    {
+      "id": 189,
+      "name": "if_setobject",
+      "scripts": 84
+    },
+    {
+      "id": 190,
+      "name": "friend_platform",
+      "scripts": 3
+    },
+    {
+      "id": 191,
+      "name": "enum_getreverseindex",
+      "scripts": 60
+    },
+    {
+      "id": 192,
+      "name": "stockmarket_getoffercompletedgold",
+      "scripts": 1
+    },
+    {
+      "id": 193,
+      "name": "pop_string_local",
+      "scripts": 1377
+    },
+    {
+      "id": 195,
+      "name": "detail_dof",
+      "scripts": 3
+    },
+    {
+      "id": 196,
+      "name": "if_setonclanchanneltransmit",
+      "scripts": 11
+    },
+    {
+      "id": 197,
+      "name": "substring",
+      "scripts": 83
+    },
+    {
+      "id": 198,
+      "name": "if_setnpcmodel",
+      "scripts": 15
+    },
+    {
+      "id": 200,
+      "name": "autosetup_getlevel",
+      "scripts": 6
+    },
+    {
+      "id": 202,
+      "name": "if_setoncameraupdatetransmit",
+      "scripts": 1
+    },
+    {
+      "id": 205,
+      "name": "detailcanmod_maxforegroundfps",
+      "scripts": 2
+    },
+    {
+      "id": 206,
+      "name": "chatphrase_findnext",
+      "scripts": 2
+    },
+    {
+      "id": 207,
+      "name": "create_connect_reply",
+      "scripts": 6
+    },
+    {
+      "id": 210,
+      "name": "detailget_safemode",
+      "scripts": 3
+    },
+    {
+      "id": 211,
+      "name": "worldmap_jumptosourcecoord",
+      "scripts": 3
+    },
+    {
+      "id": 212,
+      "name": "spline_new",
+      "scripts": 65
+    },
+    {
+      "id": 213,
+      "name": "quest_param",
+      "scripts": 29
+    },
+    {
+      "id": 214,
+      "name": "cam_getangle_xa",
+      "scripts": 2
+    },
+    {
+      "id": 215,
+      "name": "cam2_setfieldofviewscreen",
+      "scripts": 1
+    },
+    {
+      "id": 216,
+      "name": "if_getinvcount",
+      "scripts": 2
+    },
+    {
+      "id": 217,
+      "name": "login_last_transfer_reply",
+      "scripts": 1
+    },
+    {
+      "id": 218,
+      "name": "date_isleapyear",
+      "scripts": 2
+    },
+    {
+      "id": 219,
+      "name": "activeclansettings_getaffinedslot",
+      "scripts": 32
+    },
+    {
+      "id": 220,
+      "name": "battery_ischarging",
+      "scripts": 1
+    },
+    {
+      "id": 221,
+      "name": "oc_minimenu_colour",
+      "scripts": 3
+    },
+    {
+      "id": 222,
+      "name": "pop_string_discard",
+      "scripts": 9
+    },
+    {
+      "id": 223,
+      "name": "friend_del",
+      "scripts": 5
+    },
+    {
+      "id": 226,
+      "name": "player_group_find",
+      "scripts": 26
+    },
+    {
+      "id": 227,
+      "name": "login_ban_duration",
+      "scripts": 1
+    },
+    {
+      "id": 228,
+      "name": "player_group_member_get_rank",
+      "scripts": 4
+    },
+    {
+      "id": 229,
+      "name": "if_setopkey",
+      "scripts": 58
+    },
+    {
+      "id": 230,
+      "name": "if_setmodellighting",
+      "scripts": 6
+    },
+    {
+      "id": 231,
+      "name": "sso_displayname",
+      "scripts": 1
+    },
+    {
+      "id": 232,
+      "name": "viewport_getzoom",
+      "scripts": 1
+    },
+    {
+      "id": 233,
+      "name": "lobby_entergame",
+      "scripts": 5
+    },
+    {
+      "id": 234,
+      "name": "viewport_setfov",
+      "scripts": 3
+    },
+    {
+      "id": 235,
+      "name": "addpercent",
+      "scripts": 6
+    },
+    {
+      "id": 236,
+      "name": "if_close",
+      "scripts": 13
+    },
+    {
+      "id": 238,
+      "name": "resume_hsldialog",
+      "scripts": 2
+    },
+    {
+      "id": 239,
+      "name": "pop_varbit",
+      "scripts": 377
+    },
+    {
+      "id": 240,
+      "name": "ttv_stream_start",
+      "scripts": 1
+    },
+    {
+      "id": 243,
+      "name": "ttv_webcam_getdevice_byuniquename",
+      "scripts": 6
+    },
+    {
+      "id": 245,
+      "name": "detailget_flickering_on",
+      "scripts": 3
+    },
+    {
+      "id": 246,
+      "name": "detail_loadingscreentype",
+      "scripts": 2
+    },
+    {
+      "id": 247,
+      "name": "field6317",
+      "scripts": 1
+    },
+    {
+      "id": 249,
+      "name": "cc_settextshadow",
+      "scripts": 190
+    },
+    {
+      "id": 250,
+      "name": "field6392",
+      "scripts": 2
+    },
+    {
+      "id": 251,
+      "name": "string_indexof_char",
+      "scripts": 12
+    },
+    {
+      "id": 252,
+      "name": "inv_getvar",
+      "scripts": 25
+    },
+    {
+      "id": 253,
+      "name": "string_length",
+      "scripts": 363
+    },
+    {
+      "id": 254,
+      "name": "stat_base_actual",
+      "scripts": 23
+    },
+    {
+      "id": 255,
+      "name": "mes",
+      "scripts": 170
+    },
+    {
+      "id": 256,
+      "name": "cc_settrans",
+      "scripts": 236
+    },
+    {
+      "id": 258,
+      "name": "if_closesubclient",
+      "scripts": 12
+    },
+    {
+      "id": 259,
+      "name": "quest_statreq_count",
+      "scripts": 5
+    },
+    {
+      "id": 260,
+      "name": "map_world",
+      "scripts": 26
+    },
+    {
+      "id": 262,
+      "name": "if_setop",
+      "scripts": 151
+    },
+    {
+      "id": 264,
+      "name": "chat_sendabusereport",
+      "scripts": 3
+    },
+    {
+      "id": 265,
+      "name": "cam2_setlookatorientation_zmovement",
+      "scripts": 2
+    },
+    {
+      "id": 266,
+      "name": "chatcat_getphrasecount",
+      "scripts": 2
+    },
+    {
+      "id": 267,
+      "name": "detailcanset_bloom",
+      "scripts": 2
+    },
+    {
+      "id": 268,
+      "name": "telemetry_get_row_count",
+      "scripts": 1
+    },
+    {
+      "id": 269,
+      "name": "detailcanmod_anisotropicfiltering",
+      "scripts": 1
+    },
+    {
+      "id": 270,
+      "name": "cc_setlinkfriend",
+      "scripts": 3
+    },
+    {
+      "id": 271,
+      "name": "if_setobject_alwaysnum",
+      "scripts": 7
+    },
+    {
+      "id": 272,
+      "name": "worldlist_specific",
+      "scripts": 9
+    },
+    {
+      "id": 274,
+      "name": "clearbit",
+      "scripts": 16
+    },
+    {
+      "id": 276,
+      "name": "if_setonmouserepeat",
+      "scripts": 307
+    },
+    {
+      "id": 277,
+      "name": "clan_getchatuserworldname",
+      "scripts": 1
+    },
+    {
+      "id": 278,
+      "name": "cc_sendtoback",
+      "scripts": 21
+    },
+    {
+      "id": 279,
+      "name": "worldmap_disabletextsize",
+      "scripts": 2
+    },
+    {
+      "id": 283,
+      "name": "create_email_validate_reply",
+      "scripts": 6
+    },
+    {
+      "id": 284,
+      "name": "if_hassubmodal",
+      "scripts": 15
+    },
+    {
+      "id": 285,
+      "name": "cc_setmaxlines",
+      "scripts": 35
+    },
+    {
+      "id": 286,
+      "name": "ttv_webcam_getcap_byindex",
+      "scripts": 3
+    },
+    {
+      "id": 288,
+      "name": "cc_settiling",
+      "scripts": 69
+    },
+    {
+      "id": 289,
+      "name": "worldmap_jumptodisplaycoord",
+      "scripts": 4
+    },
+    {
+      "id": 292,
+      "name": "if_setonkey",
+      "scripts": 52
+    },
+    {
+      "id": 293,
+      "name": "cam2_addeffect_shake",
+      "scripts": 1
+    },
+    {
+      "id": 294,
+      "name": "cc_setobject_wearcol",
+      "scripts": 1
+    },
+    {
+      "id": 296,
+      "name": "playermember",
+      "scripts": 60
+    },
+    {
+      "id": 297,
+      "name": "userdetail_lobby_lastloginday",
+      "scripts": 1
+    },
+    {
+      "id": 298,
+      "name": "discardThreeInterfaceArgs",
+      "scripts": 2
+    },
+    {
+      "id": 299,
+      "name": "if_settextalign",
+      "scripts": 26
+    },
+    {
+      "id": 300,
+      "name": "abs",
+      "scripts": 19
+    },
+    {
+      "id": 301,
+      "name": "if_setongamepadbutton",
+      "scripts": 2
+    },
+    {
+      "id": 302,
+      "name": "quest_statreq_level",
+      "scripts": 1
+    },
+    {
+      "id": 303,
+      "name": "chatcat_getdesc",
+      "scripts": 1
+    },
+    {
+      "id": 305,
+      "name": "friend_getrank",
+      "scripts": 1
+    },
+    {
+      "id": 306,
+      "name": "worldmap_3dview_getcoordfine",
+      "scripts": 1
+    },
+    {
+      "id": 307,
+      "name": "activeclansettings_getsortedaffinedslot",
+      "scripts": 1
+    },
+    {
+      "id": 308,
+      "name": "detailcanmod_buildarea",
+      "scripts": 2
+    },
+    {
+      "id": 309,
+      "name": "detail_ambientocclusion",
+      "scripts": 2
+    },
+    {
+      "id": 310,
+      "name": "get_entity_screen_position",
+      "scripts": 9
+    },
+    {
+      "id": 311,
+      "name": "quest_questreq",
+      "scripts": 1
+    },
+    {
+      "id": 312,
+      "name": "video_advert_force_remove",
+      "scripts": 3
+    },
+    {
+      "id": 313,
+      "name": "cc_getscrolly",
+      "scripts": 2
+    },
+    {
+      "id": 314,
+      "name": "detailcanset_maxscreensize",
+      "scripts": 2
+    },
+    {
+      "id": 315,
+      "name": "quest_type",
+      "scripts": 1
+    },
+    {
+      "id": 317,
+      "name": "if_setondialogabort",
+      "scripts": 10
+    },
+    {
+      "id": 318,
+      "name": "telemetry_get_group_id",
+      "scripts": 1
+    },
+    {
+      "id": 320,
+      "name": "get_minimenu_length",
+      "scripts": 1
+    },
+    {
+      "id": 322,
+      "name": "oc_stackable",
+      "scripts": 31
+    },
+    {
+      "id": 323,
+      "name": "cam2_enable",
+      "scripts": 1
+    },
+    {
+      "id": 324,
+      "name": "interface_setpickingradius",
+      "scripts": 2
+    },
+    {
+      "id": 325,
+      "name": "if_setmodelanim",
+      "scripts": 101
+    },
+    {
+      "id": 327,
+      "name": "if_setopkeyrate",
+      "scripts": 5
+    },
+    {
+      "id": 328,
+      "name": "autosetup_sethigh",
+      "scripts": 2
+    },
+    {
+      "id": 329,
+      "name": "cc_getmodelzoom",
+      "scripts": 15
+    },
+    {
+      "id": 331,
+      "name": "enum_hasoutput",
+      "scripts": 54
+    },
+    {
+      "id": 333,
+      "name": "worldmap_setmap_coord_override",
+      "scripts": 2
+    },
+    {
+      "id": 334,
+      "name": "detailget_shadowquality",
+      "scripts": 2
+    },
+    {
+      "id": 335,
+      "name": "cc_setpausetext",
+      "scripts": 7
+    },
+    {
+      "id": 336,
+      "name": "if_resume_pausebutton",
+      "scripts": 13
+    },
+    {
+      "id": 338,
+      "name": "long_branch_not",
+      "scripts": 2
+    },
+    {
+      "id": 339,
+      "name": "if_gettargetmask",
+      "scripts": 2
+    },
+    {
+      "id": 340,
+      "name": "if_getcolour",
+      "scripts": 5
+    },
+    {
+      "id": 341,
+      "name": "detailcanmod_toolkit_default",
+      "scripts": 1
+    },
+    {
+      "id": 342,
+      "name": "userdetail_lobby_playage",
+      "scripts": 1
+    },
+    {
+      "id": 343,
+      "name": "cc_setgraphic",
+      "scripts": 596
+    },
+    {
+      "id": 346,
+      "name": "ignore_getname_unfiltered",
+      "scripts": 1
+    },
+    {
+      "id": 348,
+      "name": "db_getfield",
+      "scripts": 155
+    },
+    {
+      "id": 349,
+      "name": "char_touppercase",
+      "scripts": 2
+    },
+    {
+      "id": 350,
+      "name": "fps_stats",
+      "scripts": 1
+    },
+    {
+      "id": 351,
+      "name": "friend_getworld",
+      "scripts": 6
+    },
+    {
+      "id": 354,
+      "name": "cc_getopbase",
+      "scripts": 3
+    },
+    {
+      "id": 355,
+      "name": "cam2_setlookatmode",
+      "scripts": 6
+    },
+    {
+      "id": 356,
+      "name": "push_int_local",
+      "scripts": 10635
+    },
+    {
+      "id": 358,
+      "name": "movecoord_fine",
+      "scripts": 7
+    },
+    {
+      "id": 359,
+      "name": "clan_getchatownername",
+      "scripts": 2
+    },
+    {
+      "id": 360,
+      "name": "detail_maxscreensize",
+      "scripts": 4
+    },
+    {
+      "id": 361,
+      "name": "cc_setalpha",
+      "scripts": 2
+    },
+    {
+      "id": 363,
+      "name": "mec_category",
+      "scripts": 1
+    },
+    {
+      "id": 364,
+      "name": "lowercase",
+      "scripts": 40
+    },
+    {
+      "id": 365,
+      "name": "cc_setlinewid",
+      "scripts": 3
+    },
+    {
+      "id": 366,
+      "name": "cam2_getpositionmode",
+      "scripts": 5
+    },
+    {
+      "id": 367,
+      "name": "keyheld_alt",
+      "scripts": 3
+    },
+    {
+      "id": 370,
+      "name": "oc_placeholder",
+      "scripts": 2
+    },
+    {
+      "id": 373,
+      "name": "cc_setonvarcstrtransmit",
+      "scripts": 3
+    },
+    {
+      "id": 374,
+      "name": "detailget_toolkit",
+      "scripts": 11
+    },
+    {
+      "id": 375,
+      "name": "cc_getmodelangle_z",
+      "scripts": 9
+    },
+    {
+      "id": 378,
+      "name": "player_group_member_get_status",
+      "scripts": 3
+    },
+    {
+      "id": 380,
+      "name": "chat_getfilter_trade",
+      "scripts": 8
+    },
+    {
+      "id": 381,
+      "name": "activeclansettings_getaffinedrank",
+      "scripts": 31
+    },
+    {
+      "id": 382,
+      "name": "oc_members",
+      "scripts": 34
+    },
+    {
+      "id": 383,
+      "name": "cc_callonresize",
+      "scripts": 6
+    },
+    {
+      "id": 385,
+      "name": "detailget_cpuusage",
+      "scripts": 1
+    },
+    {
+      "id": 386,
+      "name": "detailcanmod_spotshadows",
+      "scripts": 1
+    },
+    {
+      "id": 387,
+      "name": "sound_speech_volume",
+      "scripts": 2
+    },
+    {
+      "id": 388,
+      "name": "applyDisplayPreference",
+      "scripts": 1
+    },
+    {
+      "id": 389,
+      "name": "paraheight",
+      "scripts": 123
+    },
+    {
+      "id": 390,
+      "name": "spline_length",
+      "scripts": 26
+    },
+    {
+      "id": 391,
+      "name": "ttv_logout",
+      "scripts": 1
+    },
+    {
+      "id": 392,
+      "name": "os_physicalmemorysize",
+      "scripts": 1
+    },
+    {
+      "id": 393,
+      "name": "field6354",
+      "scripts": 1
+    },
+    {
+      "id": 395,
+      "name": "cc_setvflip",
+      "scripts": 32
+    },
+    {
+      "id": 396,
+      "name": "cc_clearops",
+      "scripts": 44
+    },
+    {
+      "id": 397,
+      "name": "player_group_member_count",
+      "scripts": 4
+    },
+    {
+      "id": 398,
+      "name": "detailget_speechvol",
+      "scripts": 7
+    },
+    {
+      "id": 400,
+      "name": "coordz",
+      "scripts": 44
+    },
+    {
+      "id": 401,
+      "name": "cam2_setdepthplanes",
+      "scripts": 7
+    },
+    {
+      "id": 402,
+      "name": "clan_getchatuserrank",
+      "scripts": 3
+    },
+    {
+      "id": 403,
+      "name": "gender",
+      "scripts": 35
+    },
+    {
+      "id": 404,
+      "name": "cam2_setlookatentity_npc",
+      "scripts": 1
+    },
+    {
+      "id": 406,
+      "name": "activeclanchannel_getuserworld",
+      "scripts": 4
+    },
+    {
+      "id": 407,
+      "name": "if_setonplayergrouptransmit",
+      "scripts": 9
+    },
+    {
+      "id": 408,
+      "name": "if_opensubclient",
+      "scripts": 20
+    },
+    {
+      "id": 409,
+      "name": "cam2_addeffect_ztilt",
+      "scripts": 5
+    },
+    {
+      "id": 410,
+      "name": "detail_groundblending",
+      "scripts": 2
+    },
+    {
+      "id": 412,
+      "name": "discardInterfaceTargetArg",
+      "scripts": 3
+    },
+    {
+      "id": 413,
+      "name": "seqlength",
+      "scripts": 7
+    },
+    {
+      "id": 415,
+      "name": "worldlist_sort",
+      "scripts": 1
+    },
+    {
+      "id": 417,
+      "name": "create_name_validate_reply",
+      "scripts": 2
+    },
+    {
+      "id": 419,
+      "name": "cc_setfill",
+      "scripts": 171
+    },
+    {
+      "id": 420,
+      "name": "shader_preload_throttle",
+      "scripts": 2
+    },
+    {
+      "id": 421,
+      "name": "sound_synth_volume",
+      "scripts": 1
+    },
+    {
+      "id": 422,
+      "name": "ignore_getname",
+      "scripts": 5
+    },
+    {
+      "id": 423,
+      "name": "resume_clanforumqfcdialog",
+      "scripts": 1
+    },
+    {
+      "id": 424,
+      "name": "if_setmodelangle",
+      "scripts": 55
+    },
+    {
+      "id": 425,
+      "name": "cc_setoptkey",
+      "scripts": 4
+    },
+    {
+      "id": 426,
+      "name": "worldmap_getconfigzoom",
+      "scripts": 3
+    },
+    {
+      "id": 427,
+      "name": "get_mousebuttons",
+      "scripts": 3
+    },
+    {
+      "id": 428,
+      "name": "if_setsubtractinsets",
+      "scripts": 1
+    },
+    {
+      "id": 432,
+      "name": "if_setopcursor",
+      "scripts": 9
+    },
+    {
+      "id": 435,
+      "name": "if_setcolour",
+      "scripts": 348
+    },
+    {
+      "id": 436,
+      "name": "if_sethflip",
+      "scripts": 6
+    },
+    {
+      "id": 437,
+      "name": "cc_setfontmono",
+      "scripts": 1
+    },
+    {
+      "id": 438,
+      "name": "detailget_reflections",
+      "scripts": 2
+    },
+    {
+      "id": 439,
+      "name": "if_getgraphicdimensions",
+      "scripts": 5
+    },
+    {
+      "id": 441,
+      "name": "if_getmodelyof",
+      "scripts": 13
+    },
+    {
+      "id": 442,
+      "name": "compare",
+      "scripts": 266
+    },
+    {
+      "id": 443,
+      "name": "detailget_soundvol",
+      "scripts": 7
+    },
+    {
+      "id": 445,
+      "name": "chatcat_getsubcatcount",
+      "scripts": 2
+    },
+    {
+      "id": 448,
+      "name": "video_advert_play",
+      "scripts": 2
+    },
+    {
+      "id": 449,
+      "name": "if_getmodelzoom",
+      "scripts": 21
+    },
+    {
+      "id": 450,
+      "name": "detailcanset_anisotropicfiltering",
+      "scripts": 2
+    },
+    {
+      "id": 451,
+      "name": "if_setmaxlines",
+      "scripts": 10
+    },
+    {
+      "id": 452,
+      "name": "if_setondrag",
+      "scripts": 18
+    },
+    {
+      "id": 453,
+      "name": "cc_setswipedeadzone",
+      "scripts": 1
+    },
+    {
+      "id": 455,
+      "name": "map_loadingscreen_settriggerpercent",
+      "scripts": 6
+    },
+    {
+      "id": 457,
+      "name": "detail_maxbackgroundfps",
+      "scripts": 1
+    },
+    {
+      "id": 459,
+      "name": "reboottimer",
+      "scripts": 5
+    },
+    {
+      "id": 460,
+      "name": "if_setplayermodel_self",
+      "scripts": 2
+    },
+    {
+      "id": 461,
+      "name": "detailget_brightness",
+      "scripts": 3
+    },
+    {
+      "id": 463,
+      "name": "lobby_enterlobby_social_network",
+      "scripts": 1
+    },
+    {
+      "id": 465,
+      "name": "if_settextfont",
+      "scripts": 60
+    },
+    {
+      "id": 467,
+      "name": "telemetry_get_row_index",
+      "scripts": 2
+    },
+    {
+      "id": 468,
+      "name": "cc_deleteall",
+      "scripts": 697
+    },
+    {
+      "id": 469,
+      "name": "discardInterfaceArg",
+      "scripts": 4
+    },
+    {
+      "id": 470,
+      "name": "cam_forceangle",
+      "scripts": 3
+    },
+    {
+      "id": 471,
+      "name": "cam2_setlookatentity_player",
+      "scripts": 3
+    },
+    {
+      "id": 472,
+      "name": "setup_messagebox",
+      "scripts": 1
+    },
+    {
+      "id": 473,
+      "name": "string_indexof_string",
+      "scripts": 40
+    },
+    {
+      "id": 474,
+      "name": "db_getfieldcount",
+      "scripts": 56
+    },
+    {
+      "id": 475,
+      "name": "openurl",
+      "scripts": 34
+    },
+    {
+      "id": 476,
+      "name": "if_setonrelease",
+      "scripts": 18
+    },
+    {
+      "id": 477,
+      "name": "cc_setswipeflags",
+      "scripts": 1
+    },
+    {
+      "id": 478,
+      "name": "activeclanchannel_getuserdisplayname",
+      "scripts": 4
+    },
+    {
+      "id": 479,
+      "name": "cc_gettext",
+      "scripts": 86
+    },
+    {
+      "id": 480,
+      "name": "discardFontArg",
+      "scripts": 1
+    },
+    {
+      "id": 481,
+      "name": "detailcanset_maxforegroundfps",
+      "scripts": 2
+    },
+    {
+      "id": 482,
+      "name": "pop_var",
+      "scripts": 1388
+    },
+    {
+      "id": 484,
+      "name": "create_createrequest",
+      "scripts": 1
+    },
+    {
+      "id": 485,
+      "name": "if_setonchattransmit",
+      "scripts": 6
+    },
+    {
+      "id": 486,
+      "name": "cam2_setlookatorientation_yrotation",
+      "scripts": 3
+    },
+    {
+      "id": 487,
+      "name": "minimenuopen",
+      "scripts": 13
+    },
+    {
+      "id": 490,
+      "name": "if_sendtoback",
+      "scripts": 9
+    },
+    {
+      "id": 491,
+      "name": "if_setonmouseover",
+      "scripts": 109
+    },
+    {
+      "id": 492,
+      "name": "battery_getlevelpercent",
+      "scripts": 1
+    },
+    {
+      "id": 493,
+      "name": "detailcanset_antialiasingmode",
+      "scripts": 2
+    },
+    {
+      "id": 495,
+      "name": "format_datetime_from_minutes",
+      "scripts": 4
+    },
+    {
+      "id": 496,
+      "name": "ttv_login",
+      "scripts": 1
+    },
+    {
+      "id": 497,
+      "name": "create_suggest_name_request",
+      "scripts": 1
+    },
+    {
+      "id": 498,
+      "name": "detail_antialiasing_default",
+      "scripts": 2
+    },
+    {
+      "id": 499,
+      "name": "detailcanmod_bloom",
+      "scripts": 1
+    },
+    {
+      "id": 500,
+      "name": "ignore_count",
+      "scripts": 6
+    },
+    {
+      "id": 501,
+      "name": "viewport_setzoom",
+      "scripts": 3
+    },
+    {
+      "id": 503,
+      "name": "activeclansettings_getclanname",
+      "scripts": 4
+    },
+    {
+      "id": 504,
+      "name": "setbit",
+      "scripts": 31
+    },
+    {
+      "id": 506,
+      "name": "fromdate",
+      "scripts": 3
+    },
+    {
+      "id": 508,
+      "name": "coord",
+      "scripts": 65
+    },
+    {
+      "id": 509,
+      "name": "if_npc_setcustomrecol",
+      "scripts": 1
+    },
+    {
+      "id": 510,
+      "name": "get_loc_bounding_box",
+      "scripts": 4
+    },
+    {
+      "id": 511,
+      "name": "activechatphrase_setdynamicint",
+      "scripts": 1
+    },
+    {
+      "id": 512,
+      "name": "if_setonstattransmit",
+      "scripts": 12
+    },
+    {
+      "id": 513,
+      "name": "detailget_idleanims",
+      "scripts": 1
+    },
+    {
+      "id": 514,
+      "name": "cam2_setpositionacceleration_axis",
+      "scripts": 1
+    },
+    {
+      "id": 516,
+      "name": "cam_lookat",
+      "scripts": 6
+    },
+    {
+      "id": 517,
+      "name": "sethardcodedopcursors",
+      "scripts": 1
+    },
+    {
+      "id": 518,
+      "name": "if_setonresize",
+      "scripts": 46
+    },
+    {
+      "id": 519,
+      "name": "cc_setsize",
+      "scripts": 880
+    },
+    {
+      "id": 520,
+      "name": "worldmap_closemap",
+      "scripts": 1
+    },
+    {
+      "id": 521,
+      "name": "oc_uncert",
+      "scripts": 30
+    },
+    {
+      "id": 522,
+      "name": "if_gettext",
+      "scripts": 120
+    },
+    {
+      "id": 523,
+      "name": "enum_string",
+      "scripts": 6
+    },
+    {
+      "id": 524,
+      "name": "push_var",
+      "scripts": 2858
+    },
+    {
+      "id": 525,
+      "name": "cc_settextalign",
+      "scripts": 351
+    },
+    {
+      "id": 526,
+      "name": "detailcanset_skydetail",
+      "scripts": 1
+    },
+    {
+      "id": 527,
+      "name": "login_continue",
+      "scripts": 1
+    },
+    {
+      "id": 528,
+      "name": "get_col_tag",
+      "scripts": 9
+    },
+    {
+      "id": 530,
+      "name": "if_setgraphic",
+      "scripts": 822
+    },
+    {
+      "id": 531,
+      "name": "pop_array_int",
+      "scripts": 124
+    },
+    {
+      "id": 532,
+      "name": "ttv_library_getstate",
+      "scripts": 1
+    },
+    {
+      "id": 533,
+      "name": "setbit_range",
+      "scripts": 1
+    },
+    {
+      "id": 534,
+      "name": "if_setpinchdeadzone",
+      "scripts": 2
+    },
+    {
+      "id": 535,
+      "name": "detailcanmod_groundblending",
+      "scripts": 2
+    },
+    {
+      "id": 536,
+      "name": "viewport_geteffectivesize",
+      "scripts": 2
+    },
+    {
+      "id": 538,
+      "name": "if_setongamepadtrigger",
+      "scripts": 2
+    },
+    {
+      "id": 539,
+      "name": "cos_deg",
+      "scripts": 1
+    },
+    {
+      "id": 540,
+      "name": "os_ismac",
+      "scripts": 3
+    },
+    {
+      "id": 543,
+      "name": "branch_not",
+      "scripts": 2053
+    },
+    {
+      "id": 544,
+      "name": "if_setonverticalpinch",
+      "scripts": 2
+    },
+    {
+      "id": 545,
+      "name": "cc_settargetopcursor",
+      "scripts": 2
+    },
+    {
+      "id": 547,
+      "name": "notifications_cancellocal",
+      "scripts": 1
+    },
+    {
+      "id": 548,
+      "name": "push_long_local",
+      "scripts": 3
+    },
+    {
+      "id": 549,
+      "name": "detail_volumetriclighting",
+      "scripts": 1
+    },
+    {
+      "id": 550,
+      "name": "stat_base",
+      "scripts": 142
+    },
+    {
+      "id": 551,
+      "name": "ttv_library_request",
+      "scripts": 1
+    },
+    {
+      "id": 553,
+      "name": "is_npc_active",
+      "scripts": 1
+    },
+    {
+      "id": 554,
+      "name": "cc_setontargetleave",
+      "scripts": 9
+    },
+    {
+      "id": 555,
+      "name": "cc_getheight",
+      "scripts": 269
+    },
+    {
+      "id": 556,
+      "name": "detail_maxforegroundfps",
+      "scripts": 3
+    },
+    {
+      "id": 557,
+      "name": "activeclanchannel_getuserrank",
+      "scripts": 12
+    },
+    {
+      "id": 558,
+      "name": "clan_getchatusername",
+      "scripts": 3
+    },
+    {
+      "id": 559,
+      "name": "clan_isself",
+      "scripts": 2
+    },
+    {
+      "id": 561,
+      "name": "if_setonhold",
+      "scripts": 7
+    },
+    {
+      "id": 562,
+      "name": "resend_uid_passport_request",
+      "scripts": 1
+    },
+    {
+      "id": 563,
+      "name": "map_lang",
+      "scripts": 126
+    },
+    {
+      "id": 565,
+      "name": "detailget_maxbackgroundfps",
+      "scripts": 1
+    },
+    {
+      "id": 567,
+      "name": "date_runeday_fromdate",
+      "scripts": 18
+    },
+    {
+      "id": 568,
+      "name": "viewport_clampfov",
+      "scripts": 3
+    },
+    {
+      "id": 569,
+      "name": "keyheld_ctrl",
+      "scripts": 6
+    },
+    {
+      "id": 570,
+      "name": "movecoord",
+      "scripts": 69
+    },
+    {
+      "id": 571,
+      "name": "chat_setfilter",
+      "scripts": 8
+    },
+    {
+      "id": 573,
+      "name": "worldlist_pingworlds",
+      "scripts": 2
+    },
+    {
+      "id": 575,
+      "name": "cc_npc_setcustomretex",
+      "scripts": 1
+    },
+    {
+      "id": 576,
+      "name": "if_setopkeyignoreheld",
+      "scripts": 1
+    },
+    {
+      "id": 577,
+      "name": "ttv_webcam_flip",
+      "scripts": 2
+    },
+    {
+      "id": 579,
+      "name": "telemetry_get_column_index",
+      "scripts": 2
+    },
+    {
+      "id": 580,
+      "name": "runenergy_visible",
+      "scripts": 4
+    },
+    {
+      "id": 581,
+      "name": "activeclansettings_getcurrentowner_slot",
+      "scripts": 1
+    },
+    {
+      "id": 582,
+      "name": "ttv_livestreams_update",
+      "scripts": 2
+    },
+    {
+      "id": 583,
+      "name": "cc_setparam_string",
+      "scripts": 19
+    },
+    {
+      "id": 585,
+      "name": "if_setonscrollwheel",
+      "scripts": 20
+    },
+    {
+      "id": 586,
+      "name": "multiply",
+      "scripts": 1104
+    },
+    {
+      "id": 587,
+      "name": "cc_sendtofront",
+      "scripts": 17
+    },
+    {
+      "id": 588,
+      "name": "detailget_musicvol",
+      "scripts": 7
+    },
+    {
+      "id": 589,
+      "name": "worldmap_getconfigbounds",
+      "scripts": 2
+    },
+    {
+      "id": 590,
+      "name": "min",
+      "scripts": 513
+    },
+    {
+      "id": 593,
+      "name": "db_find_with_count",
+      "scripts": 4
+    },
+    {
+      "id": 595,
+      "name": "if_gettop",
+      "scripts": 25
+    },
+    {
+      "id": 596,
+      "name": "openurl_shim",
+      "scripts": 6
+    },
+    {
+      "id": 597,
+      "name": "cc_setdragrenderbehaviour",
+      "scripts": 24
+    },
+    {
+      "id": 598,
+      "name": "cc_gethide",
+      "scripts": 32
+    },
+    {
+      "id": 599,
+      "name": "cc_dragpickup",
+      "scripts": 7
+    },
+    {
+      "id": 600,
+      "name": "playermod",
+      "scripts": 4
+    },
+    {
+      "id": 601,
+      "name": "worldmap_getsize",
+      "scripts": 3
+    },
+    {
+      "id": 604,
+      "name": "cc_setnoclickthrough",
+      "scripts": 25
+    },
+    {
+      "id": 606,
+      "name": "oc_wearpos",
+      "scripts": 42
+    },
+    {
+      "id": 607,
+      "name": "cam2_setpositionangularinterpolation",
+      "scripts": 6
+    },
+    {
+      "id": 610,
+      "name": "ttv_webcam_getcap_count",
+      "scripts": 1
+    },
+    {
+      "id": 611,
+      "name": "cc_sethflip",
+      "scripts": 45
+    },
+    {
+      "id": 612,
+      "name": "detailcanmod_ambientocclusion",
+      "scripts": 1
+    },
+    {
+      "id": 613,
+      "name": "ttv_stream_stop",
+      "scripts": 1
+    },
+    {
+      "id": 615,
+      "name": "worldmap_setmap",
+      "scripts": 2
+    },
+    {
+      "id": 617,
+      "name": "worldmap_flashelementcategory",
+      "scripts": 1
+    },
+    {
+      "id": 619,
+      "name": "inv_total",
+      "scripts": 152
+    },
+    {
+      "id": 620,
+      "name": "cam2_setfieldofview",
+      "scripts": 3
+    },
+    {
+      "id": 621,
+      "name": "cc_getinvobject",
+      "scripts": 58
+    },
+    {
+      "id": 622,
+      "name": "if_setfill",
+      "scripts": 6
+    },
+    {
+      "id": 623,
+      "name": "player_group_member_get_displayname",
+      "scripts": 2
+    },
+    {
+      "id": 625,
+      "name": "worldlist_next",
+      "scripts": 3
+    },
+    {
+      "id": 626,
+      "name": "activeclansettings_find_affined",
+      "scripts": 43
+    },
+    {
+      "id": 627,
+      "name": "quest_points",
+      "scripts": 1
+    },
+    {
+      "id": 628,
+      "name": "create_name_availablerequest",
+      "scripts": 1
+    },
+    {
+      "id": 630,
+      "name": "if_setmouseovercursor",
+      "scripts": 18
+    },
+    {
+      "id": 631,
+      "name": "if_setonclansettingstransmit",
+      "scripts": 15
+    },
+    {
+      "id": 632,
+      "name": "create_step_reached",
+      "scripts": 3
+    },
+    {
+      "id": 633,
+      "name": "cc_sethide",
+      "scripts": 321
+    },
+    {
+      "id": 634,
+      "name": "lobby_enterlobby_sso",
+      "scripts": 2
+    },
+    {
+      "id": 635,
+      "name": "escape",
+      "scripts": 21
+    },
+    {
+      "id": 636,
+      "name": "detailget_stereo",
+      "scripts": 1
+    },
+    {
+      "id": 638,
+      "name": "userdetail_lobby_membership",
+      "scripts": 6
+    },
+    {
+      "id": 639,
+      "name": "activeclansettings_getbannedcount",
+      "scripts": 1
+    },
+    {
+      "id": 640,
+      "name": "npc_type",
+      "scripts": 3
+    },
+    {
+      "id": 641,
+      "name": "pushFontAvailable",
+      "scripts": 2
+    },
+    {
+      "id": 643,
+      "name": "cc_setaspect",
+      "scripts": 1
+    },
+    {
+      "id": 644,
+      "name": "if_setparam_string",
+      "scripts": 2
+    },
+    {
+      "id": 645,
+      "name": "detail_cpuusage",
+      "scripts": 1
+    },
+    {
+      "id": 646,
+      "name": "enum_getreversecount",
+      "scripts": 41
+    },
+    {
+      "id": 647,
+      "name": "detailget_particles",
+      "scripts": 1
+    },
+    {
+      "id": 648,
+      "name": "notifications_init",
+      "scripts": 1
+    },
+    {
+      "id": 649,
+      "name": "cc_setonmouseleave",
+      "scripts": 222
+    },
+    {
+      "id": 652,
+      "name": "getwindowmode",
+      "scripts": 15
+    },
+    {
+      "id": 653,
+      "name": "bug_report",
+      "scripts": 1
+    },
+    {
+      "id": 654,
+      "name": "invother_getnum",
+      "scripts": 11
+    },
+    {
+      "id": 655,
+      "name": "and",
+      "scripts": 73
+    },
+    {
+      "id": 658,
+      "name": "worldmap_setzoom",
+      "scripts": 1
+    },
+    {
+      "id": 659,
+      "name": "detailget_grounddecor_on",
+      "scripts": 2
+    },
+    {
+      "id": 660,
+      "name": "quest_pointsreq",
+      "scripts": 8
+    },
+    {
+      "id": 661,
+      "name": "keyheld_shift",
+      "scripts": 18
+    },
+    {
+      "id": 662,
+      "name": "cc_getid",
+      "scripts": 105
+    },
+    {
+      "id": 663,
+      "name": "oc_cert",
+      "scripts": 18
+    },
+    {
+      "id": 664,
+      "name": "sound_group_start",
+      "scripts": 2
+    },
+    {
+      "id": 665,
+      "name": "detailcanmod_lightingquality",
+      "scripts": 1
+    },
+    {
+      "id": 666,
+      "name": "if_gety",
+      "scripts": 233
+    },
+    {
+      "id": 667,
+      "name": "enum_getoutputcount",
+      "scripts": 459
+    },
+    {
+      "id": 668,
+      "name": "noopAutosetupCommand",
+      "scripts": 1
+    },
+    {
+      "id": 669,
+      "name": "cc_setcolour",
+      "scripts": 546
+    },
+    {
+      "id": 670,
+      "name": "setdefaultcursors",
+      "scripts": 11
+    },
+    {
+      "id": 671,
+      "name": "cam_dec_y",
+      "scripts": 1
+    },
+    {
+      "id": 673,
+      "name": "if_gethide",
+      "scripts": 322
+    },
+    {
+      "id": 674,
+      "name": "map_quickchat",
+      "scripts": 5
+    },
+    {
+      "id": 681,
+      "name": "create_under13",
+      "scripts": 1
+    },
+    {
+      "id": 683,
+      "name": "friend_getname",
+      "scripts": 10
+    },
+    {
+      "id": 686,
+      "name": "chat_sendprivate",
+      "scripts": 3
+    },
+    {
+      "id": 687,
+      "name": "worldmap_getmap",
+      "scripts": 4
+    },
+    {
+      "id": 688,
+      "name": "noopWalkMarkerCommand",
+      "scripts": 1
+    },
+    {
+      "id": 692,
+      "name": "player_group_banned_count",
+      "scripts": 1
+    },
+    {
+      "id": 693,
+      "name": "branch_greater_than",
+      "scripts": 1984
+    },
+    {
+      "id": 694,
+      "name": "detailget_skydetail",
+      "scripts": 1
+    },
+    {
+      "id": 695,
+      "name": "oc_hasvarobj",
+      "scripts": 9
+    },
+    {
+      "id": 696,
+      "name": "detailget_volumetriclighting",
+      "scripts": 1
+    },
+    {
+      "id": 701,
+      "name": "cc_getlayer",
+      "scripts": 29
+    },
+    {
+      "id": 702,
+      "name": "detail_removeroofs_option",
+      "scripts": 2
+    },
+    {
+      "id": 703,
+      "name": "clan_joinchat",
+      "scripts": 5
+    },
+    {
+      "id": 704,
+      "name": "stat_visible_xp",
+      "scripts": 8
+    },
+    {
+      "id": 707,
+      "name": "detail_lightingquality",
+      "scripts": 3
+    },
+    {
+      "id": 708,
+      "name": "setwindowmode",
+      "scripts": 5
+    },
+    {
+      "id": 711,
+      "name": "get_entity_bounding_box",
+      "scripts": 9
+    },
+    {
+      "id": 712,
+      "name": "coordz_fine",
+      "scripts": 4
+    },
+    {
+      "id": 713,
+      "name": "autosetup_blackflaglast",
+      "scripts": 1
+    },
+    {
+      "id": 714,
+      "name": "cc_setoutline",
+      "scripts": 62
+    },
+    {
+      "id": 716,
+      "name": "detail_removeroofs_option_override",
+      "scripts": 3
+    },
+    {
+      "id": 718,
+      "name": "detailcanmod_texturing",
+      "scripts": 1
+    },
+    {
+      "id": 719,
+      "name": "detail_flickering_on",
+      "scripts": 2
+    },
+    {
+      "id": 720,
+      "name": "sso_available",
+      "scripts": 3
+    },
+    {
+      "id": 721,
+      "name": "get_obj_screen_position",
+      "scripts": 4
+    },
+    {
+      "id": 722,
+      "name": "if_setdraggable",
+      "scripts": 21
+    },
+    {
+      "id": 723,
+      "name": "friend_is_referred",
+      "scripts": 1
+    },
+    {
+      "id": 726,
+      "name": "cc_getmodelyof",
+      "scripts": 8
+    },
+    {
+      "id": 728,
+      "name": "cc_getfontmetrics",
+      "scripts": 57
+    },
+    {
+      "id": 731,
+      "name": "if_sethide",
+      "scripts": 2379
+    },
+    {
+      "id": 734,
+      "name": "cc_create",
+      "scripts": 778
+    },
+    {
+      "id": 735,
+      "name": "cc_setmodelzoom",
+      "scripts": 7
+    },
+    {
+      "id": 736,
+      "name": "if_setretex",
+      "scripts": 8
+    },
+    {
+      "id": 737,
+      "name": "if_setoncamfinished",
+      "scripts": 75
+    },
+    {
+      "id": 739,
+      "name": "setdefaultwindowmode",
+      "scripts": 4
+    },
+    {
+      "id": 740,
+      "name": "ttv_hasprerequisites",
+      "scripts": 1
+    },
+    {
+      "id": 742,
+      "name": "cc_setonvarctransmit",
+      "scripts": 16
+    },
+    {
+      "id": 745,
+      "name": "get_mousey",
+      "scripts": 15
+    },
+    {
+      "id": 747,
+      "name": "login_hoptime",
+      "scripts": 2
+    },
+    {
+      "id": 748,
+      "name": "if_gettrans",
+      "scripts": 109
+    },
+    {
+      "id": 749,
+      "name": "shop_opencategories",
+      "scripts": 1
+    },
+    {
+      "id": 750,
+      "name": "chatcat_getsubcat",
+      "scripts": 2
+    },
+    {
+      "id": 751,
+      "name": "detail_stereo",
+      "scripts": 1
+    },
+    {
+      "id": 754,
+      "name": "opplayer",
+      "scripts": 1
+    },
+    {
+      "id": 756,
+      "name": "resume_countdialog",
+      "scripts": 4
+    },
+    {
+      "id": 757,
+      "name": "activeclansettings_getallowunaffined",
+      "scripts": 1
+    },
+    {
+      "id": 758,
+      "name": "append_num",
+      "scripts": 2
+    },
+    {
+      "id": 760,
+      "name": "if_setmodelorthog",
+      "scripts": 2
+    },
+    {
+      "id": 762,
+      "name": "openurl_nologin",
+      "scripts": 17
+    },
+    {
+      "id": 763,
+      "name": "detailget_antialiasing_default",
+      "scripts": 1
+    },
+    {
+      "id": 764,
+      "name": "if_getmodelangle_y",
+      "scripts": 16
+    },
+    {
+      "id": 765,
+      "name": "cam_inc_x",
+      "scripts": 1
+    },
+    {
+      "id": 766,
+      "name": "not",
+      "scripts": 2
+    },
+    {
+      "id": 769,
+      "name": "detailget_chosesafemode",
+      "scripts": 2
+    },
+    {
+      "id": 770,
+      "name": "clan_leavechat",
+      "scripts": 3
+    },
+    {
+      "id": 772,
+      "name": "if_getheight",
+      "scripts": 709
+    },
+    {
+      "id": 773,
+      "name": "noopWorldMapCommand",
+      "scripts": 1
+    },
+    {
+      "id": 774,
+      "name": "clan_getchatdisplayname",
+      "scripts": 14
+    },
+    {
+      "id": 775,
+      "name": "if_setongamepadbuttonheld",
+      "scripts": 2
+    },
+    {
+      "id": 776,
+      "name": "if_setongamepadaxis",
+      "scripts": 2
+    },
+    {
+      "id": 777,
+      "name": "userdetail_lobby_unreadmessages",
+      "scripts": 1
+    },
+    {
+      "id": 778,
+      "name": "if_setnoclickthrough",
+      "scripts": 18
+    },
+    {
+      "id": 780,
+      "name": "cc_setobject_nonum",
+      "scripts": 54
+    },
+    {
+      "id": 782,
+      "name": "facing_fine",
+      "scripts": 1
+    },
+    {
+      "id": 783,
+      "name": "if_set_gamescreen_enabled",
+      "scripts": 9
+    },
+    {
+      "id": 786,
+      "name": "cam2_setlinearmovementmode",
+      "scripts": 4
+    },
+    {
+      "id": 787,
+      "name": "randominc",
+      "scripts": 15
+    },
+    {
+      "id": 789,
+      "name": "friend_getslotfromname",
+      "scripts": 5
+    },
+    {
+      "id": 790,
+      "name": "cam_reset",
+      "scripts": 10
+    },
+    {
+      "id": 791,
+      "name": "detailcanset_reflections",
+      "scripts": 2
+    },
+    {
+      "id": 793,
+      "name": "cam2_setpositionpoint_point",
+      "scripts": 5
+    },
+    {
+      "id": 794,
+      "name": "detailcanset_waterdetail",
+      "scripts": 1
+    },
+    {
+      "id": 796,
+      "name": "detail_waterdetail_high",
+      "scripts": 2
+    },
+    {
+      "id": 797,
+      "name": "detailcanmod_shadowquality",
+      "scripts": 1
+    },
+    {
+      "id": 798,
+      "name": "sound_jingle_volume",
+      "scripts": 1
+    },
+    {
+      "id": 799,
+      "name": "invpow",
+      "scripts": 2
+    },
+    {
+      "id": 800,
+      "name": "inv_freespace",
+      "scripts": 33
+    },
+    {
+      "id": 801,
+      "name": "login_cancel",
+      "scripts": 4
+    },
+    {
+      "id": 804,
+      "name": "activeclanchannel_getuserslot",
+      "scripts": 14
+    },
+    {
+      "id": 805,
+      "name": "if_triggerop",
+      "scripts": 39
+    },
+    {
+      "id": 806,
+      "name": "if_getscrolly",
+      "scripts": 116
+    },
+    {
+      "id": 807,
+      "name": "pushWorldMapUnavailable",
+      "scripts": 2
+    },
+    {
+      "id": 809,
+      "name": "chat_playername",
+      "scripts": 17
+    },
+    {
+      "id": 810,
+      "name": "_enum",
+      "scripts": 1364
+    },
+    {
+      "id": 811,
+      "name": "cam2_setpositionentity_npc",
+      "scripts": 1
+    },
+    {
+      "id": 812,
+      "name": "worldmap_disabletype",
+      "scripts": 2
+    },
+    {
+      "id": 813,
+      "name": "worldlist_fetch",
+      "scripts": 16
+    },
+    {
+      "id": 815,
+      "name": "push_string_local",
+      "scripts": 1920
+    },
+    {
+      "id": 816,
+      "name": "removetags",
+      "scripts": 104
+    },
+    {
+      "id": 817,
+      "name": "quest_getsortname",
+      "scripts": 1
+    },
+    {
+      "id": 818,
+      "name": "cc_getinvcount",
+      "scripts": 34
+    },
+    {
+      "id": 820,
+      "name": "chat_gethistory_byuid",
+      "scripts": 10
+    },
+    {
+      "id": 822,
+      "name": "userdetail_dob",
+      "scripts": 2
+    },
+    {
+      "id": 823,
+      "name": "modulo",
+      "scripts": 584
+    },
+    {
+      "id": 824,
+      "name": "chat_getfilter_private",
+      "scripts": 11
+    },
+    {
+      "id": 825,
+      "name": "detailget_bgsoundvol",
+      "scripts": 7
+    },
+    {
+      "id": 826,
+      "name": "spline_addpoint",
+      "scripts": 65
+    },
+    {
+      "id": 827,
+      "name": "worldmap_coordinmap",
+      "scripts": 1
+    },
+    {
+      "id": 828,
+      "name": "bas_getanim_ready",
+      "scripts": 22
+    },
+    {
+      "id": 829,
+      "name": "ttv_webcam_stop",
+      "scripts": 1
+    },
+    {
+      "id": 831,
+      "name": "detail_toolkit",
+      "scripts": 2
+    },
+    {
+      "id": 832,
+      "name": "detailcanmod_maxscreensize",
+      "scripts": 2
+    },
+    {
+      "id": 833,
+      "name": "cam2_setlookatorientation_vector",
+      "scripts": 1
+    },
+    {
+      "id": 834,
+      "name": "cc_setobject",
+      "scripts": 125
+    },
+    {
+      "id": 835,
+      "name": "cc_setdraggable",
+      "scripts": 25
+    },
+    {
+      "id": 837,
+      "name": "ttv_webcam_getdevice_count",
+      "scripts": 3
+    },
+    {
+      "id": 838,
+      "name": "staffmodlevel",
+      "scripts": 14
+    },
+    {
+      "id": 839,
+      "name": "quest_started",
+      "scripts": 1
+    },
+    {
+      "id": 840,
+      "name": "detailcanset_texturing",
+      "scripts": 2
+    },
+    {
+      "id": 841,
+      "name": "if_settargetcursors",
+      "scripts": 1
+    },
+    {
+      "id": 843,
+      "name": "chat_clear",
+      "scripts": 1
+    },
+    {
+      "id": 844,
+      "name": "detail_loginvol",
+      "scripts": 9
+    },
+    {
+      "id": 845,
+      "name": "shop_open",
+      "scripts": 1
+    },
+    {
+      "id": 847,
+      "name": "db_find",
+      "scripts": 42
+    },
+    {
+      "id": 849,
+      "name": "if_setdragrenderbehaviour",
+      "scripts": 3
+    },
+    {
+      "id": 851,
+      "name": "detailget_texturing",
+      "scripts": 5
+    },
+    {
+      "id": 852,
+      "name": "cc_getgraphic",
+      "scripts": 40
+    },
+    {
+      "id": 853,
+      "name": "cc_setmodelangle",
+      "scripts": 28
+    },
+    {
+      "id": 854,
+      "name": "player_group_banned_get_displayname",
+      "scripts": 1
+    },
+    {
+      "id": 856,
+      "name": "if_clearscripthooks",
+      "scripts": 12
+    },
+    {
+      "id": 857,
+      "name": "userdetail_lobby_ccexpiry",
+      "scripts": 1
+    },
+    {
+      "id": 858,
+      "name": "oc_find",
+      "scripts": 4
+    },
+    {
+      "id": 859,
+      "name": "stockmarket_isofferadding",
+      "scripts": 2
+    },
+    {
+      "id": 860,
+      "name": "if_getmodel",
+      "scripts": 1
+    },
+    {
+      "id": 861,
+      "name": "cc_setonvartransmit",
+      "scripts": 81
+    },
+    {
+      "id": 862,
+      "name": "clienttype",
+      "scripts": 16
+    },
+    {
+      "id": 863,
+      "name": "fullscreen_getmode",
+      "scripts": 3
+    },
+    {
+      "id": 864,
+      "name": "detail_reflections",
+      "scripts": 2
+    },
+    {
+      "id": 865,
+      "name": "detailcanmod_antialiasing",
+      "scripts": 1
+    },
+    {
+      "id": 866,
+      "name": "branch",
+      "scripts": 9391
+    },
+    {
+      "id": 867,
+      "name": "quest_getdifficulty",
+      "scripts": 1
+    },
+    {
+      "id": 869,
+      "name": "quickchat_dynamic_command_add",
+      "scripts": 2114
+    },
+    {
+      "id": 870,
+      "name": "cam2_removealleffects",
+      "scripts": 4
+    },
+    {
+      "id": 871,
+      "name": "activeclansettings_getbanneddisplayname",
+      "scripts": 2
+    },
+    {
+      "id": 872,
+      "name": "ignore_getnotes",
+      "scripts": 2
+    },
+    {
+      "id": 873,
+      "name": "inv_totalparam",
+      "scripts": 19
+    },
+    {
+      "id": 874,
+      "name": "activeclansettings_getranktalk",
+      "scripts": 1
+    },
+    {
+      "id": 875,
+      "name": "ttv_chat_sendmessage",
+      "scripts": 1
+    },
+    {
+      "id": 876,
+      "name": "if_getfontmetrics",
+      "scripts": 44
+    },
+    {
+      "id": 877,
+      "name": "db_findnext",
+      "scripts": 45
+    },
+    {
+      "id": 878,
+      "name": "cc_setposition",
+      "scripts": 929
+    },
+    {
+      "id": 879,
+      "name": "if_setgraphicshadow",
+      "scripts": 5
+    },
+    {
+      "id": 882,
+      "name": "create_connectrequest",
+      "scripts": 1
+    },
+    {
+      "id": 884,
+      "name": "map_loadedpercent",
+      "scripts": 2
+    },
+    {
+      "id": 885,
+      "name": "get_loc_overlay_height",
+      "scripts": 4
+    },
+    {
+      "id": 886,
+      "name": "fullscreen_lastmode",
+      "scripts": 1
+    },
+    {
+      "id": 887,
+      "name": "detail_soundvol",
+      "scripts": 8
+    },
+    {
+      "id": 888,
+      "name": "parawidth",
+      "scripts": 72
+    },
+    {
+      "id": 889,
+      "name": "if_getcharposatindex",
+      "scripts": 4
+    },
+    {
+      "id": 890,
+      "name": "cc_setmodel",
+      "scripts": 14
+    },
+    {
+      "id": 891,
+      "name": "if_callonresize",
+      "scripts": 28
+    },
+    {
+      "id": 892,
+      "name": "if_setopbase",
+      "scripts": 29
+    },
+    {
+      "id": 893,
+      "name": "applet_hasfocus",
+      "scripts": 20
+    },
+    {
+      "id": 895,
+      "name": "if_setonverticalswipe",
+      "scripts": 7
+    },
+    {
+      "id": 896,
+      "name": "detailcanset_ambientocclusion",
+      "scripts": 2
+    },
+    {
+      "id": 897,
+      "name": "detailget_toolkit_default",
+      "scripts": 3
+    },
+    {
+      "id": 898,
+      "name": "if_settrans",
+      "scripts": 269
+    },
+    {
+      "id": 899,
+      "name": "stockmarket_isofferempty",
+      "scripts": 9
+    },
+    {
+      "id": 901,
+      "name": "if_setonclickrepeat",
+      "scripts": 1
+    },
+    {
+      "id": 903,
+      "name": "cancel_interface_drag",
+      "scripts": 5
+    },
+    {
+      "id": 904,
+      "name": "worldmap_3dview_active",
+      "scripts": 2
+    },
+    {
+      "id": 907,
+      "name": "os_driver_vendor",
+      "scripts": 2
+    },
+    {
+      "id": 909,
+      "name": "if_getwidth",
+      "scripts": 843
+    },
+    {
+      "id": 910,
+      "name": "get_npc_vislevel",
+      "scripts": 1
+    },
+    {
+      "id": 911,
+      "name": "telemetry_get_column_id",
+      "scripts": 1
+    },
+    {
+      "id": 912,
+      "name": "cc_setlinkfriendchat",
+      "scripts": 1
+    },
+    {
+      "id": 913,
+      "name": "oc_param",
+      "scripts": 293
+    },
+    {
+      "id": 915,
+      "name": "setobj",
+      "scripts": 1
+    },
+    {
+      "id": 917,
+      "name": "if_hassuboverlay",
+      "scripts": 31
+    },
+    {
+      "id": 919,
+      "name": "if_setonvarcstrtransmit",
+      "scripts": 17
+    },
+    {
+      "id": 921,
+      "name": "divide",
+      "scripts": 1020
+    },
+    {
+      "id": 922,
+      "name": "cc_setmodelanim",
+      "scripts": 23
+    },
+    {
+      "id": 924,
+      "name": "if_setoninvtransmit",
+      "scripts": 50
+    },
+    {
+      "id": 926,
+      "name": "if_setonclantransmit",
+      "scripts": 8
+    },
+    {
+      "id": 927,
+      "name": "resume_objdialog",
+      "scripts": 2
+    },
+    {
+      "id": 928,
+      "name": "stockmarket_getofferitem",
+      "scripts": 3
+    },
+    {
+      "id": 929,
+      "name": "detail_bgsoundvol",
+      "scripts": 12
+    },
+    {
+      "id": 930,
+      "name": "chat_playername_unfiltered",
+      "scripts": 52
+    },
+    {
+      "id": 931,
+      "name": "invother_getvar",
+      "scripts": 6
+    },
+    {
+      "id": 932,
+      "name": "os_driver_outdated",
+      "scripts": 1
+    },
+    {
+      "id": 934,
+      "name": "if_setonvarclantransmit",
+      "scripts": 6
+    },
+    {
+      "id": 936,
+      "name": "ttv_webcam_getdevice_byindex",
+      "scripts": 2
+    },
+    {
+      "id": 937,
+      "name": "worldmap_3dview_setloddistance",
+      "scripts": 1
+    },
+    {
+      "id": 938,
+      "name": "mec_param",
+      "scripts": 3
+    },
+    {
+      "id": 941,
+      "name": "resume_stringdialog",
+      "scripts": 7
+    },
+    {
+      "id": 943,
+      "name": "if_setpinchflags",
+      "scripts": 2
+    },
+    {
+      "id": 944,
+      "name": "mes_typed",
+      "scripts": 31
+    },
+    {
+      "id": 946,
+      "name": "cc_gettargetmask",
+      "scripts": 2
+    },
+    {
+      "id": 948,
+      "name": "cc_setonrelease",
+      "scripts": 28
+    },
+    {
+      "id": 949,
+      "name": "cc_setonresize",
+      "scripts": 2
+    },
+    {
+      "id": 951,
+      "name": "bitcount",
+      "scripts": 17
+    },
+    {
+      "id": 952,
+      "name": "create_suggest_name_reply",
+      "scripts": 1
+    },
+    {
+      "id": 953,
+      "name": "cc_setplayermodel_self",
+      "scripts": 6
+    },
+    {
+      "id": 954,
+      "name": "detailget_ambientocclusion",
+      "scripts": 2
+    },
+    {
+      "id": 955,
+      "name": "login_reply",
+      "scripts": 2
+    },
+    {
+      "id": 956,
+      "name": "detailcanmod_hardshadows",
+      "scripts": 1
+    },
+    {
+      "id": 957,
+      "name": "chatphrase_getautoresponse",
+      "scripts": 2
+    },
+    {
+      "id": 959,
+      "name": "setwalkmarker",
+      "scripts": 1
+    },
+    {
+      "id": 960,
+      "name": "if_getcharindexatpos",
+      "scripts": 2
+    },
+    {
+      "id": 961,
+      "name": "friend_add",
+      "scripts": 12
+    },
+    {
+      "id": 964,
+      "name": "cc_setdragdeadzone",
+      "scripts": 39
+    },
+    {
+      "id": 965,
+      "name": "show_software_license",
+      "scripts": 1
+    },
+    {
+      "id": 967,
+      "name": "max",
+      "scripts": 691
+    },
+    {
+      "id": 970,
+      "name": "detailcanmod_maxbackgroundfps",
+      "scripts": 2
+    },
+    {
+      "id": 971,
+      "name": "get_loc_screen_position",
+      "scripts": 4
+    },
+    {
+      "id": 972,
+      "name": "cc_setplayerhead_self",
+      "scripts": 1
+    },
+    {
+      "id": 974,
+      "name": "worldmap_getmapname",
+      "scripts": 4
+    },
+    {
+      "id": 975,
+      "name": "lobby_entergamereply",
+      "scripts": 6
+    },
+    {
+      "id": 976,
+      "name": "cc_getscrollheight",
+      "scripts": 1
+    },
+    {
+      "id": 977,
+      "name": "get_minimenu_target",
+      "scripts": 1
+    },
+    {
+      "id": 979,
+      "name": "if_setscrollsize",
+      "scripts": 304
+    },
+    {
+      "id": 981,
+      "name": "notify_accountcreatestarted",
+      "scripts": 1
+    },
+    {
+      "id": 982,
+      "name": "fullscreen_modecount",
+      "scripts": 3
+    },
+    {
+      "id": 983,
+      "name": "detailget_drawdistance",
+      "scripts": 3
+    },
+    {
+      "id": 984,
+      "name": "discardDragTarget",
+      "scripts": 1
+    },
+    {
+      "id": 986,
+      "name": "if_getscrollwidth",
+      "scripts": 37
+    },
+    {
+      "id": 987,
+      "name": "cc_setonmouseover",
+      "scripts": 167
+    },
+    {
+      "id": 988,
+      "name": "npc_find_active_minimenu_entry",
+      "scripts": 1
+    },
+    {
+      "id": 989,
+      "name": "if_setonvarctransmit",
+      "scripts": 75
+    },
+    {
+      "id": 990,
+      "name": "detail_buildarea",
+      "scripts": 2
+    },
+    {
+      "id": 992,
+      "name": "activechatphrase_setdynamicobj",
+      "scripts": 1
+    },
+    {
+      "id": 993,
+      "name": "get_obj_bounding_box",
+      "scripts": 4
+    },
+    {
+      "id": 994,
+      "name": "if_settargetverb",
+      "scripts": 2
+    },
+    {
+      "id": 995,
+      "name": "cc_setnpchead",
+      "scripts": 2
+    },
+    {
+      "id": 997,
+      "name": "or",
+      "scripts": 5
+    },
+    {
+      "id": 998,
+      "name": "worldmap_getcurrentmap",
+      "scripts": 7
+    },
+    {
+      "id": 999,
+      "name": "cc_setopkeyrate",
+      "scripts": 3
+    },
+    {
+      "id": 1000,
+      "name": "coordy",
+      "scripts": 9
+    },
+    {
+      "id": 1001,
+      "name": "detailget_anisotropicfiltering",
+      "scripts": 2
+    },
+    {
+      "id": 1002,
+      "name": "detail_lightdetail_high",
+      "scripts": 1
+    },
+    {
+      "id": 1003,
+      "name": "detail_idleanims",
+      "scripts": 1
+    },
+    {
+      "id": 1004,
+      "name": "cc_getop",
+      "scripts": 4
+    },
+    {
+      "id": 1007,
+      "name": "worldmap_getconfigorigin",
+      "scripts": 2
+    },
+    {
+      "id": 1009,
+      "name": "cc_gety",
+      "scripts": 222
+    },
+    {
+      "id": 1010,
+      "name": "detailget_antialiasingmode",
+      "scripts": 2
+    },
+    {
+      "id": 1011,
+      "name": "basecolour",
+      "scripts": 6
+    },
+    {
+      "id": 1012,
+      "name": "cc_settargetverb",
+      "scripts": 8
+    },
+    {
+      "id": 1013,
+      "name": "if_setrecol",
+      "scripts": 7
+    },
+    {
+      "id": 1014,
+      "name": "hsvtorgb",
+      "scripts": 24
+    },
+    {
+      "id": 1015,
+      "name": "if_getparentlayer",
+      "scripts": 99
+    },
+    {
+      "id": 1017,
+      "name": "video_advert_allow_skip",
+      "scripts": 1
+    },
+    {
+      "id": 1019,
+      "name": "chat_getfilter_public",
+      "scripts": 7
+    },
+    {
+      "id": 1020,
+      "name": "cam2_setlookatorientation_maxdistanceclamping",
+      "scripts": 1
+    },
+    {
+      "id": 1021,
+      "name": "inv_getobj",
+      "scripts": 197
+    },
+    {
+      "id": 1022,
+      "name": "player_group_get_overall_status",
+      "scripts": 1
+    },
+    {
+      "id": 1023,
+      "name": "detailcanmod_volumetriclighting",
+      "scripts": 1
+    },
+    {
+      "id": 1025,
+      "name": "stockmarket_getoffertype",
+      "scripts": 4
+    },
+    {
+      "id": 1026,
+      "name": "detailcanset_particles",
+      "scripts": 1
+    },
+    {
+      "id": 1027,
+      "name": "char_tolowercase",
+      "scripts": 1
+    },
+    {
+      "id": 1028,
+      "name": "ttv_webcam_getcap_byuniqueid",
+      "scripts": 2
+    },
+    {
+      "id": 1029,
+      "name": "if_setonmouseleave",
+      "scripts": 163
+    },
+    {
+      "id": 1030,
+      "name": "os_islinux",
+      "scripts": 2
+    },
+    {
+      "id": 1031,
+      "name": "ttv_stream_getquality",
+      "scripts": 1
+    },
+    {
+      "id": 1034,
+      "name": "cc_setparam",
+      "scripts": 232
+    },
+    {
+      "id": 1035,
+      "name": "friend_getnotes",
+      "scripts": 2
+    },
+    {
+      "id": 1038,
+      "name": "detailget_groundblending",
+      "scripts": 3
+    },
+    {
+      "id": 1040,
+      "name": "if_getmodelxof",
+      "scripts": 12
+    },
+    {
+      "id": 1041,
+      "name": "if_hassub",
+      "scripts": 32
+    },
+    {
+      "id": 1042,
+      "name": "if_setposition",
+      "scripts": 666
+    },
+    {
+      "id": 1046,
+      "name": "activeclanchannel_getsorteduserslot",
+      "scripts": 2
+    },
+    {
+      "id": 1047,
+      "name": "quit",
+      "scripts": 1
+    },
+    {
+      "id": 1048,
+      "name": "window_getinsets",
+      "scripts": 1
+    },
+    {
+      "id": 1049,
+      "name": "quest_finished",
+      "scripts": 1
+    },
+    {
+      "id": 1052,
+      "name": "cc_set2dangle",
+      "scripts": 34
+    },
+    {
+      "id": 1053,
+      "name": "cc_setondragcomplete",
+      "scripts": 50
+    },
+    {
+      "id": 1055,
+      "name": "quest_questreq_count",
+      "scripts": 3
+    },
+    {
+      "id": 1058,
+      "name": "mec_text",
+      "scripts": 1
+    },
+    {
+      "id": 1060,
+      "name": "has_nxt",
+      "scripts": 70
+    },
+    {
+      "id": 1061,
+      "name": "detail_hardshadows",
+      "scripts": 3
+    },
+    {
+      "id": 1062,
+      "name": "activeclanchannel_kickuser",
+      "scripts": 1
+    },
+    {
+      "id": 1063,
+      "name": "worldlist_specific_thisworld",
+      "scripts": 2
+    },
+    {
+      "id": 1065,
+      "name": "cam2_setpositionmode",
+      "scripts": 6
+    },
+    {
+      "id": 1066,
+      "name": "branch_less_than_or_equals",
+      "scripts": 771
+    },
+    {
+      "id": 1068,
+      "name": "detailcanset_vsync",
+      "scripts": 2
+    },
+    {
+      "id": 1069,
+      "name": "pow",
+      "scripts": 29
+    },
+    {
+      "id": 1071,
+      "name": "pop_int_local",
+      "scripts": 5117
+    },
+    {
+      "id": 1072,
+      "name": "append",
+      "scripts": 200
+    },
+    {
+      "id": 1073,
+      "name": "autosetup_setlow",
+      "scripts": 3
+    },
+    {
+      "id": 1076,
+      "name": "detail_grounddecor_on",
+      "scripts": 2
+    },
+    {
+      "id": 1079,
+      "name": "autosetup_setultra",
+      "scripts": 1
+    },
+    {
+      "id": 1080,
+      "name": "stockmarket_getofferprice",
+      "scripts": 3
+    },
+    {
+      "id": 1081,
+      "name": "stockmarket_isofferfinished",
+      "scripts": 4
+    },
+    {
+      "id": 1082,
+      "name": "cam2_setcollisionmode",
+      "scripts": 4
+    },
+    {
+      "id": 1084,
+      "name": "coordlevel_fine",
+      "scripts": 1
+    },
+    {
+      "id": 1085,
+      "name": "inv_size",
+      "scripts": 91
+    },
+    {
+      "id": 1088,
+      "name": "video_advert_has_finished",
+      "scripts": 2
+    },
+    {
+      "id": 1089,
+      "name": "create_availablerequest",
+      "scripts": 1
+    },
+    {
+      "id": 1091,
+      "name": "detailget_fog_on",
+      "scripts": 2
+    },
+    {
+      "id": 1092,
+      "name": "detail_fog_on",
+      "scripts": 1
+    },
+    {
+      "id": 1094,
+      "name": "db_listall",
+      "scripts": 1
+    },
+    {
+      "id": 1095,
+      "name": "is_targeted_entity",
+      "scripts": 1
+    },
+    {
+      "id": 1096,
+      "name": "cc_get2dangle",
+      "scripts": 8
+    },
+    {
+      "id": 1098,
+      "name": "chatphrase_getautoresponsecount",
+      "scripts": 5
+    },
+    {
+      "id": 1099,
+      "name": "testbit",
+      "scripts": 191
+    },
+    {
+      "id": 1100,
+      "name": "char_isalphanumeric",
+      "scripts": 4
+    },
+    {
+      "id": 1101,
+      "name": "coordx",
+      "scripts": 43
+    },
+    {
+      "id": 1102,
+      "name": "friend_test",
+      "scripts": 21
+    },
+    {
+      "id": 1105,
+      "name": "cam_movealong",
+      "scripts": 99
+    },
+    {
+      "id": 1106,
+      "name": "cam2_setlookatpoint_point",
+      "scripts": 1
+    },
+    {
+      "id": 1107,
+      "name": "cc_setdragdeadtime",
+      "scripts": 34
+    },
+    {
+      "id": 1108,
+      "name": "worldmap_listelement_start",
+      "scripts": 1
+    },
+    {
+      "id": 1109,
+      "name": "cc_setontimer",
+      "scripts": 173
+    },
+    {
+      "id": 1111,
+      "name": "cc_setonmouserepeat",
+      "scripts": 276
+    },
+    {
+      "id": 1112,
+      "name": "if_setnpchead",
+      "scripts": 9
+    },
+    {
+      "id": 1113,
+      "name": "activeclanchannel_find_listened",
+      "scripts": 17
+    },
+    {
+      "id": 1114,
+      "name": "if_settext",
+      "scripts": 1525
+    },
+    {
+      "id": 1115,
+      "name": "chatphrase_getdynamiccommand",
+      "scripts": 2
+    },
+    {
+      "id": 1116,
+      "name": "detailcanset_buildarea",
+      "scripts": 2
+    },
+    {
+      "id": 1117,
+      "name": "cc_setonclickrepeat",
+      "scripts": 2
+    },
+    {
+      "id": 1118,
+      "name": "detail_drawdistance",
+      "scripts": 2
+    },
+    {
+      "id": 1119,
+      "name": "if_getscrollx",
+      "scripts": 67
+    },
+    {
+      "id": 1120,
+      "name": "cc_triggerop",
+      "scripts": 6
+    },
+    {
+      "id": 1122,
+      "name": "branch_greater_than_or_equals",
+      "scripts": 920
+    },
+    {
+      "id": 1123,
+      "name": "if_getscrollheight",
+      "scripts": 67
+    },
+    {
+      "id": 1124,
+      "name": "cc_setscrollpos",
+      "scripts": 6
+    },
+    {
+      "id": 1125,
+      "name": "worldlist_switch",
+      "scripts": 5
+    },
+    {
+      "id": 1127,
+      "name": "cam2_setsnapdistances",
+      "scripts": 1
+    },
+    {
+      "id": 1128,
+      "name": "ttv_login_getstate",
+      "scripts": 1
+    },
+    {
+      "id": 1130,
+      "name": "if_setonfriendtransmit",
+      "scripts": 15
+    },
+    {
+      "id": 1131,
+      "name": "if_getinvobject",
+      "scripts": 3
+    },
+    {
+      "id": 1132,
+      "name": "cc_settextfont",
+      "scripts": 381
+    },
+    {
+      "id": 1133,
+      "name": "cam2_setpositionmaxspeed_axis",
+      "scripts": 1
+    },
+    {
+      "id": 1135,
+      "name": "cam2_setlookatorientation_xmovement",
+      "scripts": 2
+    },
+    {
+      "id": 1136,
+      "name": "comlevel_active",
+      "scripts": 10
+    },
+    {
+      "id": 1137,
+      "name": "if_setmodeltint",
+      "scripts": 4
+    },
+    {
+      "id": 1138,
+      "name": "if_get2dangle",
+      "scripts": 10
+    },
+    {
+      "id": 1139,
+      "name": "cc_getmodelxof",
+      "scripts": 6
+    },
+    {
+      "id": 1140,
+      "name": "ttv_stream_getviewers",
+      "scripts": 1
+    },
+    {
+      "id": 1141,
+      "name": "clanforumqfc_tostring",
+      "scripts": 2
+    },
+    {
+      "id": 1142,
+      "name": "interpolate",
+      "scripts": 2
+    },
+    {
+      "id": 1143,
+      "name": "if_setpausetext",
+      "scripts": 13
+    },
+    {
+      "id": 1144,
+      "name": "field5245",
+      "scripts": 1
+    },
+    {
+      "id": 1145,
+      "name": "create_setunder13",
+      "scripts": 1
+    },
+    {
+      "id": 1146,
+      "name": "oc_iop",
+      "scripts": 22
+    },
+    {
+      "id": 1147,
+      "name": "worldmap_getdisableelements",
+      "scripts": 1
+    },
+    {
+      "id": 1148,
+      "name": "cc_gettrans",
+      "scripts": 35
+    },
+    {
+      "id": 1149,
+      "name": "friend_getworldname",
+      "scripts": 3
+    },
+    {
+      "id": 1150,
+      "name": "quest_statreq_stat",
+      "scripts": 1
+    },
+    {
+      "id": 1151,
+      "name": "sound_vorbis_rate",
+      "scripts": 73
+    },
+    {
+      "id": 1152,
+      "name": "cc_setretex",
+      "scripts": 1
+    },
+    {
+      "id": 1154,
+      "name": "detailcanset_hardshadows",
+      "scripts": 1
+    },
+    {
+      "id": 1155,
+      "name": "if_getlayer",
+      "scripts": 88
+    },
+    {
+      "id": 1158,
+      "name": "oc_cost",
+      "scripts": 9
+    },
+    {
+      "id": 1159,
+      "name": "player_group_get_max_size",
+      "scripts": 1
+    },
+    {
+      "id": 1160,
+      "name": "if_setmodel",
+      "scripts": 115
+    },
+    {
+      "id": 1162,
+      "name": "lc_param",
+      "scripts": 4
+    },
+    {
+      "id": 1164,
+      "name": "telemetry_get_grid_value",
+      "scripts": 2
+    },
+    {
+      "id": 1165,
+      "name": "activeclanchannel_find_affined",
+      "scripts": 33
+    },
+    {
+      "id": 1166,
+      "name": "pushZeroInsets",
+      "scripts": 11
+    },
+    {
+      "id": 1167,
+      "name": "switch",
+      "scripts": 2908
+    },
+    {
+      "id": 1168,
+      "name": "chat_getnextuid",
+      "scripts": 1
+    },
+    {
+      "id": 1171,
+      "name": "if_setparam_int",
+      "scripts": 38
+    },
+    {
+      "id": 1173,
+      "name": "date_runeday",
+      "scripts": 80
+    },
+    {
+      "id": 1174,
+      "name": "cc_setondrag",
+      "scripts": 32
+    },
+    {
+      "id": 1176,
+      "name": "autosetup_setmin",
+      "scripts": 2
+    },
+    {
+      "id": 1179,
+      "name": "get_active_minimenu_entry",
+      "scripts": 1
+    },
+    {
+      "id": 1180,
+      "name": "sin_deg",
+      "scripts": 1
+    },
+    {
+      "id": 1181,
+      "name": "atan2_deg",
+      "scripts": 1
+    },
+    {
+      "id": 1182,
+      "name": "telemetry_is_row_pinned",
+      "scripts": 1
+    },
+    {
+      "id": 1185,
+      "name": "userflowflags",
+      "scripts": 1
+    },
+    {
+      "id": 1186,
+      "name": "cam2_getlookatmode",
+      "scripts": 3
+    },
+    {
+      "id": 1187,
+      "name": "detailget_waterdetail_high",
+      "scripts": 1
+    },
+    {
+      "id": 1188,
+      "name": "detail_musicvol",
+      "scripts": 5
+    },
+    {
+      "id": 1191,
+      "name": "pushUnsupportedQuadFalse",
+      "scripts": 2
+    },
+    {
+      "id": 1192,
+      "name": "discardCurrentSwipeSettingArg",
+      "scripts": 1
+    },
+    {
+      "id": 1194,
+      "name": "friend_is_referrer",
+      "scripts": 1
+    },
+    {
+      "id": 1196,
+      "name": "notify_accountcreated",
+      "scripts": 1
+    },
+    {
+      "id": 1197,
+      "name": "cc_npc_setcustomrecol",
+      "scripts": 1
+    },
+    {
+      "id": 1199,
+      "name": "openurlraw",
+      "scripts": 8
+    },
+    {
+      "id": 1200,
+      "name": "chat_sendpublic",
+      "scripts": 12
+    },
+    {
+      "id": 1201,
+      "name": "if_setonmisctransmit",
+      "scripts": 5
+    },
+    {
+      "id": 1202,
+      "name": "inv_getnum",
+      "scripts": 69
+    },
+    {
+      "id": 1203,
+      "name": "player_group_member_get_team",
+      "scripts": 1
+    },
+    {
+      "id": 1205,
+      "name": "detailcanset_lightingquality",
+      "scripts": 2
+    },
+    {
+      "id": 1210,
+      "name": "login_disallowtrigger",
+      "scripts": 2
+    },
+    {
+      "id": 1211,
+      "name": "login_accountappeal",
+      "scripts": 1
+    },
+    {
+      "id": 1212,
+      "name": "telemetry_get_row_id",
+      "scripts": 1
+    },
+    {
+      "id": 1213,
+      "name": "pop_int_discard",
+      "scripts": 209
+    },
+    {
+      "id": 1214,
+      "name": "coord_gridtofine",
+      "scripts": 4
+    },
+    {
+      "id": 1216,
+      "name": "playermodlevel",
+      "scripts": 4
+    },
+    {
+      "id": 1218,
+      "name": "if_setondragcomplete_alias",
+      "scripts": 1
+    },
+    {
+      "id": 1219,
+      "name": "ttv_livestreams_getstream_next",
+      "scripts": 1
+    },
+    {
+      "id": 1220,
+      "name": "cc_setonop",
+      "scripts": 214
+    },
+    {
+      "id": 1222,
+      "name": "worldmap_3dview_disable",
+      "scripts": 1
+    },
+    {
+      "id": 1223,
+      "name": "clanprofile_find",
+      "scripts": 75
+    },
+    {
+      "id": 1224,
+      "name": "if_set2dangle",
+      "scripts": 36
+    },
+    {
+      "id": 1226,
+      "name": "if_setonplayergroupvarptransmit",
+      "scripts": 1
+    },
+    {
+      "id": 1227,
+      "name": "if_setscrollpos",
+      "scripts": 220
+    },
+    {
+      "id": 1228,
+      "name": "cc_setonhold",
+      "scripts": 5
+    },
+    {
+      "id": 1229,
+      "name": "get_entity_overlay_height",
+      "scripts": 9
+    },
+    {
+      "id": 1230,
+      "name": "if_npc_setcustomretex",
+      "scripts": 1
+    },
+    {
+      "id": 1234,
+      "name": "cam2_setpositionentity_player",
+      "scripts": 7
+    },
+    {
+      "id": 1235,
+      "name": "detail_speechvol",
+      "scripts": 7
+    },
+    {
+      "id": 1237,
+      "name": "cc_setopkey",
+      "scripts": 10
+    },
+    {
+      "id": 1238,
+      "name": "worldmap_disableelementcategory",
+      "scripts": 4
+    },
+    {
+      "id": 1239,
+      "name": "stat",
+      "scripts": 46
+    },
+    {
+      "id": 1240,
+      "name": "player_group_member_get_same_world_var",
+      "scripts": 1
+    },
+    {
+      "id": 1241,
+      "name": "noopTargetModeCommand",
+      "scripts": 5
+    },
+    {
+      "id": 1242,
+      "name": "array_sort",
+      "scripts": 13
+    },
+    {
+      "id": 1243,
+      "name": "activeclanchannel_getranktalk",
+      "scripts": 1
+    },
+    {
+      "id": 1244,
+      "name": "cc_delete",
+      "scripts": 25
+    },
+    {
+      "id": 1245,
+      "name": "autosetup_dosetup",
+      "scripts": 1
+    },
+    {
+      "id": 1247,
+      "name": "discardDisplayBounds",
+      "scripts": 1
+    },
+    {
+      "id": 1248,
+      "name": "discardWorldMapMenuAction",
+      "scripts": 1
+    },
+    {
+      "id": 1249,
+      "name": "ttv_webcam_start",
+      "scripts": 1
+    },
+    {
+      "id": 1250,
+      "name": "cc_setlinkactiveclanchannel",
+      "scripts": 3
+    },
+    {
+      "id": 1251,
+      "name": "cc_setscrollsize",
+      "scripts": 5
+    },
+    {
+      "id": 1253,
+      "name": "noopDisplayCommand",
+      "scripts": 1
+    },
+    {
+      "id": 1254,
+      "name": "cam2_setlookatacceleration_axis",
+      "scripts": 1
+    },
+    {
+      "id": 1255,
+      "name": "detailcanmod_grounddecor",
+      "scripts": 1
+    },
+    {
+      "id": 1256,
+      "name": "coordy_fine",
+      "scripts": 2
+    },
+    {
+      "id": 1258,
+      "name": "cam_inc_y",
+      "scripts": 1
+    },
+    {
+      "id": 1259,
+      "name": "friend_setnotes",
+      "scripts": 2
+    },
+    {
+      "id": 1260,
+      "name": "quest_getmembers",
+      "scripts": 7
+    },
+    {
+      "id": 1261,
+      "name": "activeclanchannel_getrankkick",
+      "scripts": 4
+    },
+    {
+      "id": 1262,
+      "name": "if_setontargetleave",
+      "scripts": 7
+    },
+    {
+      "id": 1263,
+      "name": "formatminimenu",
+      "scripts": 1
+    },
+    {
+      "id": 1264,
+      "name": "getdefaultwindowmode",
+      "scripts": 2
+    },
+    {
+      "id": 1265,
+      "name": "if_npc_setcustombodymodel",
+      "scripts": 1
+    },
+    {
+      "id": 1266,
+      "name": "chat_lastuid",
+      "scripts": 2
+    },
+    {
+      "id": 1267,
+      "name": "marketing_sendevent",
+      "scripts": 1
+    },
+    {
+      "id": 1268,
+      "name": "sound_vorbis_volume",
+      "scripts": 210
+    },
+    {
+      "id": 1269,
+      "name": "detail_spotshadows_on",
+      "scripts": 2
+    },
+    {
+      "id": 1270,
+      "name": "detailcanset_shadowquality",
+      "scripts": 2
+    },
+    {
+      "id": 1271,
+      "name": "detail_bloom",
+      "scripts": 4
+    },
+    {
+      "id": 1272,
+      "name": "clientclock",
+      "scripts": 533
+    },
+    {
+      "id": 1273,
+      "name": "oc_category",
+      "scripts": 50
+    },
+    {
+      "id": 1279,
+      "name": "cc_setoninvtransmit",
+      "scripts": 7
+    },
+    {
+      "id": 1281,
+      "name": "activeclansettings_getaffinedjoinruneday",
+      "scripts": 1
+    },
+    {
+      "id": 1282,
+      "name": "chatphrase_getdynamiccommandcount",
+      "scripts": 3
+    },
+    {
+      "id": 1283,
+      "name": "player_group_member_is_online",
+      "scripts": 1
+    },
+    {
+      "id": 1284,
+      "name": "detail_brightness",
+      "scripts": 5
+    },
+    {
+      "id": 1285,
+      "name": "cc_setopcursor",
+      "scripts": 18
+    },
+    {
+      "id": 1287,
+      "name": "activeclanchannel_getclanname",
+      "scripts": 9
+    },
+    {
+      "id": 1288,
+      "name": "notifications_opensettings",
+      "scripts": 1
+    },
+    {
+      "id": 1289,
+      "name": "get_mousex",
+      "scripts": 17
+    },
+    {
+      "id": 1290,
+      "name": "login_resetreply",
+      "scripts": 8
+    },
+    {
+      "id": 1291,
+      "name": "if_setonvartransmit",
+      "scripts": 192
+    },
+    {
+      "id": 1292,
+      "name": "discardLogoutArg",
+      "scripts": 2
+    },
+    {
+      "id": 1293,
+      "name": "cc_setopkeyignoreheld",
+      "scripts": 3
+    },
+    {
+      "id": 1294,
+      "name": "login_disallowresult",
+      "scripts": 2
+    },
+    {
+      "id": 1298,
+      "name": "chatphrase_find",
+      "scripts": 2
+    },
+    {
+      "id": 1299,
+      "name": "getbit_range",
+      "scripts": 4
+    },
+    {
+      "id": 1300,
+      "name": "cc_setop",
+      "scripts": 321
+    },
+    {
+      "id": 1301,
+      "name": "clan_getchatusername_unfiltered",
+      "scripts": 2
+    },
+    {
+      "id": 1302,
+      "name": "ttv_stream_settitle",
+      "scripts": 1
+    },
+    {
+      "id": 1303,
+      "name": "worldmap_listelement_next",
+      "scripts": 1
+    },
+    {
+      "id": 1305,
+      "name": "cam2_getpositionentity_angleoffsets",
+      "scripts": 5
+    },
+    {
+      "id": 1306,
+      "name": "marketing_init",
+      "scripts": 1
+    },
+    {
+      "id": 1307,
+      "name": "if_npc_setcustomheadmodel",
+      "scripts": 1
+    },
+    {
+      "id": 1308,
+      "name": "invother_getobj",
+      "scripts": 14
+    },
+    {
+      "id": 1310,
+      "name": "player_group_get_displayname",
+      "scripts": 7
+    },
+    {
+      "id": 1312,
+      "name": "chatcat_getsubcatshortcut",
+      "scripts": 2
+    },
+    {
+      "id": 1313,
+      "name": "login_inprogress",
+      "scripts": 2
+    },
+    {
+      "id": 1315,
+      "name": "if_setontargetenter",
+      "scripts": 3
+    },
+    {
+      "id": 1316,
+      "name": "if_get_gamescreen",
+      "scripts": 2
+    },
+    {
+      "id": 1318,
+      "name": "detail_texturing",
+      "scripts": 5
+    },
+    {
+      "id": 1319,
+      "name": "lobby_enterlobbyreply",
+      "scripts": 1
+    },
+    {
+      "id": 1321,
+      "name": "cc_getwidth",
+      "scripts": 245
+    },
+    {
+      "id": 1322,
+      "name": "cc_resetlinkplayer",
+      "scripts": 2
+    },
+    {
+      "id": 1323,
+      "name": "cc_getscrollx",
+      "scripts": 1
+    },
+    {
+      "id": 1324,
+      "name": "targetmode_cancel",
+      "scripts": 2
+    },
+    {
+      "id": 1326,
+      "name": "clan_getchatuserworld",
+      "scripts": 2
+    },
+    {
+      "id": 1327,
+      "name": "cc_setnpcmodel",
+      "scripts": 2
+    },
+    {
+      "id": 1328,
+      "name": "branch_less_than",
+      "scripts": 2236
+    },
+    {
+      "id": 1329,
+      "name": "chat_getprevuid",
+      "scripts": 2
+    },
+    {
+      "id": 1330,
+      "name": "friend_getworldflags",
+      "scripts": 1
+    },
+    {
+      "id": 1331,
+      "name": "ignore_add_temp",
+      "scripts": 2
+    },
+    {
+      "id": 1333,
+      "name": "ttv_stream_getstate",
+      "scripts": 1
+    },
+    {
+      "id": 1335,
+      "name": "detail_skydetail",
+      "scripts": 1
+    },
+    {
+      "id": 1337,
+      "name": "playercountry",
+      "scripts": 3
+    },
+    {
+      "id": 1338,
+      "name": "sound_group_stop",
+      "scripts": 1
+    },
+    {
+      "id": 1340,
+      "name": "detail_customcursors",
+      "scripts": 4
+    },
+    {
+      "id": 1341,
+      "name": "if_settextshadow",
+      "scripts": 11
+    },
+    {
+      "id": 1342,
+      "name": "player_group_member_get_last_seen_node_id",
+      "scripts": 1
+    },
+    {
+      "id": 1343,
+      "name": "activechatphrase_send",
+      "scripts": 1
+    },
+    {
+      "id": 1344,
+      "name": "quest_getname",
+      "scripts": 1
+    },
+    {
+      "id": 1345,
+      "name": "string_distance",
+      "scripts": 2
+    },
+    {
+      "id": 1346,
+      "name": "telemetry_get_group_index",
+      "scripts": 2
+    },
+    {
+      "id": 1347,
+      "name": "cam2_resetsnapdistances",
+      "scripts": 1
+    },
+    {
+      "id": 1348,
+      "name": "detail_toolkit_default",
+      "scripts": 4
+    },
+    {
+      "id": 1349,
+      "name": "return",
+      "scripts": 14313
+    },
+    {
+      "id": 1350,
+      "name": "has_html5",
+      "scripts": 4
+    },
+    {
+      "id": 1351,
+      "name": "push_varbit",
+      "scripts": 2971
+    },
+    {
+      "id": 1352,
+      "name": "cc_setswipedeadtime",
+      "scripts": 1
+    },
+    {
+      "id": 1353,
+      "name": "chatphrase_getdynamiccommandparam_enum",
+      "scripts": 1
+    },
+    {
+      "id": 1354,
+      "name": "detailcanmod_waterdetail",
+      "scripts": 1
+    },
+    {
+      "id": 1355,
+      "name": "cc_resume_pausebutton",
+      "scripts": 2
+    },
+    {
+      "id": 1356,
+      "name": "detailcanset_maxbackgroundfps",
+      "scripts": 2
+    },
+    {
+      "id": 1357,
+      "name": "coordx_fine",
+      "scripts": 4
+    },
+    {
+      "id": 1358,
+      "name": "if_setonclick",
+      "scripts": 133
+    },
+    {
+      "id": 1359,
+      "name": "char_isprintable",
+      "scripts": 10
+    },
+    {
+      "id": 1360,
+      "name": "detail_shadowquality",
+      "scripts": 2
+    },
+    {
+      "id": 1361,
+      "name": "force_interface_drag",
+      "scripts": 3
+    },
+    {
+      "id": 1362,
+      "name": "runweight_visible",
+      "scripts": 4
+    },
+    {
+      "id": 1363,
+      "name": "detailcanmod_particles",
+      "scripts": 2
+    },
+    {
+      "id": 1364,
+      "name": "oc_icursor",
+      "scripts": 16
+    },
+    {
+      "id": 1365,
+      "name": "if_clearops",
+      "scripts": 46
+    },
+    {
+      "id": 1367,
+      "name": "autosetup_setcustom",
+      "scripts": 6
+    },
+    {
+      "id": 1369,
+      "name": "clan_getchatcount",
+      "scripts": 15
+    },
+    {
+      "id": 1371,
+      "name": "cc_setlinkplayergroup",
+      "scripts": 4
+    },
+    {
+      "id": 1373,
+      "name": "text_switch",
+      "scripts": 4
+    },
+    {
+      "id": 1375,
+      "name": "random",
+      "scripts": 87
+    },
+    {
+      "id": 1376,
+      "name": "push_constant_string",
+      "scripts": 12506
+    },
+    {
+      "id": 1377,
+      "name": "cc_getcolour",
+      "scripts": 3
+    },
+    {
+      "id": 1378,
+      "name": "cam_followcoord",
+      "scripts": 8
+    },
+    {
+      "id": 1380,
+      "name": "append_char",
+      "scripts": 11
+    },
+    {
+      "id": 1382,
+      "name": "resume_namedialog",
+      "scripts": 2
+    },
+    {
+      "id": 1385,
+      "name": "userdetail_lobby_emailstatus",
+      "scripts": 1
+    },
+    {
+      "id": 1388,
+      "name": "cc_settargetcursors",
+      "scripts": 6
+    },
+    {
+      "id": 1391,
+      "name": "if_setlinedirection",
+      "scripts": 1
+    },
+    {
+      "id": 1394,
+      "name": "cc_getmodelangle_y",
+      "scripts": 10
+    },
+    {
+      "id": 1395,
+      "name": "detailcanset_volumetriclighting",
+      "scripts": 2
+    },
+    {
+      "id": 1397,
+      "name": "ignore_test",
+      "scripts": 13
+    },
+    {
+      "id": 1398,
+      "name": "detailget_spotshadows_on",
+      "scripts": 1
+    },
+    {
+      "id": 1399,
+      "name": "cc_setobject_alwaysnum",
+      "scripts": 10
+    },
+    {
+      "id": 1400,
+      "name": "cc_npc_setcustombodymodel",
+      "scripts": 1
+    },
+    {
+      "id": 1402,
+      "name": "detailcanmod_reflections",
+      "scripts": 1
+    },
+    {
+      "id": 1406,
+      "name": "detailget_vsync",
+      "scripts": 1
+    },
+    {
+      "id": 1407,
+      "name": "detailget_lightdetail_high",
+      "scripts": 4
+    },
+    {
+      "id": 1408,
+      "name": "autosetup_setmedium",
+      "scripts": 2
+    },
+    {
+      "id": 1409,
+      "name": "if_setobject_nonum",
+      "scripts": 54
+    },
+    {
+      "id": 1410,
+      "name": "chatcat_getphrase",
+      "scripts": 2
+    },
+    {
+      "id": 1411,
+      "name": "ignore_setnotes",
+      "scripts": 2
+    },
+    {
+      "id": 1412,
+      "name": "get_npc_stat",
+      "scripts": 2
+    },
+    {
+      "id": 1413,
+      "name": "cc_clearscripthooks",
+      "scripts": 8
+    },
+    {
+      "id": 1414,
+      "name": "userdetail_quickchat",
+      "scripts": 18
+    },
+    {
+      "id": 1416,
+      "name": "tostring_localised",
+      "scripts": 207
+    },
+    {
+      "id": 1417,
+      "name": "cc_setparam_int",
+      "scripts": 25
+    },
+    {
+      "id": 1418,
+      "name": "cam_moveto",
+      "scripts": 6
+    },
+    {
+      "id": 1419,
+      "name": "branch_equals",
+      "scripts": 6581
+    },
+    {
+      "id": 1420,
+      "name": "friend_setrank",
+      "scripts": 1
+    },
+    {
+      "id": 1421,
+      "name": "detailcanset_grounddecor",
+      "scripts": 2
+    },
+    {
+      "id": 1422,
+      "name": "cam2_setspringproperties",
+      "scripts": 1
+    },
+    {
+      "id": 1424,
+      "name": "detailget_hardshadows",
+      "scripts": 2
+    },
+    {
+      "id": 1425,
+      "name": "detailget_loginvol",
+      "scripts": 9
+    },
+    {
+      "id": 1427,
+      "name": "inv_stockbase",
+      "scripts": 1
+    },
+    {
+      "id": 1428,
+      "name": "ttv_livestreams_getstream_start",
+      "scripts": 1
+    },
+    {
+      "id": 1429,
+      "name": "lobby_leavelobby",
+      "scripts": 9
+    },
+    {
+      "id": 1431,
+      "name": "field6563",
+      "scripts": 18
+    }
+  ],
+  "implemented_unused": [
+    "activeclansettings_getaffinedmuted",
+    "activeclansettings_getcoinshare",
+    "activeclansettings_getrankkick",
+    "activeclansettings_getranklootshare",
+    "activeclansettings_getreplacementowner_slot",
+    "affiliate",
+    "affinedclansettings_addbanned_fromchannel",
+    "affinedclansettings_setmuted_fromchannel",
+    "append_signnum",
+    "automatedtestflags",
+    "basematerial",
+    "branch_if_false",
+    "branch_if_true",
+    "cam2_getpositionentity_lookatangle",
+    "cam2_getpositionentity_lookatangleoffsets",
+    "cam2_getpositionentity_lookatdistance",
+    "cam2_legacycam_ready",
+    "cam2_removeeffect",
+    "cam2_setlookatacceleration",
+    "cam2_setlookatangularinterpolation",
+    "cam2_setlookatmaxspeed",
+    "cam2_setlookatspline_spline",
+    "cam2_setlookatspringproperties",
+    "cam2_setpositionacceleration",
+    "cam2_setpositionmaxspeed",
+    "cam2_setpositionspline_spline",
+    "cam2_setpositionspringproperties",
+    "cam2_settraildistance",
+    "cam_getfollowheight",
+    "cam_modeisfollowplayer",
+    "cam_removeroof",
+    "cam_setfollowheight",
+    "can_run_java_client",
+    "cc_addpinchflags",
+    "cc_addswipeflags",
+    "cc_delpinchflags",
+    "cc_delswipeflags",
+    "cc_discardGestureHook",
+    "cc_getcharindexatpos",
+    "cc_getcharposatindex",
+    "cc_getfontgraphic",
+    "cc_getmodel",
+    "cc_getscrollwidth",
+    "cc_npc_setcustombodymodel_transformed",
+    "cc_npc_setcustomheadmodel",
+    "cc_resetmodellighting",
+    "cc_setgraphicshadow",
+    "cc_setmodellighting",
+    "cc_setmodelorigin",
+    "cc_setmodelorthog",
+    "cc_setmodeltint",
+    "cc_setobject_wearcol_alwaysnum",
+    "cc_setobject_wearcol_nonum",
+    "cc_setoncameraupdatetransmit",
+    "cc_setoncamfinished",
+    "cc_setonchattransmit",
+    "cc_setonclanchanneltransmit",
+    "cc_setonclansettingstransmit",
+    "cc_setonclantransmit",
+    "cc_setondialogabort",
+    "cc_setondragcomplete_alias",
+    "cc_setonfriendtransmit",
+    "cc_setongamepadaxis",
+    "cc_setongamepadbutton",
+    "cc_setongamepadbuttonheld",
+    "cc_setongamepadtrigger",
+    "cc_setonhorizontalpinch",
+    "cc_setonhorizontalswipe",
+    "cc_setonkey",
+    "cc_setonopt",
+    "cc_setonplayergrouptransmit",
+    "cc_setonplayergroupvarptransmit",
+    "cc_setonstocktransmit",
+    "cc_setonsubchange",
+    "cc_setonvarclantransmit",
+    "cc_setonverticalpinch",
+    "cc_setonverticalswipe",
+    "cc_setopchar",
+    "cc_setoptchar",
+    "cc_setoptkeyrate",
+    "cc_setpinchdeadzone",
+    "cc_setpinchflags",
+    "cc_setplayermodel",
+    "cc_setrecol",
+    "cc_setsubtractinsets",
+    "cc_settextantimacro",
+    "char_isalpha",
+    "char_isvalid",
+    "chat_gethistory_bytypeandline",
+    "chat_gethistorylength",
+    "chatcat_findphrasebyshortcut",
+    "chatcat_findsubcatbyshortcut",
+    "chatcat_getphraseshortcut",
+    "chatphrase_findrestart",
+    "coord_fine",
+    "coord_finetogrid",
+    "create_get_email",
+    "date_year",
+    "db_find_get",
+    "db_find_refine",
+    "db_getrowtable",
+    "defaultminimenu",
+    "detail_animdetail",
+    "detail_diskcachesize",
+    "detail_gamerenderscale",
+    "detail_idleanims_many",
+    "detail_interfacescale",
+    "detail_shadows",
+    "detailcanmod_animdetail",
+    "detailcanmod_dof",
+    "detailcanmod_fog",
+    "detailcanmod_gamerenderscale",
+    "detailcanmod_interfacescale",
+    "detailcanmod_orthographic",
+    "detailcanmod_shadows",
+    "detailcanset_animdetail",
+    "detailcanset_antialiasing",
+    "detailcanset_dof",
+    "detailcanset_fog",
+    "detailcanset_gamerenderscale",
+    "detailcanset_groundblending",
+    "detailcanset_interfacescale",
+    "detailcanset_orthographic",
+    "detailcanset_shadows",
+    "detailcanset_spotshadows",
+    "detailcanset_toolkit_default",
+    "detailget_animdetail",
+    "detailget_buildarea",
+    "detailget_canchoosesafemode",
+    "detailget_customcursors",
+    "detailget_diskcachesize",
+    "detailget_dof",
+    "detailget_gamerenderscale",
+    "detailget_idleanims_many",
+    "detailget_interfacescale",
+    "detailget_loadingscreentype",
+    "detailget_maxdiskcachesize",
+    "detailget_mindiskcachesize",
+    "detailget_orthographic",
+    "detailget_performance_metric",
+    "detailget_recommendeddiskcachesize",
+    "detailget_shadows",
+    "discardDetailSettingPair",
+    "discardDisplaySettingPair",
+    "discardDragResizePair",
+    "discardDragTargetPair",
+    "discardFourInterfaceArgs",
+    "discardNotificationGroup",
+    "docheat",
+    "email_validation_add_new_address",
+    "email_validation_change_address",
+    "email_validation_submit_code",
+    "emoji_add",
+    "emoji_enable_auto_chatline",
+    "emoji_remove",
+    "emoji_removeall",
+    "emoji_substitute",
+    "enum_getreversecount_string",
+    "enum_getreverseindex_string",
+    "enum_hasoutput_string",
+    "frombilling",
+    "fullscreen_exit",
+    "get_displayname_withextras",
+    "get_entity_say",
+    "get_npc_name",
+    "get_second_minimenu_entry",
+    "get_selfyangle",
+    "getgridcoordrelativetocamera",
+    "if_addpinchflags",
+    "if_addswipeflags",
+    "if_debug_button1",
+    "if_debug_button10",
+    "if_debug_button2",
+    "if_debug_button3",
+    "if_debug_button4",
+    "if_debug_button5",
+    "if_debug_button6",
+    "if_debug_button7",
+    "if_debug_button8",
+    "if_debug_button9",
+    "if_debug_getcomcount",
+    "if_debug_getcomname",
+    "if_debug_getname",
+    "if_debug_getopenifcount",
+    "if_debug_getopenifid",
+    "if_debug_getservertriggers",
+    "if_debug_target",
+    "if_delpinchflags",
+    "if_delswipeflags",
+    "if_discardGestureHook",
+    "if_dragpickup",
+    "if_getfontgraphic",
+    "if_getopbase",
+    "if_npc_setcustombodymodel_transformed",
+    "if_resetlinkplayer",
+    "if_setalpha",
+    "if_setaspect",
+    "if_setclickmask",
+    "if_setdragdeadtime",
+    "if_setdragdeadzone",
+    "if_setfontmono",
+    "if_setheld",
+    "if_setlinewid",
+    "if_setlinkactiveclanchannel",
+    "if_setlinkfriend",
+    "if_setlinkfriendchat",
+    "if_setlinkplayergroup",
+    "if_setmodelorigin",
+    "if_setobject_wearcol",
+    "if_setobject_wearcol_alwaysnum",
+    "if_setobject_wearcol_nonum",
+    "if_setonopt",
+    "if_setopchar",
+    "if_setoptchar",
+    "if_setoptkeyignoreheld",
+    "if_setoptkeyrate",
+    "if_setplayerhead_self",
+    "if_setplayermodel",
+    "if_setswipedeadtime",
+    "if_setswipedeadzone",
+    "if_setswipeflags",
+    "if_settargetopcursor",
+    "ignore_getslotfromname",
+    "ignore_is_temp",
+    "interface_getpickingradius",
+    "inv_totalparam_stack",
+    "invother_total",
+    "is_gamescreen_state",
+    "is_npc_visible",
+    "lastlogin",
+    "login_request",
+    "login_request_social_network",
+    "logout_getreason",
+    "long_branch_equals",
+    "long_branch_greater_than",
+    "long_branch_greater_than_or_equals",
+    "long_branch_less_than",
+    "long_branch_less_than_or_equals",
+    "map_build_complete",
+    "map_isowner",
+    "mec_sprite",
+    "mec_textsize",
+    "movescripted",
+    "noopInterfaceCommand",
+    "noopLicenseCommand",
+    "notifications_sendlocal",
+    "oc_findrestart",
+    "oc_id",
+    "oc_minimenu_colour_overridden",
+    "oc_op",
+    "oc_shard",
+    "oc_shardcount",
+    "oc_unshard",
+    "oc_wearpos3",
+    "opcount",
+    "opplayert",
+    "os_isandroid",
+    "os_isios",
+    "player_find_active_minimenu_entry",
+    "player_group_get_create_mins_since_epoch",
+    "player_group_get_create_seconds_to_now",
+    "player_group_is_members_only",
+    "player_group_member_get_join_xp",
+    "player_group_member_is_member",
+    "playerdemo",
+    "pop_array_int_leave_value_on_stack",
+    "pop_long_discard",
+    "pop_long_local",
+    "preload_download_complete",
+    "preload_download_downloadedsize",
+    "preload_download_rate",
+    "preload_download_remainingsize",
+    "preload_download_totalsize",
+    "preload_progress",
+    "profile_cpu",
+    "pushCanvasSize",
+    "pushFontMetrics",
+    "pushLicenseAvailable",
+    "pushNotificationPermissionGranted",
+    "pushNotificationUnavailable",
+    "pushRuneScapeSetupValue",
+    "pushShopUnavailable",
+    "pushTargetModeUnavailable",
+    "pushTargetModeZero",
+    "pushUnsupportedPairFalse",
+    "pushUnsupportedPairFalseAlt",
+    "pushUnsupportedPairFalseFourth",
+    "pushUnsupportedPairFalseThird",
+    "push_array_int_and_index",
+    "push_array_int_leave_index_on_stack",
+    "push_constant_int",
+    "push_long_constant",
+    "quest_allreqmet",
+    "quest_pointsreq_met",
+    "quest_questreq_met",
+    "quest_statreq_met",
+    "quest_varbitreq_count",
+    "quest_varbitreq_desc",
+    "quest_varbitreq_met",
+    "quest_varpreq_count",
+    "quest_varpreq_desc",
+    "quest_varpreq_met",
+    "runjavascript",
+    "saveRuneScapeSetup",
+    "self_player_uid",
+    "seq_param",
+    "setbit_range_toint",
+    "setgender",
+    "setsubmenuminlength",
+    "shader_preload_allow",
+    "shader_preload_percent",
+    "shop_applypendingtransactions",
+    "shop_getcategorycount",
+    "shop_getcategorydescription",
+    "shop_getcategoryid",
+    "shop_getindexforcategoryid",
+    "shop_getindexforcategoryname",
+    "shop_getproductcount",
+    "shop_getproductdetails",
+    "shop_isproductavailable",
+    "shop_isproductrecommended",
+    "shop_requestdata",
+    "shop_requestdatastatus",
+    "sound_distancefocusfilter_setparams",
+    "sound_jingle",
+    "sound_mixbuss_add",
+    "sound_mixbuss_setlevel",
+    "sound_song",
+    "sound_song_stop",
+    "sound_song_volume",
+    "sound_synth_rate",
+    "sqrt",
+    "stockmarket_isofferstable",
+    "telemetry_is_grid_processor_set",
+    "text_gender",
+    "togglebit",
+    "ttv_chat_getstate",
+    "ttv_setdebugoutput",
+    "ttv_stream_setsmoothresize",
+    "ttv_webcam_getstate",
+    "userdetail_lobby_dobrequested",
+    "userdetail_lobby_jcoins_balance",
+    "userdetail_lobby_lastloginaddress",
+    "userdetail_lobby_loyalty_balance",
+    "userdetail_lobby_membersstats",
+    "userdetail_lobby_recoveryday",
+    "viewport_getfov",
+    "worldlist_autoworld",
+    "worldmap_3dview_getloddistance",
+    "worldmap_3dview_getscreenposition",
+    "worldmap_3dview_gettextfont",
+    "worldmap_3dview_setlighting",
+    "worldmap_3dview_settextfont",
+    "worldmap_disableelement",
+    "worldmap_disableelements",
+    "worldmap_findnearestelement",
+    "worldmap_flashelement",
+    "worldmap_getcategorypriority",
+    "worldmap_getconfigsize",
+    "worldmap_getdisableelement",
+    "worldmap_getdisableelementcategory",
+    "worldmap_getdisabletextsize",
+    "worldmap_getdisabletype",
+    "worldmap_getsourcecoord",
+    "worldmap_getsourceposition",
+    "worldmap_jumptodisplaycoord_instant",
+    "worldmap_jumptosourcecoord_instant",
+    "worldmap_perpetualflash",
+    "worldmap_setcategorypriority",
+    "worldmap_setflashloops",
+    "worldmap_setflashloops_default",
+    "worldmap_setflashtics",
+    "worldmap_setflashtics_default",
+    "worldmap_setmap_coord",
+    "worldmap_stopcurrentflashes",
+    "writeconsole"
+  ]
+}

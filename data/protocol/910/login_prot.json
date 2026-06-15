@@ -1,0 +1,78 @@
+{
+  "schema": "protocol-910/v1",
+  "source": "../../client/client/src/main/java/com/jagex/game/network/protocol/LoginProt.java",
+  "packets": [
+    {
+      "name": "INIT_GAME_CONNECTION",
+      "opcode": 14,
+      "size": 0,
+      "obf": "nu.e"
+    },
+    {
+      "name": "INIT_JS5REMOTE_CONNECTION",
+      "opcode": 15,
+      "size": -1,
+      "obf": "nu.n"
+    },
+    {
+      "name": "GAMELOGIN",
+      "opcode": 16,
+      "size": -2,
+      "obf": "nu.m"
+    },
+    {
+      "name": "LOBBYLOGIN",
+      "opcode": 19,
+      "size": -2,
+      "obf": "nu.k"
+    },
+    {
+      "name": "REQUEST_WORLDLIST",
+      "opcode": 23,
+      "size": 4,
+      "obf": "nu.f"
+    },
+    {
+      "name": "CHECK_WORLD_SUITABILITY",
+      "opcode": 24,
+      "size": -1,
+      "obf": "nu.w"
+    },
+    {
+      "name": "GAMELOGIN_CONTINUE",
+      "opcode": 26,
+      "size": 0,
+      "obf": "nu.l"
+    },
+    {
+      "name": "SSL_WEBCONNECTION",
+      "opcode": 27,
+      "size": 0,
+      "obf": "nu.u"
+    },
+    {
+      "name": "CREATE_ACCOUNT_CONNECT",
+      "opcode": 28,
+      "size": -2,
+      "obf": "nu.z"
+    },
+    {
+      "name": "INIT_SOCIAL_NETWORK_CONNECTION",
+      "opcode": 29,
+      "size": -2,
+      "obf": "nu.p"
+    },
+    {
+      "name": "SOCIAL_NETWORK_LOGIN",
+      "opcode": 30,
+      "size": -2,
+      "obf": "nu.d"
+    },
+    {
+      "name": "INIT_DEBUG_CONNECTION",
+      "opcode": 31,
+      "size": 4,
+      "obf": "nu.c"
+    }
+  ]
+}

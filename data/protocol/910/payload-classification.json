@@ -1,0 +1,782 @@
+{
+  "CAM2_ENABLE": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "CAMERA_UPDATE": {
+    "client": "complex:no-reads",
+    "server": "complex:no_encode_override"
+  },
+  "CAM_FORCEANGLE": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "CAM_LOOKAT": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "CAM_MOVETO": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "CAM_REMOVEROOF": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "CAM_RESET": {
+    "client": "complex:no-reads",
+    "server": "complex:no_encode_override"
+  },
+  "CAM_SHAKE": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "CAM_SMOOTHRESET": {
+    "client": "complex:no-reads",
+    "server": "complex:no_encode_override"
+  },
+  "CHANGE_LOBBY": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "CHAT_FILTER_SETTINGS": {
+    "client": "simple",
+    "server": "v2-simple"
+  },
+  "CHAT_FILTER_SETTINGS_PRIVATECHAT": {
+    "client": "simple",
+    "server": "v2-simple"
+  },
+  "CLANCHANNEL_DELTA": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "CLANCHANNEL_FULL": {
+    "client": "simple",
+    "server": "complex:computed-arg"
+  },
+  "CLANSETTINGS_DELTA": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "CLANSETTINGS_FULL": {
+    "client": "simple",
+    "server": "complex:computed-arg"
+  },
+  "CLEAR_PLAYER_SNAPSHOT": {
+    "client": "simple",
+    "server": "v2-simple"
+  },
+  "CLIENT_SETVARCBIT_LARGE": {
+    "client": "simple",
+    "server": "simple"
+  },
+  "CLIENT_SETVARCBIT_SMALL": {
+    "client": "simple",
+    "server": "simple"
+  },
+  "CLIENT_SETVARCSTR_LARGE": {
+    "client": "simple",
+    "server": "simple"
+  },
+  "CLIENT_SETVARCSTR_SMALL": {
+    "client": "simple",
+    "server": "simple"
+  },
+  "CLIENT_SETVARC_LARGE": {
+    "client": "simple",
+    "server": "simple"
+  },
+  "CLIENT_SETVARC_SMALL": {
+    "client": "simple",
+    "server": "simple"
+  },
+  "CREATE_ACCOUNT_REPLY": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "CREATE_CHECK_EMAIL_REPLY": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "CREATE_CHECK_NAME_REPLY": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "CREATE_SUGGEST_NAME_ERROR": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "CREATE_SUGGEST_NAME_REPLY": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "CUTSCENE": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "DEBUG_SERVER_TRIGGERS": {
+    "client": "complex:read-under-control",
+    "server": "complex:no_encode_override"
+  },
+  "DO_CHEAT": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "ENVIRONMENT_OVERRIDE": {
+    "client": "complex:no-reads",
+    "server": "complex:no_encode_override"
+  },
+  "EXECUTE_CLIENT_CHEAT": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "FRIENDLIST_LOADED": {
+    "client": "complex:no-reads",
+    "server": "complex:other"
+  },
+  "HINT_ARROW": {
+    "client": "complex:read-under-control",
+    "server": "complex:computed-arg"
+  },
+  "HINT_TRAIL": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "IF_CLOSESUB": {
+    "client": "simple",
+    "server": "simple"
+  },
+  "IF_MOVESUB": {
+    "client": "simple",
+    "server": "simple"
+  },
+  "IF_OPENSUB": {
+    "client": "simple",
+    "server": "v2-simple"
+  },
+  "IF_OPENSUB_ACTIVE_LOC": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "IF_OPENSUB_ACTIVE_NPC": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "IF_OPENSUB_ACTIVE_OBJ": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "IF_OPENSUB_ACTIVE_PLAYER": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "IF_OPENTOP": {
+    "client": "simple",
+    "server": "v2-simple"
+  },
+  "IF_SETANGLE": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "IF_SETANIM": {
+    "client": "simple",
+    "server": "v2-simple"
+  },
+  "IF_SETCLICKMASK": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "IF_SETCOLOUR": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "IF_SETEVENTS": {
+    "client": "simple",
+    "server": "v2-simple"
+  },
+  "IF_SETGRAPHIC": {
+    "client": "simple",
+    "server": "v2-simple"
+  },
+  "IF_SETHIDE": {
+    "client": "simple",
+    "server": "complex:computed-arg"
+  },
+  "IF_SETMODEL": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "IF_SETNPCHEAD": {
+    "client": "simple",
+    "server": "v2-simple"
+  },
+  "IF_SETOBJECT": {
+    "client": "simple",
+    "server": "complex:computed-arg"
+  },
+  "IF_SETPLAYERHEAD": {
+    "client": "simple",
+    "server": "v2-simple"
+  },
+  "IF_SETPLAYERHEAD_IGNOREWORN": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "IF_SETPLAYERHEAD_OTHER": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "IF_SETPLAYERMODEL_OTHER": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "IF_SETPLAYERMODEL_SELF": {
+    "client": "simple",
+    "server": "v2-simple"
+  },
+  "IF_SETPLAYERMODEL_SNAPSHOT": {
+    "client": "simple",
+    "server": "v2-simple"
+  },
+  "IF_SETPOSITION": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "IF_SETRECOL": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "IF_SETRETEX": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "IF_SETSCROLLPOS": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "IF_SETTARGETPARAM": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "IF_SETTEXT": {
+    "client": "simple",
+    "server": "complex:local"
+  },
+  "IF_SETTEXTANTIMACRO": {
+    "client": "simple",
+    "server": "complex:computed-arg"
+  },
+  "IF_SETTEXTFONT": {
+    "client": "simple",
+    "server": "v2-simple"
+  },
+  "IF_SET_HTTP_IMAGE": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "JCOINS_UPDATE": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "JS5_RELOAD": {
+    "client": "complex:no-reads",
+    "server": "complex:no_encode_override"
+  },
+  "LAST_LOGIN_INFO": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "LOBBY_APPEARANCE": {
+    "client": "simple",
+    "server": "complex:non-v1-codec:pdata"
+  },
+  "LOC_ADD_CHANGE": {
+    "client": "complex:no-reads",
+    "server": "v2-simple"
+  },
+  "LOC_ANIM": {
+    "client": "complex:no-reads",
+    "server": "complex:computed-arg"
+  },
+  "LOC_ANIM_SPECIFIC": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "LOC_CUSTOMISE": {
+    "client": "complex:no-reads",
+    "server": "complex:no_encode_override"
+  },
+  "LOC_DEL": {
+    "client": "complex:no-reads",
+    "server": "v2-simple"
+  },
+  "LOC_PREFETCH": {
+    "client": "complex:no-reads",
+    "server": "complex:no_encode_override"
+  },
+  "LOGOUT": {
+    "client": "simple",
+    "server": "v2-simple"
+  },
+  "LOGOUT_FULL": {
+    "client": "simple",
+    "server": "v2-simple"
+  },
+  "LOGOUT_TRANSFER": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "LOYALTY_UPDATE": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "MAP_ANIM": {
+    "client": "complex:no-reads",
+    "server": "complex:no_encode_override"
+  },
+  "MAP_PROJANIM": {
+    "client": "complex:no-reads",
+    "server": "complex:no_encode_override"
+  },
+  "MAP_PROJANIM_HALFSQ": {
+    "client": "complex:no-reads",
+    "server": "complex:no_encode_override"
+  },
+  "MESSAGE_CLANCHANNEL": {
+    "client": "simple",
+    "server": "complex:computed-arg"
+  },
+  "MESSAGE_CLANCHANNEL_SYSTEM": {
+    "client": "simple",
+    "server": "complex:computed-arg"
+  },
+  "MESSAGE_FRIENDCHANNEL": {
+    "client": "complex:read-under-control",
+    "server": "complex:local"
+  },
+  "MESSAGE_GAME": {
+    "client": "complex:read-under-control",
+    "server": "complex:local"
+  },
+  "MESSAGE_PLAYER_GROUP": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "MESSAGE_PRIVATE": {
+    "client": "complex:read-under-control",
+    "server": "complex:local"
+  },
+  "MESSAGE_PRIVATE_ECHO": {
+    "client": "simple",
+    "server": "complex:other"
+  },
+  "MESSAGE_PUBLIC": {
+    "client": "simple",
+    "server": "complex:other"
+  },
+  "MESSAGE_QUICKCHAT_CLANCHANNEL": {
+    "client": "simple",
+    "server": "complex:computed-arg"
+  },
+  "MESSAGE_QUICKCHAT_FRIENDCHAT": {
+    "client": "complex:read-under-control",
+    "server": "complex:local"
+  },
+  "MESSAGE_QUICKCHAT_PLAYER_GROUP": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "MESSAGE_QUICKCHAT_PRIVATE": {
+    "client": "complex:read-under-control",
+    "server": "complex:local"
+  },
+  "MESSAGE_QUICKCHAT_PRIVATE_ECHO": {
+    "client": "simple",
+    "server": "complex:non-v1-codec:pdata"
+  },
+  "MIDI_JINGLE": {
+    "client": "simple",
+    "server": "v2-simple"
+  },
+  "MIDI_SONG": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "MIDI_SONG_LOCATION": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "MIDI_SONG_STOP": {
+    "client": "complex:no-reads",
+    "server": "complex:no_encode_override"
+  },
+  "MINIMAP_TOGGLE": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "NO_TIMEOUT": {
+    "client": "complex:no-reads",
+    "server": "complex:no_encode_override"
+  },
+  "NPC_ANIM_SPECIFIC": {
+    "client": "complex:read-under-control",
+    "server": "complex:local"
+  },
+  "NPC_HEADICON_SPECIFIC": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "NPC_INFO": {
+    "client": "complex:no-reads",
+    "server": "complex:local"
+  },
+  "OBJ_ADD": {
+    "client": "complex:no-reads",
+    "server": "v2-simple"
+  },
+  "OBJ_COUNT": {
+    "client": "complex:no-reads",
+    "server": "complex:no_encode_override"
+  },
+  "OBJ_DEL": {
+    "client": "complex:no-reads",
+    "server": "v2-simple"
+  },
+  "OBJ_REVEAL": {
+    "client": "complex:no-reads",
+    "server": "complex:no_encode_override"
+  },
+  "PLAYER_GROUP_DELTA": {
+    "client": "complex:no-reads",
+    "server": "complex:no_encode_override"
+  },
+  "PLAYER_GROUP_FULL": {
+    "client": "complex:no-reads",
+    "server": "complex:no_encode_override"
+  },
+  "PLAYER_GROUP_VARPS": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "PLAYER_INFO": {
+    "client": "complex:no-reads",
+    "server": "complex:local"
+  },
+  "PLAYER_SNAPSHOT": {
+    "client": "simple",
+    "server": "complex:non-v1-codec:pdata"
+  },
+  "POINTLIGHT_COLOUR": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "POINTLIGHT_INTENSITY": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "PROJANIM_SPECIFIC": {
+    "client": "simple",
+    "server": "complex:computed-arg"
+  },
+  "REBUILD_NORMAL": {
+    "client": "complex:no-reads",
+    "server": "complex:conditional"
+  },
+  "REBUILD_REGION": {
+    "client": "complex:no-reads",
+    "server": "complex:local"
+  },
+  "REDUCE_NPC_ATTACK_PRIORITY": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "REDUCE_PLAYER_ATTACK_PRIORITY": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "REFLECTION_CHECKER": {
+    "client": "complex:no-reads",
+    "server": "complex:no_encode_override"
+  },
+  "RESET_ANIMS": {
+    "client": "complex:no-reads",
+    "server": "complex:no_encode_override"
+  },
+  "RESET_CLIENT_VARCACHE": {
+    "client": "complex:no-reads",
+    "server": "complex:no_encode_override"
+  },
+  "RUNCLIENTSCRIPT": {
+    "client": "complex:read-under-control",
+    "server": "complex:local"
+  },
+  "SEND_PING": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "SERVER_TICK_END": {
+    "client": "complex:no-reads",
+    "server": "complex:no_encode_override"
+  },
+  "SETDRAWORDER": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "SET_MAP_FLAG": {
+    "client": "simple",
+    "server": "simple"
+  },
+  "SET_MOVEACTION": {
+    "client": "complex:ternary-read",
+    "server": "complex:no_encode_override"
+  },
+  "SET_PLAYER_OP": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "SET_TARGET": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "SHOW_FACE_HERE": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "SOCIAL_NETWORK_LOGOUT": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "SONG_PRELOAD": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "SOUND_AREA": {
+    "client": "complex:no-reads",
+    "server": "complex:no_encode_override"
+  },
+  "SOUND_MIXBUSS_ADD": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "SOUND_MIXBUSS_SETLEVEL": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "SPOTANIM_SPECIFIC": {
+    "client": "simple",
+    "server": "simple"
+  },
+  "STORE_SERVERPERM_VARCS_ACK": {
+    "client": "complex:no-reads",
+    "server": "complex:no_encode_override"
+  },
+  "SYNTH_SOUND": {
+    "client": "simple",
+    "server": "v2-simple"
+  },
+  "TELEMETRY_CLEAR_GRID_VALUE": {
+    "client": "complex:read-under-control",
+    "server": "complex:no_encode_override"
+  },
+  "TELEMETRY_GRID_ADD_COLUMN": {
+    "client": "complex:read-under-control",
+    "server": "complex:no_encode_override"
+  },
+  "TELEMETRY_GRID_ADD_GROUP": {
+    "client": "complex:read-under-control",
+    "server": "complex:no_encode_override"
+  },
+  "TELEMETRY_GRID_ADD_ROW": {
+    "client": "complex:read-under-control",
+    "server": "complex:no_encode_override"
+  },
+  "TELEMETRY_GRID_FULL": {
+    "client": "complex:read-under-control",
+    "server": "complex:no_encode_override"
+  },
+  "TELEMETRY_GRID_MOVE_COLUMN": {
+    "client": "complex:read-under-control",
+    "server": "complex:no_encode_override"
+  },
+  "TELEMETRY_GRID_MOVE_ROW": {
+    "client": "complex:read-under-control",
+    "server": "complex:no_encode_override"
+  },
+  "TELEMETRY_GRID_REMOVE_COLUMN": {
+    "client": "complex:read-under-control",
+    "server": "complex:no_encode_override"
+  },
+  "TELEMETRY_GRID_REMOVE_GROUP": {
+    "client": "complex:read-under-control",
+    "server": "complex:no_encode_override"
+  },
+  "TELEMETRY_GRID_REMOVE_ROW": {
+    "client": "complex:read-under-control",
+    "server": "complex:no_encode_override"
+  },
+  "TELEMETRY_GRID_SET_ROW_PINNED": {
+    "client": "complex:read-under-control",
+    "server": "complex:no_encode_override"
+  },
+  "TELEMETRY_GRID_VALUES_DELTA": {
+    "client": "complex:read-under-control",
+    "server": "complex:no_encode_override"
+  },
+  "TEXT_COORD": {
+    "client": "complex:no-reads",
+    "server": "complex:no_encode_override"
+  },
+  "TRIGGER_ONDIALOGABORT": {
+    "client": "complex:no-reads",
+    "server": "complex:no_encode_override"
+  },
+  "UPDATE_DOB": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "UPDATE_FRIENDCHAT_CHANNEL_FULL": {
+    "client": "complex:read-under-control",
+    "server": "complex:conditional"
+  },
+  "UPDATE_FRIENDCHAT_CHANNEL_SINGLEUSER": {
+    "client": "complex:read-under-control",
+    "server": "complex:local"
+  },
+  "UPDATE_FRIENDLIST": {
+    "client": "complex:read-under-control",
+    "server": "complex:loop"
+  },
+  "UPDATE_IGNORELIST": {
+    "client": "complex:read-under-control",
+    "server": "complex:loop"
+  },
+  "UPDATE_INV_FULL": {
+    "client": "complex:read-under-control",
+    "server": "complex:local"
+  },
+  "UPDATE_INV_PARTIAL": {
+    "client": "complex:read-under-control",
+    "server": "complex:array-param-no-default"
+  },
+  "UPDATE_INV_STOP_TRANSMIT": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "UPDATE_REBOOT_TIMER": {
+    "client": "complex:read-under-control",
+    "server": "simple"
+  },
+  "UPDATE_RUNENERGY": {
+    "client": "simple",
+    "server": "simple"
+  },
+  "UPDATE_RUNWEIGHT": {
+    "client": "simple",
+    "server": "v2-simple"
+  },
+  "UPDATE_SITESETTINGS": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "UPDATE_STAT": {
+    "client": "simple",
+    "server": "simple"
+  },
+  "UPDATE_STOCKMARKET_SLOT": {
+    "client": "complex:read-in-condition",
+    "server": "complex:computed-arg"
+  },
+  "UPDATE_UID192": {
+    "client": "complex:no-reads",
+    "server": "complex:no_encode_override"
+  },
+  "UPDATE_ZONE_FULL_170": {
+    "client": "no_client_branch",
+    "server": "complex:no_encode_override"
+  },
+  "UPDATE_ZONE_FULL_FOLLOWS": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "UPDATE_ZONE_PARTIAL_51": {
+    "client": "no_client_branch",
+    "server": "complex:no_encode_override"
+  },
+  "UPDATE_ZONE_PARTIAL_ENCLOSED": {
+    "client": "complex:read-under-control",
+    "server": "complex:no_encode_override"
+  },
+  "UPDATE_ZONE_PARTIAL_FOLLOWS": {
+    "client": "simple",
+    "server": "v2-simple"
+  },
+  "URL_OPEN": {
+    "client": "simple",
+    "server": "complex:computed-arg"
+  },
+  "VARBIT_LARGE": {
+    "client": "simple",
+    "server": "simple"
+  },
+  "VARBIT_SMALL": {
+    "client": "simple",
+    "server": "simple"
+  },
+  "VARCLAN": {
+    "client": "complex:no-reads",
+    "server": "complex:no_encode_override"
+  },
+  "VARCLAN_DISABLE": {
+    "client": "complex:no-reads",
+    "server": "complex:other"
+  },
+  "VARCLAN_ENABLE": {
+    "client": "complex:no-reads",
+    "server": "complex:other"
+  },
+  "VARP_LARGE": {
+    "client": "simple",
+    "server": "simple"
+  },
+  "VARP_SMALL": {
+    "client": "simple",
+    "server": "simple"
+  },
+  "VORBIS_PRELOAD_SOUNDS": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "VORBIS_PRELOAD_SOUND_GROUP": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "VORBIS_SOUND": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "VORBIS_SOUND_GROUP": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "VORBIS_SOUND_GROUP_START": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "VORBIS_SOUND_GROUP_STOP": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "VORBIS_SPEECH_SOUND": {
+    "client": "simple",
+    "server": "complex:no_encode_override"
+  },
+  "VORBIS_SPEECH_STOP": {
+    "client": "complex:no-reads",
+    "server": "complex:no_encode_override"
+  },
+  "WORLDLIST_FETCH_REPLY": {
+    "client": "simple",
+    "server": "complex:other"
+  }
+}

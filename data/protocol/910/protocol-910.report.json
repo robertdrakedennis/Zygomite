@@ -1,0 +1,17 @@
+{
+  "schema": "protocol-report/v1",
+  "summary": {
+    "errors": 0,
+    "warnings": 0,
+    "infos": 1
+  },
+  "findings": [
+    {
+      "check": "P5",
+      "severity": "info",
+      "prot": "login",
+      "kind": "info",
+      "message": "LoginProt: client size is vacuous — has_size_field=false, ctor_assigns_size=false (constructor: public LoginProt(int id, int size) { this.id = id; }); schema sizes taken from declaration literals, Java parity test skips the size assertion"
+    }
+  ]
+}

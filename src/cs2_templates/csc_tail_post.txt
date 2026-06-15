@@ -1,0 +1,50 @@
+ };
+	}
+
+	@ObfuscatedName("ss.bcv")
+	private static String[] opcodeNames;
+
+	@ObfuscatedName("ss.bcw")
+	public static String getName(int opcode) {
+		if (opcodeNames == null) {
+			initNames();
+		}
+		if (opcode < 0 || opcode >= opcodeNames.length) {
+			return "unknown_" + opcode;
+		}
+		String name = opcodeNames[opcode];
+		return name != null ? name : "unknown_" + opcode;
+	}
+
+	@ObfuscatedName("ss.bcx")
+	private static synchronized void initNames() {
+		if (opcodeNames != null) {
+			return;
+		}
+		ClientScriptCommand[] commands = values();
+		opcodeNames = new String[commands.length];
+		try {
+			for (java.lang.reflect.Field field : ClientScriptCommand.class.getDeclaredFields()) {
+				if (field.getType() == ClientScriptCommand.class) {
+					try {
+						ClientScriptCommand cmd = (ClientScriptCommand) field.get(null);
+						if (cmd != null && cmd.index >= 0 && cmd.index < opcodeNames.length) {
+							opcodeNames[cmd.index] = field.getName();
+						}
+					} catch (IllegalAccessException iae) {
+					}
+				}
+			}
+		} catch (Exception ex) {
+		}
+	}
+
+	public ClientScriptCommand(int index, boolean isLargeOperand) {
+		this.index = index;
+		this.isLargeOperand = isLargeOperand;
+	}
+
+	public ClientScriptCommand(int index) {
+		this(index, false);
+	}
+}

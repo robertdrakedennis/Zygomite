@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+ab_glyph = "0.2.32"
 anyhow = "1.0.100"
 bzip2 = "0.6.1"
 clap = { version = "4.5.53", features = ["derive"] }

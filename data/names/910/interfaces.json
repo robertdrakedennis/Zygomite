@@ -1,0 +1,525 @@
+{
+  "1048": {
+    "name": "INVENTION_INFORMATION"
+  },
+  "105": {
+    "name": "GRAND_EXCHANGE"
+  },
+  "107": {
+    "name": "GRAND_EXCHANGE_INVENTORY"
+  },
+  "109": {
+    "name": "GRAND_EXCHANGE_COLLECTION_BOX"
+  },
+  "1092": {
+    "name": "LODESTONE_NETWORK"
+  },
+  "11": {
+    "name": "BANK_DEPOSIT_BOX"
+  },
+  "1109": {
+    "name": "SPELLBOOK_SELECTION"
+  },
+  "1110": {
+    "name": "ROOT_INTERFACE_KEY_16"
+  },
+  "1184": {
+    "name": "NPC_CHAT_DIALOGUE"
+  },
+  "1186": {
+    "name": "BASIC_CHAT_DIALOGUE"
+  },
+  "1191": {
+    "name": "PLAYER_CHAT_DIALOGUE"
+  },
+  "1207": {
+    "name": "NECRO_BOOK_MENU"
+  },
+  "1211": {
+    "name": "NECRO_BOOK_PRIMARY"
+  },
+  "1213": {
+    "name": "ROOT_INTERFACE_KEY_1026"
+  },
+  "1216": {
+    "components": {
+      "1": "FIREWORKS_LAYER",
+      "14": "LEVEL_DIGIT_A",
+      "15": "LEVEL_DIGIT_B",
+      "16": "LEVEL_DIGIT_C",
+      "2": "MODEL_A",
+      "3": "MODEL_B",
+      "4": "MODEL_C",
+      "5": "BANNER_LAYER"
+    },
+    "name": "LEVEL_UP_OVERLAY"
+  },
+  "1218": {
+    "name": "PRICE_CHECKER"
+  },
+  "1265": {
+    "name": "GENERAL_STORE"
+  },
+  "13": {
+    "name": "BANK_PIN_ENTRY"
+  },
+  "1311": {
+    "name": "CUSTOMISATIONS"
+  },
+  "1312": {
+    "name": "INVENTION_MANUFACTURE_LIST"
+  },
+  "137": {
+    "name": "ROOT_INTERFACE_KEY_18"
+  },
+  "1387": {
+    "name": "DIANGO_ITEM_RETRIEVAL"
+  },
+  "14": {
+    "name": "BANK_PIN_SETTINGS"
+  },
+  "1416": {
+    "name": "ROOT_INTERFACE_KEY_10"
+  },
+  "1417": {
+    "name": "ROOT_INTERFACE_KEY_11"
+  },
+  "1426": {
+    "name": "SETTINGS_MAIN"
+  },
+  "1427": {
+    "name": "ROOT_INTERFACE_KEY_15"
+  },
+  "1430": {
+    "name": "ACTION_BAR"
+  },
+  "1431": {
+    "name": "HERO_MENU"
+  },
+  "1433": {
+    "name": "OPTIONS_SHELL"
+  },
+  "1434": {
+    "name": "DEFENCE_ABILITIES"
+  },
+  "1435": {
+    "name": "MELEE_ABILITIES"
+  },
+  "1436": {
+    "name": "ACTION_BAR_MENU"
+  },
+  "1437": {
+    "name": "MAGIC_ABILITIES"
+  },
+  "1438": {
+    "name": "MAGIC_SPELL_LIST"
+  },
+  "1439": {
+    "name": "PRAYER_ABILITIES"
+  },
+  "1440": {
+    "name": "MAGIC_BOOK_SELECTION"
+  },
+  "1444": {
+    "name": "CONTROLS_SETTINGS"
+  },
+  "1445": {
+    "name": "RANGED_ABILITIES"
+  },
+  "1446": {
+    "name": "EQUIPMENT_DETAILS_PANEL"
+  },
+  "1448": {
+    "name": "OPTIONS_MENU"
+  },
+  "1449": {
+    "name": "DEFENCE_STATUS_PANEL"
+  },
+  "1450": {
+    "name": "MELEE_BOOK_MENU"
+  },
+  "1451": {
+    "name": "MAGIC_REQUIREMENTS_TOOLTIP"
+  },
+  "1452": {
+    "name": "RANGED_BOOK_PRIMARY"
+  },
+  "1454": {
+    "name": "COMBAT_STYLE_OVERVIEW"
+  },
+  "1456": {
+    "name": "RANGED_BOOK_MENU"
+  },
+  "1457": {
+    "name": "PRAYER_BOOK_MENU"
+  },
+  "1458": {
+    "name": "PRAYER_BOOK"
+  },
+  "1459": {
+    "name": "MAGIC_BOOK_MENU"
+  },
+  "1460": {
+    "name": "MELEE_BOOK_PRIMARY"
+  },
+  "1461": {
+    "name": "MAGIC_BOOK_PRIMARY"
+  },
+  "1462": {
+    "name": "WORN_EQUIPMENT_MENU"
+  },
+  "1463": {
+    "name": "EQUIPMENT_COMPANION_PANEL"
+  },
+  "1464": {
+    "name": "WORN_EQUIPMENT"
+  },
+  "1465": {
+    "name": "HERO_PANEL"
+  },
+  "1466": {
+    "name": "ROOT_INTERFACE_KEY_0"
+  },
+  "1467": {
+    "name": "ROOT_INTERFACE_KEY_19"
+  },
+  "1470": {
+    "name": "ROOT_INTERFACE_KEY_22"
+  },
+  "1471": {
+    "name": "ROOT_INTERFACE_KEY_21"
+  },
+  "1472": {
+    "name": "ROOT_INTERFACE_KEY_20"
+  },
+  "1473": {
+    "name": "INVENTORY"
+  },
+  "1474": {
+    "name": "INVENTORY_MENU"
+  },
+  "1475": {
+    "name": "INTERFACE_LAYOUT_EDITOR"
+  },
+  "1477": {
+    "components": {
+      "854": "LEVEL_UP_OVERLAY_HOST"
+    },
+    "name": "FIXED_WINDOW"
+  },
+  "1482": {
+    "name": "GAME_VIEW"
+  },
+  "1483": {
+    "name": "ROOT_INTERFACE_KEY_1010"
+  },
+  "1488": {
+    "name": "COMBAT_TARGET"
+  },
+  "1505": {
+    "name": "PRAYER_ORB"
+  },
+  "1519": {
+    "name": "ROOT_INTERFACE_KEY_27"
+  },
+  "1529": {
+    "name": "ROOT_INTERFACE_KEY_25"
+  },
+  "1530": {
+    "name": "INVENTION_DISCOVERY_RESULT"
+  },
+  "1588": {
+    "name": "ROOT_INTERFACE_KEY_28"
+  },
+  "1607": {
+    "name": "EXTRAS_PANEL"
+  },
+  "1616": {
+    "name": "ACTION_BAR_OVERLAY"
+  },
+  "1621": {
+    "name": "COSTUME_ROOM_STORAGE"
+  },
+  "1638": {
+    "name": "TASK_JOURNAL"
+  },
+  "1639": {
+    "name": "SLAYER_COUNTER"
+  },
+  "1666": {
+    "name": "ACHIEVEMENTS_PANEL"
+  },
+  "1678": {
+    "name": "ROOT_INTERFACE_KEY_29"
+  },
+  "1680": {
+    "name": "ORB_HUD"
+  },
+  "1708": {
+    "name": "INVENTION_DISCOVERY"
+  },
+  "1709": {
+    "name": "INVENTION_MATERIAL_BAG"
+  },
+  "1712": {
+    "name": "INVENTION_ADD_MATERIALS"
+  },
+  "1713": {
+    "name": "INVENTION_CHECK_PERKS"
+  },
+  "1719": {
+    "name": "GRAND_EXCHANGE_ITEM_SETS"
+  },
+  "1720": {
+    "name": "FRIENDS_CHAT_LIST"
+  },
+  "1721": {
+    "name": "GRAND_EXCHANGE_ITEM_SETS_INVENTORY"
+  },
+  "182": {
+    "name": "ROOT_INTERFACE_KEY_1019"
+  },
+  "1832": {
+    "name": "WARDROBE_PRESET_BASE"
+  },
+  "1840": {
+    "name": "PLAYER_PREVIEW_MODEL"
+  },
+  "1841": {
+    "name": "PLAYER_PREVIEW_CONTAINER"
+  },
+  "1843": {
+    "name": "WARDROBE"
+  },
+  "1847": {
+    "name": "BUFF_BAR"
+  },
+  "187": {
+    "name": "MUSIC_PLAYER"
+  },
+  "1880": {
+    "name": "DEFENCE_BOOK_PRIMARY"
+  },
+  "1881": {
+    "name": "MELEE_BOOK_VARIANT_A"
+  },
+  "1882": {
+    "name": "CONSTITUTION_BOOK"
+  },
+  "1883": {
+    "name": "DEFENCE_BOOK_MENU"
+  },
+  "1884": {
+    "name": "MAGIC_BOOK_A"
+  },
+  "1885": {
+    "name": "MAGIC_BOOK_B"
+  },
+  "1886": {
+    "name": "MAGIC_BOOK_C"
+  },
+  "1887": {
+    "name": "MAGIC_BOOK_D"
+  },
+  "1888": {
+    "name": "MELEE_BOOK_VARIANT_B"
+  },
+  "1890": {
+    "name": "PRAYER_PRESET_OVERLAY"
+  },
+  "190": {
+    "name": "TASK_LIST_PANEL"
+  },
+  "1904": {
+    "name": "ROOT_INTERFACE_KEY_31"
+  },
+  "1919": {
+    "name": "MINIGAME_HUD"
+  },
+  "1920": {
+    "name": "HERO_PANEL_OVERLAY"
+  },
+  "1944": {
+    "name": "TOOLBELT"
+  },
+  "228": {
+    "name": "ROOT_INTERFACE_KEY_24"
+  },
+  "231": {
+    "name": "ROOT_INTERFACE_KEY_26"
+  },
+  "284": {
+    "name": "ROOT_INTERFACE_KEY_1009"
+  },
+  "291": {
+    "name": "ROOT_INTERFACE_KEY_1038"
+  },
+  "320": {
+    "name": "EQUIPMENT_STATS"
+  },
+  "34": {
+    "name": "BACKPACK_PANEL"
+  },
+  "365": {
+    "name": "GAME_SETTINGS"
+  },
+  "389": {
+    "name": "GRAND_EXCHANGE_ITEM_SEARCH"
+  },
+  "429": {
+    "name": "AUDIO_SETTINGS"
+  },
+  "464": {
+    "name": "ROOT_INTERFACE_KEY_23"
+  },
+  "477": {
+    "name": "ARCHAEOLOGY_MATERIAL_STORAGE_INFO"
+  },
+  "487": {
+    "name": "METAL_BANK"
+  },
+  "517": {
+    "components": {
+      "100": "DEFAULT_AMOUNT_CUSTOM",
+      "108": "DEFAULT_AMOUNT_CUSTOM_VALUE",
+      "112": "VISIBLE_QUICK_PRESET_BUTTONS",
+      "116": "PLACEHOLDER_ACTIONS",
+      "120": "WITHDRAW_AS_NOTES_TOGGLE",
+      "124": "OPEN_COSTUME_ROOM",
+      "127": "OPEN_DIANGO",
+      "130": "OPEN_BANK_PIN_SETTINGS",
+      "133": "TRANSFER_TAB",
+      "134": "PRESETS_TAB",
+      "14": "SIDE_INVENTORY_LEGACY",
+      "141": "TAB_SCROLL_UP",
+      "144": "TAB_SCROLL_DOWN",
+      "147": "TAB_STRIP",
+      "15": "SIDE_INVENTORY",
+      "169": "TAB_DROP_TARGET",
+      "170": "TAB_ICON",
+      "171": "TAB_INSERT_TARGET",
+      "184": "ITEM_GRID_LEGACY",
+      "202": "ITEM_GRID",
+      "204": "TAB_CUSTOM_NAME_DROPDOWN",
+      "206": "TAB_LABEL_UPPER",
+      "207": "TAB_CUSTOM_ICON_GRID",
+      "209": "TAB_CUSTOM_CLEAR_ICON",
+      "218": "ITEM_INSERT_GUTTER",
+      "219": "SEARCH",
+      "220": "CANCEL_SEARCH_A",
+      "221": "CANCEL_SEARCH_B",
+      "225": "FILTER_DROPDOWN",
+      "232": "CLEAR_FILTER",
+      "241": "CLEAR_FILTER_LEGACY",
+      "247": "PRESET_LIST",
+      "248": "PRESET_ROW_BACKPACK_TOGGLE",
+      "249": "PRESET_ROW_WORN_TOGGLE",
+      "250": "PRESET_ROW_FAMILIAR_TOGGLE",
+      "27": "WORN_INVENTORY_LEGACY",
+      "274": "PRESET_BACKPACK_TOGGLE",
+      "276": "PRESET_WORN_TOGGLE",
+      "278": "PRESET_FAMILIAR_TOGGLE",
+      "28": "WORN_INVENTORY",
+      "280": "PRESET_BACKPACK_ITEMS",
+      "281": "PRESET_SELECT_DROPDOWN",
+      "282": "PRESET_OVERWRITE",
+      "285": "PRESET_EXACT_MATCHING_TOGGLE",
+      "289": "PRESET_SETTINGS_CLOSE",
+      "29": "TOGGLE_EQUIPMENT_STATS",
+      "290": "PRESET_WORN_ITEMS",
+      "291": "CLOSE",
+      "293": "HELP",
+      "306": "X_INPUT_CANCEL",
+      "33": "FAMILIAR_INVENTORY_LEGACY",
+      "35": "FAMILIAR_INVENTORY",
+      "37": "DEPOSIT_ALL_INVENTORY",
+      "40": "DEPOSIT_ALL_WORN",
+      "43": "DEPOSIT_ALL_FAMILIAR",
+      "46": "DEPOSIT_ALL_MONEY_POUCH",
+      "51": "AUTO_TAB_SWITCHING_TOGGLE",
+      "55": "SIDE_INVENTORY_EQUIPMENT",
+      "59": "SIDE_INVENTORY_FAMILIAR",
+      "63": "PRESET_QUICK_SELECT",
+      "64": "PRESET_BOB_QUICK_SELECT",
+      "69": "PRESET_LOAD_BACKPACK",
+      "72": "PRESET_LOAD_WORN",
+      "75": "PRESET_LOAD_FAMILIAR",
+      "78": "PRESET_LOAD",
+      "80": "PRESET_RETURN_TO_BANK",
+      "87": "DEFAULT_AMOUNT_ONE",
+      "90": "DEFAULT_AMOUNT_FIVE",
+      "93": "DEFAULT_AMOUNT_TEN",
+      "97": "DEFAULT_AMOUNT_ALL"
+    },
+    "name": "BANK"
+  },
+  "550": {
+    "name": "ROOT_INTERFACE_KEY_14"
+  },
+  "557": {
+    "name": "ROOT_INTERFACE_KEY_1020"
+  },
+  "568": {
+    "name": "CHAT_BOX"
+  },
+  "590": {
+    "name": "ROOT_INTERFACE_KEY_9"
+  },
+  "635": {
+    "name": "XP_COUNTER"
+  },
+  "651": {
+    "name": "GRAND_EXCHANGE_COLLECT_ALL"
+  },
+  "660": {
+    "name": "ARCHAEOLOGY_MATERIAL_STORAGE"
+  },
+  "667": {
+    "name": "ARCHAEOLOGY_DIG_SITE_MAP"
+  },
+  "671": {
+    "name": "BOB_BANK"
+  },
+  "685": {
+    "name": "ARCHAEOLOGY_JOURNAL"
+  },
+  "691": {
+    "name": "RELIC_POWERS"
+  },
+  "1224": {
+    "name": "RITUAL_SELECTION"
+  },
+  "71": {
+    "name": "ARCHAEOLOGY_ANACHRONIA_EXCAVATION_MAP"
+  },
+  "742": {
+    "name": "GAME_SETTINGS_DROPDOWN"
+  },
+  "745": {
+    "name": "ROOT_INTERFACE_KEY_1014"
+  },
+  "91": {
+    "name": "DUNGEONEERING_PARTY"
+  },
+  "917": {
+    "name": "STATS_SUMMARY"
+  },
+  "930": {
+    "name": "TASK_SYSTEM"
+  },
+  "938": {
+    "name": "DUNGEONEERING_COMPLEXITY"
+  },
+  "947": {
+    "name": "DUNGEONEERING_FLOOR_SELECT"
+  },
+  "949": {
+    "name": "DUNGEONEERING_INVITE"
+  },
+  "988": {
+    "name": "DUNGEONEERING_OVERLAY"
+  },
+  "993": {
+    "name": "RING_OF_KINSHIP"
+  }
+}

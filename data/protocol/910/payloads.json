@@ -1,0 +1,1045 @@
+{
+  "schema": "protocol-payloads/v2",
+  "packets": {
+    "CHAT_FILTER_SETTINGS": {
+      "params": [
+        {
+          "name": "publicFilter",
+          "type": "int"
+        },
+        {
+          "name": "tradeFilter",
+          "type": "int"
+        }
+      ],
+      "fields": [
+        {
+          "codec": "p1_alt2",
+          "arg": "tradeFilter & 0xff"
+        },
+        {
+          "codec": "p1_alt2",
+          "arg": "publicFilter & 0xff"
+        }
+      ],
+      "client_reads": [
+        "g1_alt2",
+        "g1_alt2"
+      ]
+    },
+    "CHAT_FILTER_SETTINGS_PRIVATECHAT": {
+      "params": [
+        {
+          "name": "value",
+          "type": "int"
+        }
+      ],
+      "fields": [
+        {
+          "codec": "p1",
+          "arg": "value & 0xff"
+        }
+      ],
+      "client_reads": [
+        "g1"
+      ]
+    },
+    "CLEAR_PLAYER_SNAPSHOT": {
+      "params": [
+        {
+          "name": "snapshotId",
+          "type": "int"
+        }
+      ],
+      "fields": [
+        {
+          "codec": "p1",
+          "arg": "snapshotId & 0xff"
+        }
+      ],
+      "client_reads": [
+        "g1"
+      ]
+    },
+    "CLIENT_SETVARCBIT_LARGE": {
+      "params": [
+        {
+          "name": "id",
+          "type": "int"
+        },
+        {
+          "name": "value",
+          "type": "int"
+        }
+      ],
+      "fields": [
+        {
+          "codec": "p2_alt2",
+          "arg": "id"
+        },
+        {
+          "codec": "p4_alt1",
+          "arg": "value"
+        }
+      ],
+      "client_reads": [
+        "g2_alt2",
+        "g4_alt1"
+      ]
+    },
+    "CLIENT_SETVARCBIT_SMALL": {
+      "params": [
+        {
+          "name": "id",
+          "type": "int"
+        },
+        {
+          "name": "value",
+          "type": "int"
+        }
+      ],
+      "fields": [
+        {
+          "codec": "p2",
+          "arg": "id"
+        },
+        {
+          "codec": "p1_alt1",
+          "arg": "value"
+        }
+      ],
+      "client_reads": [
+        "g2",
+        "g1b_alt1"
+      ]
+    },
+    "CLIENT_SETVARCSTR_LARGE": {
+      "params": [
+        {
+          "name": "id",
+          "type": "int"
+        },
+        {
+          "name": "value",
+          "type": "string"
+        }
+      ],
+      "fields": [
+        {
+          "codec": "p2",
+          "arg": "id"
+        },
+        {
+          "codec": "pjstr",
+          "arg": "value"
+        }
+      ],
+      "client_reads": [
+        "g2",
+        "gjstr"
+      ]
+    },
+    "CLIENT_SETVARCSTR_SMALL": {
+      "params": [
+        {
+          "name": "id",
+          "type": "int"
+        },
+        {
+          "name": "value",
+          "type": "string"
+        }
+      ],
+      "fields": [
+        {
+          "codec": "p2",
+          "arg": "id"
+        },
+        {
+          "codec": "pjstr",
+          "arg": "value"
+        }
+      ],
+      "client_reads": [
+        "g2",
+        "gjstr"
+      ]
+    },
+    "CLIENT_SETVARC_LARGE": {
+      "params": [
+        {
+          "name": "id",
+          "type": "int"
+        },
+        {
+          "name": "value",
+          "type": "int"
+        }
+      ],
+      "fields": [
+        {
+          "codec": "p4_alt1",
+          "arg": "value"
+        },
+        {
+          "codec": "p2_alt2",
+          "arg": "id"
+        }
+      ],
+      "client_reads": [
+        "g4_alt1",
+        "g2_alt2"
+      ]
+    },
+    "CLIENT_SETVARC_SMALL": {
+      "params": [
+        {
+          "name": "id",
+          "type": "int"
+        },
+        {
+          "name": "value",
+          "type": "int"
+        }
+      ],
+      "fields": [
+        {
+          "codec": "p1_alt3",
+          "arg": "value"
+        },
+        {
+          "codec": "p2",
+          "arg": "id"
+        }
+      ],
+      "client_reads": [
+        "g1b_alt3",
+        "g2"
+      ]
+    },
+    "IF_CLOSESUB": {
+      "params": [
+        {
+          "name": "parentUid",
+          "type": "int"
+        }
+      ],
+      "fields": [
+        {
+          "codec": "p4_alt2",
+          "arg": "parentUid"
+        }
+      ],
+      "client_reads": [
+        "g4_alt2"
+      ]
+    },
+    "IF_MOVESUB": {
+      "params": [
+        {
+          "name": "fromParentUid",
+          "type": "int"
+        },
+        {
+          "name": "toParentUid",
+          "type": "int"
+        }
+      ],
+      "fields": [
+        {
+          "codec": "p4_alt2",
+          "arg": "fromParentUid"
+        },
+        {
+          "codec": "p4_alt2",
+          "arg": "toParentUid"
+        }
+      ],
+      "client_reads": [
+        "g4_alt2",
+        "g4_alt2"
+      ]
+    },
+    "IF_OPENSUB": {
+      "params": [
+        {
+          "name": "topLevelInterfaceId",
+          "type": "int"
+        },
+        {
+          "name": "component",
+          "type": "int"
+        },
+        {
+          "name": "subInterfaceId",
+          "type": "int"
+        },
+        {
+          "name": "type",
+          "type": "int"
+        },
+        {
+          "name": "key",
+          "type": "int[]",
+          "default": "[0, 0, 0, 0]"
+        }
+      ],
+      "fields": [
+        {
+          "codec": "p4_alt2",
+          "arg": "key[2]"
+        },
+        {
+          "codec": "p4_alt1",
+          "arg": "(topLevelInterfaceId << 16) | component"
+        },
+        {
+          "codec": "p1_alt2",
+          "arg": "type"
+        },
+        {
+          "codec": "p4",
+          "arg": "key[3]"
+        },
+        {
+          "codec": "p2",
+          "arg": "subInterfaceId"
+        },
+        {
+          "codec": "p4_alt2",
+          "arg": "key[1]"
+        },
+        {
+          "codec": "p4_alt2",
+          "arg": "key[0]"
+        }
+      ],
+      "client_reads": [
+        "g4_alt2",
+        "g4_alt1",
+        "g1_alt2",
+        "g4s",
+        "g2",
+        "g4_alt2",
+        "g4_alt2"
+      ]
+    },
+    "IF_OPENTOP": {
+      "params": [
+        {
+          "name": "topLevelInterfaceId",
+          "type": "int"
+        },
+        {
+          "name": "type",
+          "type": "int",
+          "default": "0"
+        },
+        {
+          "name": "key",
+          "type": "int[]",
+          "default": "[0, 0, 0, 0]"
+        }
+      ],
+      "fields": [
+        {
+          "codec": "p4_alt2",
+          "arg": "key[3]"
+        },
+        {
+          "codec": "p4_alt1",
+          "arg": "key[2]"
+        },
+        {
+          "codec": "p4_alt2",
+          "arg": "key[0]"
+        },
+        {
+          "codec": "p4",
+          "arg": "key[1]"
+        },
+        {
+          "codec": "p1",
+          "arg": "type"
+        },
+        {
+          "codec": "p2_alt3",
+          "arg": "topLevelInterfaceId"
+        }
+      ],
+      "client_reads": [
+        "g4_alt2",
+        "g4_alt1",
+        "g4_alt2",
+        "g4s",
+        "g1",
+        "g2_alt3"
+      ]
+    },
+    "IF_SETANIM": {
+      "params": [
+        {
+          "name": "interfaceId",
+          "type": "int"
+        },
+        {
+          "name": "componentId",
+          "type": "int"
+        },
+        {
+          "name": "animationId",
+          "type": "int"
+        }
+      ],
+      "fields": [
+        {
+          "codec": "p4",
+          "arg": "(interfaceId << 16) | componentId"
+        },
+        {
+          "codec": "p4_alt3",
+          "arg": "animationId"
+        }
+      ],
+      "client_reads": [
+        "g4s",
+        "g4_alt3"
+      ]
+    },
+    "IF_SETEVENTS": {
+      "params": [
+        {
+          "name": "interfaceId",
+          "type": "int"
+        },
+        {
+          "name": "component",
+          "type": "int"
+        },
+        {
+          "name": "fromSlot",
+          "type": "int"
+        },
+        {
+          "name": "toSlot",
+          "type": "int"
+        },
+        {
+          "name": "settings",
+          "type": "int"
+        }
+      ],
+      "fields": [
+        {
+          "codec": "p2_alt2",
+          "arg": "fromSlot"
+        },
+        {
+          "codec": "p4",
+          "arg": "settings"
+        },
+        {
+          "codec": "p2_alt3",
+          "arg": "toSlot"
+        },
+        {
+          "codec": "p4_alt1",
+          "arg": "(interfaceId << 16) | component"
+        }
+      ],
+      "client_reads": [
+        "g2_alt2",
+        "g4s",
+        "g2_alt3",
+        "g4_alt1"
+      ]
+    },
+    "IF_SETGRAPHIC": {
+      "params": [
+        {
+          "name": "interfaceId",
+          "type": "int"
+        },
+        {
+          "name": "componentId",
+          "type": "int"
+        },
+        {
+          "name": "spriteId",
+          "type": "int"
+        }
+      ],
+      "fields": [
+        {
+          "codec": "p4_alt2",
+          "arg": "spriteId"
+        },
+        {
+          "codec": "p4_alt1",
+          "arg": "(interfaceId << 16) | componentId"
+        }
+      ],
+      "client_reads": [
+        "g4_alt2",
+        "g4_alt1"
+      ]
+    },
+    "IF_SETNPCHEAD": {
+      "params": [
+        {
+          "name": "interfaceId",
+          "type": "int"
+        },
+        {
+          "name": "componentId",
+          "type": "int"
+        },
+        {
+          "name": "npcId",
+          "type": "int"
+        }
+      ],
+      "fields": [
+        {
+          "codec": "p4_alt3",
+          "arg": "(interfaceId << 16) | componentId"
+        },
+        {
+          "codec": "p4_alt2",
+          "arg": "npcId"
+        }
+      ],
+      "client_reads": [
+        "g4_alt3",
+        "g4_alt2"
+      ]
+    },
+    "IF_SETPLAYERHEAD": {
+      "params": [
+        {
+          "name": "interfaceId",
+          "type": "int"
+        },
+        {
+          "name": "componentId",
+          "type": "int"
+        }
+      ],
+      "fields": [
+        {
+          "codec": "p4_alt1",
+          "arg": "(interfaceId << 16) | componentId"
+        }
+      ],
+      "client_reads": [
+        "g4_alt1"
+      ]
+    },
+    "IF_SETPLAYERMODEL_SELF": {
+      "params": [
+        {
+          "name": "interfaceId",
+          "type": "int"
+        },
+        {
+          "name": "componentId",
+          "type": "int"
+        }
+      ],
+      "fields": [
+        {
+          "codec": "p4",
+          "arg": "(interfaceId << 16) | componentId"
+        }
+      ],
+      "client_reads": [
+        "g4s"
+      ]
+    },
+    "IF_SETPLAYERMODEL_SNAPSHOT": {
+      "params": [
+        {
+          "name": "interfaceId",
+          "type": "int"
+        },
+        {
+          "name": "componentId",
+          "type": "int"
+        },
+        {
+          "name": "snapshotId",
+          "type": "int"
+        }
+      ],
+      "fields": [
+        {
+          "codec": "p4_alt3",
+          "arg": "(interfaceId << 16) | componentId"
+        },
+        {
+          "codec": "p1_alt1",
+          "arg": "snapshotId & 0xff"
+        }
+      ],
+      "client_reads": [
+        "g4_alt3",
+        "g1_alt1"
+      ]
+    },
+    "IF_SETTEXTFONT": {
+      "params": [
+        {
+          "name": "interfaceId",
+          "type": "int"
+        },
+        {
+          "name": "componentId",
+          "type": "int"
+        },
+        {
+          "name": "fontId",
+          "type": "int"
+        },
+        {
+          "name": "_shadowed",
+          "type": "boolean",
+          "default": "false"
+        }
+      ],
+      "fields": [
+        {
+          "codec": "p4_alt1",
+          "arg": "(interfaceId << 16) | componentId"
+        },
+        {
+          "codec": "p4_alt3",
+          "arg": "fontId & 0xffffffff"
+        }
+      ],
+      "client_reads": [
+        "g4_alt1",
+        "g4_alt3"
+      ]
+    },
+    "LOGOUT": {
+      "params": [
+        {
+          "name": "reason",
+          "type": "int",
+          "default": "0"
+        }
+      ],
+      "fields": [
+        {
+          "codec": "p1",
+          "arg": "reason & 0xff"
+        }
+      ],
+      "client_reads": [
+        "g1"
+      ]
+    },
+    "LOGOUT_FULL": {
+      "params": [
+        {
+          "name": "reason",
+          "type": "int",
+          "default": "0"
+        }
+      ],
+      "fields": [
+        {
+          "codec": "p1",
+          "arg": "reason & 0xff"
+        }
+      ],
+      "client_reads": [
+        "g1"
+      ]
+    },
+    "MIDI_JINGLE": {
+      "params": [
+        {
+          "name": "jingleId",
+          "type": "int"
+        },
+        {
+          "name": "volume",
+          "type": "int",
+          "default": "255"
+        }
+      ],
+      "fields": [
+        {
+          "codec": "p1_alt1",
+          "arg": "volume & 0xff"
+        },
+        {
+          "codec": "p2_alt1",
+          "arg": "jingleId & 0xffff"
+        }
+      ],
+      "client_reads": [
+        "g1_alt1",
+        "g2_alt1"
+      ]
+    },
+    "SET_MAP_FLAG": {
+      "params": [
+        {
+          "name": "x",
+          "type": "int"
+        },
+        {
+          "name": "z",
+          "type": "int"
+        }
+      ],
+      "fields": [
+        {
+          "codec": "p1_alt1",
+          "arg": "x"
+        },
+        {
+          "codec": "p1",
+          "arg": "z"
+        }
+      ],
+      "client_reads": [
+        "g1_alt1",
+        "g1"
+      ]
+    },
+    "SPOTANIM_SPECIFIC": {
+      "params": [
+        {
+          "name": "targetHash",
+          "type": "int"
+        },
+        {
+          "name": "graphicId",
+          "type": "int"
+        },
+        {
+          "name": "height",
+          "type": "int",
+          "default": "0"
+        },
+        {
+          "name": "speed",
+          "type": "int",
+          "default": "0"
+        },
+        {
+          "name": "slot",
+          "type": "int",
+          "default": "0"
+        },
+        {
+          "name": "settings",
+          "type": "int",
+          "default": "0"
+        }
+      ],
+      "fields": [
+        {
+          "codec": "p1",
+          "arg": "settings"
+        },
+        {
+          "codec": "p2_alt2",
+          "arg": "height"
+        },
+        {
+          "codec": "p4_alt1",
+          "arg": "targetHash"
+        },
+        {
+          "codec": "p2",
+          "arg": "graphicId"
+        },
+        {
+          "codec": "p2",
+          "arg": "speed"
+        },
+        {
+          "codec": "p1_alt2",
+          "arg": "slot"
+        }
+      ],
+      "client_reads": [
+        "g1",
+        "g2_alt2",
+        "g4_alt1",
+        "g2",
+        "g2",
+        "g1_alt2"
+      ]
+    },
+    "SYNTH_SOUND": {
+      "params": [
+        {
+          "name": "synthId",
+          "type": "int"
+        },
+        {
+          "name": "loops",
+          "type": "int",
+          "default": "1"
+        },
+        {
+          "name": "delay",
+          "type": "int",
+          "default": "0"
+        },
+        {
+          "name": "volume",
+          "type": "int",
+          "default": "255"
+        },
+        {
+          "name": "rate",
+          "type": "int",
+          "default": "256"
+        }
+      ],
+      "fields": [
+        {
+          "codec": "p2",
+          "arg": "synthId & 0xffff"
+        },
+        {
+          "codec": "p1",
+          "arg": "loops & 0xff"
+        },
+        {
+          "codec": "p2",
+          "arg": "delay & 0xffff"
+        },
+        {
+          "codec": "p1",
+          "arg": "volume & 0xff"
+        },
+        {
+          "codec": "p2",
+          "arg": "rate & 0xffff"
+        }
+      ],
+      "client_reads": [
+        "g2",
+        "g1",
+        "g2",
+        "g1",
+        "g2"
+      ]
+    },
+    "UPDATE_RUNENERGY": {
+      "params": [
+        {
+          "name": "energy",
+          "type": "int"
+        }
+      ],
+      "fields": [
+        {
+          "codec": "p1",
+          "arg": "energy"
+        }
+      ],
+      "client_reads": [
+        "g1"
+      ]
+    },
+    "UPDATE_RUNWEIGHT": {
+      "params": [
+        {
+          "name": "weight",
+          "type": "int"
+        }
+      ],
+      "fields": [
+        {
+          "codec": "p2",
+          "arg": "weight & 0xffff"
+        }
+      ],
+      "client_reads": [
+        "g2s"
+      ]
+    },
+    "UPDATE_STAT": {
+      "params": [
+        {
+          "name": "skill",
+          "type": "int"
+        },
+        {
+          "name": "xp",
+          "type": "int"
+        },
+        {
+          "name": "level",
+          "type": "int"
+        }
+      ],
+      "fields": [
+        {
+          "codec": "p1_alt2",
+          "arg": "level"
+        },
+        {
+          "codec": "p4_alt1",
+          "arg": "xp"
+        },
+        {
+          "codec": "p1_alt3",
+          "arg": "skill"
+        }
+      ],
+      "client_reads": [
+        "g1_alt2",
+        "g4_alt1",
+        "g1_alt3"
+      ]
+    },
+    "UPDATE_ZONE_PARTIAL_FOLLOWS": {
+      "params": [
+        {
+          "name": "level",
+          "type": "int"
+        },
+        {
+          "name": "zoneBaseX",
+          "type": "int"
+        },
+        {
+          "name": "zoneBaseZ",
+          "type": "int"
+        }
+      ],
+      "fields": [
+        {
+          "codec": "p1",
+          "arg": "level & 0x3"
+        },
+        {
+          "codec": "p1_alt2",
+          "arg": "zoneBaseZ & 0xff"
+        },
+        {
+          "codec": "p1",
+          "arg": "zoneBaseX & 0xff"
+        }
+      ],
+      "client_reads": [
+        "g1",
+        "g1b_alt2",
+        "g1b"
+      ]
+    },
+    "VARBIT_LARGE": {
+      "params": [
+        {
+          "name": "id",
+          "type": "int"
+        },
+        {
+          "name": "value",
+          "type": "int"
+        }
+      ],
+      "fields": [
+        {
+          "codec": "p2_alt2",
+          "arg": "id"
+        },
+        {
+          "codec": "p4_alt1",
+          "arg": "value"
+        }
+      ],
+      "client_reads": [
+        "g2_alt2",
+        "g4_alt1"
+      ]
+    },
+    "VARBIT_SMALL": {
+      "params": [
+        {
+          "name": "id",
+          "type": "int"
+        },
+        {
+          "name": "value",
+          "type": "int"
+        }
+      ],
+      "fields": [
+        {
+          "codec": "p1_alt3",
+          "arg": "value"
+        },
+        {
+          "codec": "p2_alt2",
+          "arg": "id"
+        }
+      ],
+      "client_reads": [
+        "g1_alt3",
+        "g2_alt2"
+      ]
+    },
+    "VARP_LARGE": {
+      "params": [
+        {
+          "name": "id",
+          "type": "int"
+        },
+        {
+          "name": "value",
+          "type": "int"
+        }
+      ],
+      "fields": [
+        {
+          "codec": "p2_alt1",
+          "arg": "id"
+        },
+        {
+          "codec": "p4",
+          "arg": "value"
+        }
+      ],
+      "client_reads": [
+        "g2_alt1",
+        "g4s"
+      ]
+    },
+    "VARP_SMALL": {
+      "params": [
+        {
+          "name": "id",
+          "type": "int"
+        },
+        {
+          "name": "value",
+          "type": "int"
+        }
+      ],
+      "fields": [
+        {
+          "codec": "p1",
+          "arg": "value"
+        },
+        {
+          "codec": "p2_alt2",
+          "arg": "id"
+        }
+      ],
+      "client_reads": [
+        "g1b",
+        "g2_alt2"
+      ]
+    }
+  }
+}

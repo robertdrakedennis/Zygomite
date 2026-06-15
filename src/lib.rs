@@ -36,6 +36,12 @@
     clippy::items_after_statements,
     // unused_self: some methods take &self for symmetry with sibling methods
     clippy::unused_self,
+    // Doc comments freely reference cache/CS2 identifiers (opcode names, table
+    // ids, JS5 terms) without backticks; mass-quoting them hurts readability.
+    clippy::doc_markdown,
+    // Module/overview doc comments lead with a multi-sentence summary paragraph
+    // by design (the modules document a whole subsystem).
+    clippy::too_long_first_doc_paragraph,
 )]
 
 pub mod animator;
@@ -46,26 +52,42 @@ pub mod collision;
 pub mod config;
 pub mod config_dump;
 pub mod config_refs;
+pub mod config_transcode;
 pub mod constants;
+pub mod cs2;
+pub mod cs2_coverage;
+pub mod cs2_datagen;
+pub mod cs2_javagen;
+pub mod cs2_registry;
 pub mod cutscene2d;
+pub mod decode;
 pub mod dep_tree;
 pub mod dump;
+pub mod explain;
+pub mod explain_loc;
+pub mod explain_transitive;
 pub mod error;
 pub mod fixture;
+pub mod font;
 pub mod interface;
 pub mod interface_codec;
 pub mod js5;
+pub mod js5pack;
 pub mod map;
 pub mod migrate;
 pub mod model;
 pub mod overlay_deps;
 pub mod overlay_manifest;
 pub mod overlay_plan;
+pub mod pack_root;
 pub mod packet;
 pub mod parallel;
+pub mod port;
+pub mod protocol_registry;
 pub mod script;
 pub mod script_transpile;
 pub mod transpile;
+pub mod ts_idgen;
 pub mod validate;
 pub mod vars;
 pub mod vfx;
