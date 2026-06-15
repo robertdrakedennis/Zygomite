@@ -111,6 +111,9 @@ pub struct StackEffect {
 /// flag flips and the corresponding lowering is no longer needed (the construct
 /// becomes directly representable). These are the single authoritative answer to
 /// "is the 910 client ready for X?".
+// reason: each bool is an independent, named client-capability flag (not a state
+// machine) — grouping them into an enum/bitflags would obscure the per-feature API.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Capabilities {
     /// The `cc_list` / dropdown component family (component type 16 +
@@ -215,7 +218,7 @@ pub struct BuildDescriptor {
 impl BuildDescriptor {
     /// Build the descriptor for build 910 or 948 from the crate's `data/` dir.
     pub fn load(data_dir: &Path, build: u32) -> Result<Self> {
-        let opcodes = OpcodeBook::load(data_dir, build, if build == 948 { 1 } else { 0 })
+        let opcodes = OpcodeBook::load(data_dir, build, u32::from(build == 948))
             .with_context(|| format!("load opcode book for build {build}"))?;
         let stack = load_stack_effects(data_dir)?;
         let (db_packing, capabilities, interface_caps) = match build {
@@ -332,21 +335,21 @@ mod tests {
     fn db_field_948_to_910_repack_matches_shift_right_four() {
         // 962611 (948) decodes to table 235, col 3, tuple 3; re-encoding through
         // the 910 packing gives 60163 — exactly the `>>4` the Python applied.
-        let field = DbFieldPacking::DONOR_948.decode(962611);
+        let field = DbFieldPacking::DONOR_948.decode(962_611);
         assert_eq!(field.table, 235);
         assert_eq!(field.column, 3);
         assert_eq!(field.tuple, 3);
         assert_eq!(DbFieldPacking::BASE_910.encode(&field), 60163);
-        assert_eq!(962611 >> 4, 60163);
+        assert_eq!(962_611 >> 4, 60163);
     }
 
     #[test]
     fn db_field_repack_equals_shift_for_every_ritual_field() {
         // Every db-field the ritual splice touches re-packs to exactly `v >> 4`.
         for v in [
-            958480, 958545, 958592, 962560, 962576, 962592, 962608, 962609, 962610, 962611, 962640,
-            962656, 962672, 962688, 962704, 962720, 962736, 962768, 962784, 962800, 962832, 966674,
-            966704, 966736, 966768, 966784, 966800, 966816,
+            958_480, 958_545, 958_592, 962_560, 962_576, 962_592, 962_608, 962_609, 962_610, 962_611, 962_640,
+            962_656, 962_672, 962_688, 962_704, 962_720, 962_736, 962_768, 962_784, 962_800, 962_832, 966_674,
+            966_704, 966_736, 966_768, 966_784, 966_800, 966_816,
         ] {
             let field = DbFieldPacking::DONOR_948.decode(v);
             assert_eq!(

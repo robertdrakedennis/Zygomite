@@ -136,7 +136,7 @@ mod tests {
     #[test]
     fn insertion_shifts_later_targets() {
         // old: [0 nop][1 nop][2 branch->0][3 branch->1]; rewrite instr 1 into TWO.
-        let old = vec![Insn::bare("nop"), Insn::bare("nop"), jump(0), jump(1)];
+        let old = [Insn::bare("nop"), Insn::bare("nop"), jump(0), jump(1)];
         let mut rb = Rebuilder::new();
         for (i, insn) in old.iter().enumerate() {
             rb.begin();
@@ -156,8 +156,7 @@ mod tests {
 
     #[test]
     fn switch_targets_are_remapped() {
-        let old = vec![
-            Insn::bare("x"),
+        let old = [Insn::bare("x"),
             Insn {
                 op: "switch".into(),
                 operand: Operand::Switch(vec![
@@ -166,8 +165,7 @@ mod tests {
                 ]),
             },
             Insn::bare("y"),
-            Insn::bare("z"),
-        ];
+            Insn::bare("z")];
         let mut rb = Rebuilder::new();
         for (i, insn) in old.iter().enumerate() {
             rb.begin();

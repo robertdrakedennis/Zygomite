@@ -100,13 +100,12 @@ fn registry_948_diverges_only_by_donor_only_opcodes() {
     // donor-only 948 opcodes (no 910 command). There must be at least one (this
     // is the documented reason 948 is NOT registry-routed); `sub` (id 824) is a
     // concrete witness observed in the live 948 cache.
-    let missing: Vec<&String> = from_txt
+    let any_missing = from_txt
         .by_name()
         .keys()
-        .filter(|n| !from_reg.by_name().contains_key(*n))
-        .collect();
+        .any(|n| !from_reg.by_name().contains_key(n));
     assert!(
-        !missing.is_empty(),
+        any_missing,
         "948: expected the registry to omit donor-only opcodes; found none — \
          the registry may now have full 948 coverage, revisit load() routing"
     );

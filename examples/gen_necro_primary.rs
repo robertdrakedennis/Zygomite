@@ -1,6 +1,6 @@
 //! Clone the 910 magic ability-book page (interface 1459) into a SECOND Necromancy
 //! interface group 1211 — the Necromancy "PRIMARY" book for the ribbon docked action
-//! window, distinct from interface_1207 (the Necromancy "MENU" book used by the Powers
+//! window, distinct from `interface_1207` (the Necromancy "MENU" book used by the Powers
 //! WINDOW tab).
 //!
 //! Why two interfaces: the native combat styles each have a PRIMARY (docked action
@@ -12,12 +12,12 @@
 //!
 //! 1211 is a byte-identical clone of 910's magic page 1459 (== 1461) with com6's onload
 //! retargeted to 1211's own coms + the necromancy powers-book routing case (13) — exactly
-//! like interface_1207 (gen_necro_page.rs). The necro book-routing scripts (script8423
+//! like `interface_1207` (`gen_necro_page.rs`). The necro book-routing scripts (script8423
 //! page-init, script11435 first-show render, script8433 sub-tab click) gain parallel
 //! cases for 1211:com7 (packed 79363079) so the necro ability grid renders in 1211 too.
 //!
 //! Output: <out-dir>/<component-id>.bin per component (the necro PRIMARY group).
-//! Usage: cargo run --example gen_necro_primary -- <910-cache> <out-dir>
+//! Usage: cargo run --example `gen_necro_primary` -- <910-cache> <out-dir>
 
 use rs3_cache_rs::cache::FlatCache;
 use rs3_cache_rs::constants::ARCHIVE_INTERFACES;

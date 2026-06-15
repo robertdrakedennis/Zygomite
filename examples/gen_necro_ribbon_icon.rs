@@ -1,20 +1,20 @@
 //! Clone the 910 HUD-ribbon DEFENSIVE flyout icon component set
-//! (interface_1477 com72..com76) into a NEW Necromancy flyout icon set
+//! (`interface_1477` com72..com76) into a NEW Necromancy flyout icon set
 //! (com856..com860), driven entirely by the live 910 cache.
 //!
 //! Combat Style Modernisation — the 6th (Necromancy) combat style in the HUD
 //! ribbon Powers flyout. The flyout strip is built by the fully data-driven
-//! [proc,script8781] (it iterates enum_7717, resolves each combatId -> layout
-//! struct via script10405/enum_7716, and shows struct_param(struct, param_3503)
+//! [proc,script8781] (it iterates `enum_7717`, resolves each combatId -> layout
+//! struct via `script10405/enum_7716`, and shows `struct_param(struct`, `param_3503`)
 //! as the icon). combatId 1039 is a NATIVE reserved Necromancy slot in 910:
-//! it is already iterated by enum_7717 (index 77) and already has position
-//! storage in script8701/8709 + a fallback position struct in enum_7712
-//! (1039 -> struct_16567). The ONLY missing pieces are (a) enum_7716 has no
+//! it is already iterated by `enum_7717` (index 77) and already has position
+//! storage in script8701/8709 + a fallback position struct in `enum_7712`
+//! (1039 -> `struct_16567`). The ONLY missing pieces are (a) `enum_7716` has no
 //! 1039 -> struct mapping (so script10405 returns null and 8781 skips it), and
 //! (b) the icon component it would point at does not exist.
 //!
 //! This example produces (b): a verbatim codec-clone of DEFENSIVE's flyout icon
-//! component set. DEFENSIVE (1034) uses interface_1477:com72 (the icon root,
+//! component set. DEFENSIVE (1034) uses `interface_1477:com72` (the icon root,
 //! onload=script8409(1034), a 352x128 layer under com50) with child layers
 //! com73/com74/com75/com76. We clone all five to com856..com860:
 //!   - every child's parent `layer` ref com72 -> com856 (the new root),
@@ -27,10 +27,10 @@
 //! (decode/encode idempotency).
 //!
 //! Output: <out-dir>/<component-id>.bin per NEW component (com856..com860).
-//! These are packed into a full interface_1477 group-replace .dat by the
+//! These are packed into a full `interface_1477` group-replace .dat by the
 //! TypeScript builder (build-necro-ribbon.ts).
 //!
-//! Usage: cargo run --example gen_necro_ribbon_icon -- <910-cache> <out-dir>
+//! Usage: cargo run --example `gen_necro_ribbon_icon` -- <910-cache> <out-dir>
 
 use rs3_cache_rs::cache::FlatCache;
 use rs3_cache_rs::constants::ARCHIVE_INTERFACES;
@@ -113,12 +113,11 @@ fn main() -> Result<()> {
             for hook in component.hooks.iter_mut().flatten() {
                 if hook.script == 8409 {
                     for arg in &mut hook.args {
-                        if let HookArg::Int(v) = arg {
-                            if *v == SRC_COMBAT_ID {
+                        if let HookArg::Int(v) = arg
+                            && *v == SRC_COMBAT_ID {
                                 *v = DST_COMBAT_ID;
                                 rewrote_onload = true;
                             }
-                        }
                     }
                 }
             }

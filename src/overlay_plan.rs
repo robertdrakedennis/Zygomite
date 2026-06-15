@@ -32,7 +32,12 @@ const MAX_PLAN_WARNINGS: usize = 2048;
 const MAX_EDGE_SAMPLES: usize = 256;
 type SemanticRefBuckets = HashMap<u32, HashMap<SemanticRefKey, Vec<u32>>>;
 type ConfigGroupFileCache = HashMap<(RootKind, u32, u32), Option<BTreeMap<u32, Vec<u8>>>>;
-type MapGroupRefs = Vec<(u32, Option<(Vec<u32>, Vec<u32>)>)>;
+/// The `(loc_ids, npc_ids)` extracted from one donor map group, or `None` when the
+/// group is absent.
+type MapGroupLocNpcIds = Option<(Vec<u32>, Vec<u32>)>;
+/// One scanned map group: its id paired with its extracted ids.
+type MapGroupRef = (u32, MapGroupLocNpcIds);
+type MapGroupRefs = Vec<MapGroupRef>;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -737,7 +742,7 @@ pub fn run_overlay_plan_command(options: OverlayPlanCommandOptions<'_>) -> Resul
             &donor_manifest,
             &base_manifest,
             allow_heuristic_sites,
-        )?
+        )
     } else {
         None
     };
@@ -839,10 +844,8 @@ fn overlay_plan_cache_path(
     donor_manifest: &Rs3CacheManifest,
     base_manifest: &Rs3CacheManifest,
     allow_heuristic_sites: bool,
-) -> Result<Option<PathBuf>> {
-    let Some(home) = std::env::var_os("HOME") else {
-        return Ok(None);
-    };
+) -> Option<PathBuf> {
+    let home = std::env::var_os("HOME")?;
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     env!("CARGO_PKG_VERSION").hash(&mut hasher);
     OVERLAY_PLAN_VERSION.hash(&mut hasher);
@@ -850,11 +853,11 @@ fn overlay_plan_cache_path(
     manifest_bytes.hash(&mut hasher);
     manifest_fingerprint(donor_manifest).hash(&mut hasher);
     manifest_fingerprint(base_manifest).hash(&mut hasher);
-    Ok(Some(
+    Some(
         PathBuf::from(home)
             .join(".cache/alerion/rs3-cache-rs-overlay-plans")
             .join(format!("{:016x}.json", hasher.finish())),
-    ))
+    )
 }
 
 impl ConfigSemanticIndex {
@@ -1388,7 +1391,7 @@ fn scan_map_group_refs(
     donor_index: &ArchiveIndex,
     archive: &ArchiveDef,
     group_id: u32,
-) -> Result<(u32, Option<(Vec<u32>, Vec<u32>)>)> {
+) -> Result<MapGroupRef> {
     if !is_group_present(donor_index, group_id) {
         return Ok((group_id, None));
     }

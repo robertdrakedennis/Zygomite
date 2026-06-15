@@ -257,9 +257,9 @@ fn first_diff_line(a: &str, b: &str) -> String {
         }
     }
     let (na, nb) = (a.lines().count(), b.lines().count());
-    if na != nb {
-        format!("line count differs (committed {na}, produced {nb})")
-    } else {
+    if na == nb {
         "trailing/whitespace difference".to_string()
+    } else {
+        format!("line count differs (committed {na}, produced {nb})")
     }
 }

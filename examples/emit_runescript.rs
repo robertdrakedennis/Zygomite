@@ -1,13 +1,13 @@
-//! G1.2 — read-only RuneScript emission over the decompiled corpus.
+//! G1.2 — read-only `RuneScript` emission over the decompiled corpus.
 //!
 //! Reads `*.ts` reversible-format files (default `/tmp/948-transpile`), parses each back to the
-//! structured IR (`StructuredScript`), and renders it as RuneScript with `render_runescript`. The
+//! structured IR (`StructuredScript`), and renders it as `RuneScript` with `render_runescript`. The
 //! `.ts` editing surface is never touched — this is a presentation-only view used to judge the
 //! restyle and surface rough edges before the parser + byte gate land (G1.3).
 //!
 //! Usage:
-//!   cargo run --example emit_runescript                       # sweep: parse+render all, report
-//!   cargo run --example emit_runescript /tmp/948-transpile s  # render script `s` in full
+//!   cargo run --example `emit_runescript`                       # sweep: parse+render all, report
+//!   cargo run --example `emit_runescript` /tmp/948-transpile s  # render script `s` in full
 
 use rs3_cache_rs::transpile::{
     RuneScriptContext, parse_reversible_source, parse_structured_typescript, render_runescript,

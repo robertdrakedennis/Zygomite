@@ -442,7 +442,7 @@ fn parse_counts(header: &str) -> Option<(i64, i64, i64)> {
 
 fn parse_kv(s: &str, key: &str) -> Option<i64> {
     let rest = s.split(key).nth(1)?;
-    let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+    let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
     digits.parse().ok()
 }
 

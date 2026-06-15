@@ -143,7 +143,7 @@ pub fn rasterize(face_bytes: &[u8], mode: SizeMode) -> Result<RasterFont> {
     let mut ink_glyphs = 0u32;
 
     // First pass: measure + render each glyph cell.
-    for c in 0..GLYPH_COUNT {
+    for (c, g) in glyphs.iter_mut().enumerate() {
         let Some(ch) = cp1252_byte_to_char(c as u8) else {
             continue; // undefined byte in windows-1252 → empty glyph
         };
@@ -154,7 +154,6 @@ pub fn rasterize(face_bytes: &[u8], mode: SizeMode) -> Result<RasterFont> {
         if gid.0 == 0 {
             continue; // .notdef → unsupported char, empty glyph
         }
-        let g = &mut glyphs[c];
         let adv = scaled.h_advance(gid).max(0.0).round() as i32;
         g.advance = adv;
 
@@ -223,19 +222,19 @@ pub fn rasterize(face_bytes: &[u8], mode: SizeMode) -> Result<RasterFont> {
     // Second pass: shelf-pack ink cells into the atlas (FontRaster order).
     let wrap = ATLAS_WRAP_MIN.max(max_glyph_w);
     let (mut cur_x, mut cur_y, mut shelf_h, mut max_right) = (0i32, 0i32, 0i32, 0i32);
-    for c in 0..GLYPH_COUNT {
-        if glyphs[c].alpha.is_empty() {
+    for g in &mut glyphs {
+        if g.alpha.is_empty() {
             continue;
         }
-        let gw = glyphs[c].w;
-        let gh = glyphs[c].h;
+        let gw = g.w;
+        let gh = g.h;
         if cur_x + gw > wrap {
             cur_y += shelf_h;
             cur_x = 0;
             shelf_h = 0;
         }
-        glyphs[c].atlas_x = cur_x;
-        glyphs[c].atlas_y = cur_y;
+        g.atlas_x = cur_x;
+        g.atlas_y = cur_y;
         cur_x += gw;
         shelf_h = shelf_h.max(gh);
         max_right = max_right.max(cur_x);
@@ -245,8 +244,7 @@ pub fn rasterize(face_bytes: &[u8], mode: SizeMode) -> Result<RasterFont> {
 
     // Blit cells into the atlas coverage buffer.
     let mut atlas_alpha = vec![0u8; (atlas_w * atlas_h) as usize];
-    for c in 0..GLYPH_COUNT {
-        let g = &glyphs[c];
+    for g in &glyphs {
         if g.alpha.is_empty() {
             continue;
         }
@@ -278,7 +276,7 @@ fn pick_size_for_ascent(font: &FontVec, target_ascent: f32) -> f32 {
     let (mut lo, mut hi) = (6.0f32, 48.0f32);
     let (mut best, mut best_err) = (12.0f32, f32::MAX);
     for _ in 0..24 {
-        let mid = (lo + hi) / 2.0;
+        let mid = f32::midpoint(lo, hi);
         let ascent = cap_visual_ascent(font, mid);
         let err = (ascent - target_ascent).abs();
         if err < best_err {
@@ -360,13 +358,13 @@ pub fn render_sample(metrics: &FontMetrics, atlas: &[u8], text: &str) -> Result<
     let line = i32::from(metrics.line_height);
     let bytes = crate::font::cp1252_encode(text);
 
-    let mut w = pad * 2;
+    let mut text_w = pad * 2;
     for &c in &bytes {
-        w += i32::from(metrics.advance[c as usize]);
+        text_w += i32::from(metrics.advance[c as usize]);
     }
-    let h = ascent + descent + pad * 2;
-    let img_w = w.max(32);
-    let img_h = h.max(16);
+    let text_h = ascent + descent + pad * 2;
+    let img_w = text_w.max(32);
+    let img_h = text_h.max(16);
 
     // Dark background 0x2b2b2b.
     let (bg_r, bg_g, bg_b) = (0x2bu32, 0x2bu32, 0x2bu32);
@@ -396,22 +394,22 @@ pub fn render_sample(metrics: &FontMetrics, atlas: &[u8], text: &str) -> Result<
                 if sx + x >= atlas_w || sy + y >= atlas_h {
                     continue; // advance may exceed the ink sub-rect harmlessly
                 }
-                let a = i32::from(atlas[((sy + y) * atlas_w + (sx + x)) as usize]);
-                if a == 0 {
+                let cov = i32::from(atlas[((sy + y) * atlas_w + (sx + x)) as usize]);
+                if cov == 0 {
                     continue;
                 }
                 let dx = pen_x + x;
                 if dx < 0 || dx >= img_w {
                     continue;
                 }
-                let au = a as u32;
-                let r = (255 * au + bg_r * (255 - au)) / 255;
-                let g = (255 * au + bg_g * (255 - au)) / 255;
-                let b = (255 * au + bg_b * (255 - au)) / 255;
+                let au = cov as u32;
+                let out_r = (255 * au + bg_r * (255 - au)) / 255;
+                let out_g = (255 * au + bg_g * (255 - au)) / 255;
+                let out_b = (255 * au + bg_b * (255 - au)) / 255;
                 let idx = ((dy * img_w + dx) * 3) as usize;
-                rgb[idx] = r as u8;
-                rgb[idx + 1] = g as u8;
-                rgb[idx + 2] = b as u8;
+                rgb[idx] = out_r as u8;
+                rgb[idx + 1] = out_g as u8;
+                rgb[idx + 2] = out_b as u8;
             }
         }
         pen_x += gw;

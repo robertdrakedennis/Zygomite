@@ -8,7 +8,7 @@
 //!   * `relic-system-948/config/40-948.dat(+metadata)` — Config group 40
 //!     (DBTABLETYPE) with the relic tables 90/92/94 re-encoded as 910 opcode-1
 //!     schemas.
-//!   * `relic-system-948/dbtableindex/94.dat(+metadata)` — the relic DbTableIndex,
+//!   * `relic-system-948/dbtableindex/94.dat(+metadata)` — the relic `DbTableIndex`,
 //!     files 0/1/10, in the 910 `BaseVarType`-serial form.
 //!
 //! As with the existing `config_transcode_oracle`, the gzip byte stream is Node's

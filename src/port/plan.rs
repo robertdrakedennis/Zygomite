@@ -128,7 +128,7 @@ pub fn compute(opts: &PlanOptions<'_>) -> Result<PlanReport> {
         &TransitiveOptions {
             scripts_cache: opts.donor_cache.root(),
             scripts_build: opts.from,
-            scripts_subbuild: if opts.from == 948 { 1 } else { 0 },
+            scripts_subbuild: u32::from(opts.from == 948),
             data_dir: opts.data_dir,
             base_pack_root: opts.base_pack_root,
         },
@@ -147,7 +147,7 @@ pub fn compute(opts: &PlanOptions<'_>) -> Result<PlanReport> {
     // 2) Decode each closure script and run `represent` for the opcode deltas. We
     //    deduplicate by (kind, construct) so the report lists each delta once with
     //    a representative script.
-    let book_948 = OpcodeBook::load(opts.data_dir, opts.from, if opts.from == 948 { 1 } else { 0 })?;
+    let book_948 = OpcodeBook::load(opts.data_dir, opts.from, u32::from(opts.from == 948))?;
     let index = opts
         .donor_cache
         .archive_index(ARCHIVE_CLIENTSCRIPTS)

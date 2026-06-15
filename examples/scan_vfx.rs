@@ -1,5 +1,5 @@
 //! Decode every file in the VFX archive (61); report failures.
-//! Usage: cargo run --example scan_vfx -- <cache-dir>
+//! Usage: cargo run --example `scan_vfx` -- <cache-dir>
 
 use rs3_cache_rs::cache::FlatCache;
 

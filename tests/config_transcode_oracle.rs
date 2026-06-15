@@ -1,5 +1,5 @@
 //! Regression-lock for `config transcode`: the DBTABLETYPE opcode-1 schema
-//! encoder and the DbTableIndex `BaseVarType`-serial index encoder must
+//! encoder and the `DbTableIndex` `BaseVarType`-serial index encoder must
 //! byte-reproduce the committed relic-system-948 oracle.
 //!
 //! Oracle (NEVER edit — committed regression artifacts the tool must reproduce):
@@ -7,7 +7,7 @@
 //!     the whole Config group 40 (DBTABLETYPE), with relic tables 90/92/94
 //!     re-encoded as 910 opcode-1 schemas.
 //!   * `server/cache-patches/relic-system-948/dbtableindex/94.dat(+metadata)` —
-//!     the relic DbTableIndex (archive 49 group 94), files 0/1/10, in the 910
+//!     the relic `DbTableIndex` (archive 49 group 94), files 0/1/10, in the 910
 //!     `BaseVarType`-serial form.
 //!
 //! These `.dat` files are embedded with `include_bytes!`. The gzip byte stream
@@ -82,7 +82,7 @@ fn unpack_single_stripe(body: &[u8], roster: &[u32]) -> BTreeMap<u32, Vec<u8>> {
     files
 }
 
-/// Decode a 910 `BaseVarType`-serial integer DbTableIndex into its
+/// Decode a 910 `BaseVarType`-serial integer `DbTableIndex` into its
 /// `key -> [row ids]` entries (inverse of `encode_int_index`), for round-trip.
 fn decode_int_index(bytes: &[u8]) -> BTreeMap<i32, Vec<u32>> {
     let mut p = 0usize;
@@ -152,7 +152,7 @@ fn oracle_schemas_round_trip_opcode1() {
     }
 }
 
-/// The oracle DbTableIndex files (0/1/10) round-trip through `encode_int_index`:
+/// The oracle `DbTableIndex` files (0/1/10) round-trip through `encode_int_index`:
 /// decode each to its entries, re-encode, assert byte-identity. Locks the
 /// `encodeIntIndex` port against the committed index, with no external cache.
 #[test]

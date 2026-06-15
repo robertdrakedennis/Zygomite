@@ -41,8 +41,8 @@ use rs3_cache_rs::explain_loc::{Confidence, ExplainLocOptions, ExplainedLoc, exp
 const DONOR_948_CACHE: &str = "/Users/robert/projects/alerion/cache/unpacked/948";
 
 /// Relic truth-chain ids (relic-system-948/README.md).
-const MONOLITH_PARENT: u32 = 115416;
-const MONOLITH_CHILD_MANAGE: u32 = 116440;
+const MONOLITH_PARENT: u32 = 115_416;
+const MONOLITH_CHILD_MANAGE: u32 = 116_440;
 const GATING_VARBIT: u32 = 49357;
 const RELIC_INTERFACE: u32 = 691;
 const RELIC_UNLOCK_VARP_A: u32 = 9312;
@@ -52,7 +52,7 @@ const RELIC_DBTABLE: u32 = 94;
 /// Ritual pedestal (Necromancy) multivar parent — the plan-009 road-test loc whose
 /// open is pure server logic: an 89-varp gating block surfaces only broad-block
 /// combat false positives. Its gating varbit is 53898.
-const RITUAL_PEDESTAL_PARENT: u32 = 127375;
+const RITUAL_PEDESTAL_PARENT: u32 = 127_375;
 const RITUAL_GATING_VARBIT: u32 = 53898;
 /// One of the action-bar / combat interfaces the broad block falsely surfaces (the
 /// score-4201 #1 before plan 009). Used to assert it is now flagged low + generic.

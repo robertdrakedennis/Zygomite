@@ -6,7 +6,7 @@ struct R<'a> {
     d: &'a [u8],
     p: usize,
 }
-impl<'a> R<'a> {
+impl R<'_> {
     fn g1(&mut self) -> u32 {
         let v = self.d[self.p];
         self.p += 1;
@@ -22,10 +22,10 @@ impl<'a> R<'a> {
         self.p += 4;
         v
     }
-    fn skip(&mut self, n: usize) {
+    const fn skip(&mut self, n: usize) {
         self.p += n;
     }
-    fn left(&self) -> isize {
+    const fn left(&self) -> isize {
         self.d.len() as isize - self.p as isize
     }
 }
@@ -97,11 +97,10 @@ fn main() -> anyhow::Result<()> {
                 r.skip(wc as usize);
                 max_ids = max_ids.max(idc);
             }
-            if !bad {
-                println!("   after skin: pos={} left={} max_ids_per_vert={max_ids}", r.p, r.left());
-            } else {
+            if bad {
                 continue;
             }
+            println!("   after skin: pos={} left={} max_ids_per_vert={max_ids}", r.p, r.left());
         }
         if has_vertices {
             r.skip(vc * 2);

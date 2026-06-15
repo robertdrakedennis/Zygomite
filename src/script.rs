@@ -1625,7 +1625,7 @@ mod tests {
             argument_count_int: 5,
             argument_count_object: 1,
             argument_count_long: 0,
-            ..script.clone()
+            ..script
         };
         let other_bytes = encode_script(&other, &opcode_book, MIN_SCRIPT_BUILD)?;
         let other_sig = decode_script_arg_signature(&other_bytes, MIN_SCRIPT_BUILD)?;

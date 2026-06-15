@@ -113,15 +113,15 @@ pub fn common_rebuild(ir: &mut Cs2Ir) -> Result<()> {
                     op: "push_constant_string".to_string(),
                     operand: Operand::TypedIntConst(n.wrapping_neg()),
                 });
-                rb.push(Insn::bare("add"));
             } else {
                 rb.push(Insn {
                     op: "push_constant_string".to_string(),
                     operand: Operand::TypedIntConst(-1),
                 });
                 rb.push(Insn::bare("multiply"));
-                rb.push(Insn::bare("add"));
             }
+            // Both lowerings finish by replacing `sub` with `add`.
+            rb.push(Insn::bare("add"));
         } else if UNMAPPED_POP1_INT_OPS.contains(&insn.op.as_str()) {
             rb.push(Insn::bare("pop_int_discard"));
         } else if insn.op == "tostring_localised_long" {
@@ -227,7 +227,6 @@ pub fn sub_to_add(ir: &mut Cs2Ir) -> Result<()> {
                     op: "push_constant_string".to_string(),
                     operand: Operand::TypedIntConst(n.wrapping_neg()),
                 });
-                rb.push(Insn::bare("add"));
             } else {
                 // Variable / computed RHS: a - b → a + (-1 * b) (expands 1 → 3).
                 rb.push(Insn {
@@ -235,8 +234,9 @@ pub fn sub_to_add(ir: &mut Cs2Ir) -> Result<()> {
                     operand: Operand::TypedIntConst(-1),
                 });
                 rb.push(Insn::bare("multiply"));
-                rb.push(Insn::bare("add"));
             }
+            // Both lowerings finish by replacing `sub` with `add`.
+            rb.push(Insn::bare("add"));
         } else {
             rb.push(insn.clone());
         }

@@ -1,48 +1,9 @@
-#![deny(
-    clippy::dbg_macro,
-    clippy::todo,
-    clippy::unimplemented,
-    clippy::unwrap_used
-)]
-// Global lint policy: binary cache parsing requires frequent integer
-// casts between u8/u16/u32/i32/usize. Many false positives in pedantic.
-#![allow(
-    // Binary data parsing: necessary truncations from u32→u16, i32→usize, etc.
-    clippy::cast_possible_truncation,
-    clippy::cast_possible_wrap,
-    clippy::cast_sign_loss,
-    clippy::cast_precision_loss,
-    clippy::checked_conversions,
-    // Config parsers naturally have long functions (many field reads)
-    clippy::too_many_lines,
-    // Module naming follows domain convention (e.g. src/transpile/ast.rs → ast mod)
-    clippy::module_name_repetitions,
-    // Several config parsers have identical arm bodies for similar struct fields
-    clippy::match_same_arms,
-    // Not all public APIs need must_use (e.g. emit functions)
-    clippy::must_use_candidate,
-    // Extensive use of Option::map plus unwrap_or; map_unwrap_or is less readable here
-    clippy::map_unwrap_or,
-    // Documentation gaps are tracked separately; public API is still evolving
-    clippy::missing_errors_doc,
-    clippy::missing_panics_doc,
-    // Builder patterns: new() returns Self without must_use
-    clippy::return_self_not_must_use,
-    // Not all const-eligible functions benefit from const (e.g. those returning Strings)
-    clippy::missing_const_for_fn,
-    // Match arms using Option::map often clearer than if-let chains
-    clippy::option_if_let_else,
-    // items_after_statements: helper fns after main logic in some functions
-    clippy::items_after_statements,
-    // unused_self: some methods take &self for symmetry with sibling methods
-    clippy::unused_self,
-    // Doc comments freely reference cache/CS2 identifiers (opcode names, table
-    // ids, JS5 terms) without backticks; mass-quoting them hurts readability.
-    clippy::doc_markdown,
-    // Module/overview doc comments lead with a multi-sentence summary paragraph
-    // by design (the modules document a whole subsystem).
-    clippy::too_long_first_doc_paragraph,
-)]
+#![deny(clippy::dbg_macro, clippy::todo, clippy::unimplemented)]
+// `unwrap_used` is enforced in production builds only; `.unwrap()` is idiomatic in unit tests.
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+// The curated policy allow-list lives in `Cargo.toml [lints.clippy]` so it applies to ALL targets
+// (lib, bins, examples, tests) — a crate-level `#![allow]` here would not reach the separate
+// example/test crates.
 
 pub mod animator;
 pub mod audio;

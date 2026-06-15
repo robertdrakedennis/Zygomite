@@ -41,7 +41,7 @@ fn extract_real_registry_invariants() {
     let switch_path = if disp_path.is_file() {
         disp_path
     } else {
-        sr_path.clone()
+        sr_path
     };
     let switch_src = std::fs::read_to_string(&switch_path).expect("read dispatch source");
     let switch = parse_switch(&switch_src, &switch_path).expect("parse switch");

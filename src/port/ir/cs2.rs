@@ -354,11 +354,11 @@ mod tests {
                 opcode: 0,
                 command: "push_constant_string".into(),
                 // 962611 = table 235, col 3, tuple 3 in the 948 packing.
-                operand: RawOperand::Int(962611),
+                operand: RawOperand::Int(962_611),
             }],
         };
         let decode = |v: i32| {
-            if v == 962611 {
+            if v == 962_611 {
                 Some(DbField {
                     table: 235,
                     column: 3,

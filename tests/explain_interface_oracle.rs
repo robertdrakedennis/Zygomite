@@ -198,7 +198,7 @@ fn transitive_burden_stops_at_base_frontier_relic_shaped() {
     impl BaseRoster for Base {
         fn contains(&self, group: u32) -> bool {
             // The hub and its chain are 910-base; the relic scripts are donor-new.
-            matches!(group, 1000 | 1001 | 1002)
+            matches!(group, 1000..=1002)
         }
     }
 

@@ -2415,7 +2415,7 @@ export default class LoginProt {
         assert!(err.contains("indexes a non-array param"), "got: {err}");
 
         // Bare array param without an index.
-        let bare_array = pk(params.clone(), vec![field("p4", "key")], &["g4s"]);
+        let bare_array = pk(params, vec![field("p4", "key")], &["g4s"]);
         let err = expect_error("V2BARE", &bare_array, 4);
         assert!(err.contains("used without an index"), "got: {err}");
 

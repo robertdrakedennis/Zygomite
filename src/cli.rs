@@ -1748,7 +1748,7 @@ pub fn run(cli: Cli) -> Result<()> {
                 ),
             }
         }
-        Command::Port { command } => run_port_command(&cache, &cli.data_dir, command),
+        Command::Port { command } => run_port_command(&cache, &cli.data_dir, &command),
         // `config transcode` is intercepted before the cache is opened.
         Command::Config { .. } => {
             bail!("config subcommand should have been dispatched before cache open")
@@ -2953,6 +2953,8 @@ fn run_configs(
 /// (optionally) writes the `.asm.ts` listings + checks them byte-for-byte against
 /// the committed oracle. Today only `--closure-of-interface 1224` is wired (the
 /// ritual driver, the byte-exact oracle).
+// reason: CLI dispatch fn — each arg is a distinct decoded flag with no natural grouping.
+#[allow(clippy::too_many_arguments)]
 fn run_cs2_port(
     cache: &FlatCache,
     data_dir: &Path,
@@ -3099,8 +3101,8 @@ fn run_cs2_port(
 }
 
 /// `port <sub>` dispatch (currently `plan`).
-fn run_port_command(cache: &FlatCache, data_dir: &Path, command: PortCommand) -> Result<()> {
-    match command {
+fn run_port_command(cache: &FlatCache, data_dir: &Path, command: &PortCommand) -> Result<()> {
+    match *command {
         PortCommand::Plan {
             interface,
             from,

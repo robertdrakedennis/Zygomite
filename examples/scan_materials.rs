@@ -1,5 +1,5 @@
 //! Parse every material in archive 26 group 0 and report failures.
-//! Usage: cargo run --example scan_materials -- <cache-dir>
+//! Usage: cargo run --example `scan_materials` -- <cache-dir>
 
 use rs3_cache_rs::cache::FlatCache;
 use rs3_cache_rs::config::parse_material;

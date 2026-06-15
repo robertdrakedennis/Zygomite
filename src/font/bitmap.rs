@@ -237,13 +237,12 @@ impl GlyphAtlasSprite {
         let _offset_y = dims.g2()?;
         let sub_w = dims.g2()?;
         let sub_h = dims.g2()?;
-        if let Some((ew, eh)) = expect {
-            if canvas_w != ew || canvas_h != eh || sub_w != ew || sub_h != eh {
+        if let Some((ew, eh)) = expect
+            && (canvas_w != ew || canvas_h != eh || sub_w != ew || sub_h != eh) {
                 cache_bail!(
                     "sprite dims {canvas_w}x{canvas_h} sub {sub_w}x{sub_h} != expected {ew}x{eh}"
                 );
             }
-        }
         if canvas_w != sub_w || canvas_h != sub_h {
             cache_bail!(
                 "sprite sub-rect {sub_w}x{sub_h} != canvas {canvas_w}x{canvas_h} (atlas must fill canvas)"

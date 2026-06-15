@@ -1,22 +1,22 @@
 //! Clone the 910 HUD "Magic Book" Powers-flyout ACTION WINDOW frame
-//! (interface_1477 com261..com271) into a NEW Necromancy action-window frame
+//! (`interface_1477` com261..com271) into a NEW Necromancy action-window frame
 //! (com856..com866), driven entirely by the live 910 cache.
 //!
 //! Combat Style Modernisation — the Necromancy "purple book" action window in
-//! the resizable ribbon Powers flyout. The flyout's button list is enum_7703
+//! the resizable ribbon Powers flyout. The flyout's button list is `enum_7703`
 //! ([4,12,5,6,7,8] = Prayer/Familiar/MagicBook/Melee/Ranged/Defensive); each
-//! entry is a dockable HUD window whose layout struct (enum_7716[windowId]) holds
-//! its flyout icon (param_3495/96/97), frame component refs (param_3503..3513 ->
-//! interface_1477:comNNN) and content interface (param_3514..3517).
+//! entry is a dockable HUD window whose layout struct (`enum_7716`[windowId]) holds
+//! its flyout icon (`param_3495/96/97`), frame component refs (`param_3503..3513` ->
+//! `interface_1477:comNNN`) and content interface (`param_3514..3517`).
 //!
-//! The "Magic Book" window (windowId 5, struct_21289) is the ideal clone template
-//! for Necromancy because its content interface is interface_1459 — exactly the
-//! page our necromancy book (interface_1207) was cloned from. Its frame is
-//! interface_1477 com261 (host: 224x288, xmode=abs_right, ymode=abs_bottom,
+//! The "Magic Book" window (windowId 5, `struct_21289`) is the ideal clone template
+//! for Necromancy because its content interface is `interface_1459` — exactly the
+//! page our necromancy book (`interface_1207`) was cloned from. Its frame is
+//! `interface_1477` com261 (host: 224x288, `xmode=abs_right`, `ymode=abs_bottom`,
 //! layer=com50, hide=yes, onload=script8409(5)) with 10 child layers com262..271
 //! (all `layer=com261`). We clone all 11 to com856..com866:
 //!   - the root com856's onload arg 5 -> 1039 (the native-reserved Necromancy
-//!     window id, already iterated by enum_7717),
+//!     window id, already iterated by `enum_7717`),
 //!   - every child's parent `layer` ref com261 -> com856 (the new root).
 //! The host carries NO explicit x/y (it docks via xmode/ymode) so position is left
 //! to the layout/position structs — unlike the earlier (wrong) action-bar clone.
@@ -24,10 +24,10 @@
 //! (decode/encode idempotency).
 //!
 //! Output: <out-dir>/<component-id>.bin per NEW component (com856..com866).
-//! These are packed into a full interface_1477 group-replace .dat by the
+//! These are packed into a full `interface_1477` group-replace .dat by the
 //! TypeScript builder (build-necro-action-window.ts).
 //!
-//! Usage: cargo run --example gen_necro_action_window -- <910-cache> <out-dir>
+//! Usage: cargo run --example `gen_necro_action_window` -- <910-cache> <out-dir>
 
 use rs3_cache_rs::cache::FlatCache;
 use rs3_cache_rs::constants::ARCHIVE_INTERFACES;
@@ -95,12 +95,11 @@ fn main() -> Result<()> {
 
         // Re-parent any layer ref that points at a cloned source component to its
         // destination (handles the root and any internal nesting generically).
-        if component.layer >= 0 {
-            if let Some(&dst) = remap.get(&(component.layer as u32)) {
+        if component.layer >= 0
+            && let Some(&dst) = remap.get(&(component.layer as u32)) {
                 component.layer = i32::try_from(dst).expect("sub-id fits i32");
                 reparented += 1;
             }
-        }
 
         // On the root, retarget the onload window-id arg ("Magic Book" 5 -> NECRO
         // 1039). The root keeps its parent (com50) and abs_right/abs_bottom docking.
@@ -108,12 +107,11 @@ fn main() -> Result<()> {
             for hook in component.hooks.iter_mut().flatten() {
                 if hook.script == 8409 {
                     for arg in &mut hook.args {
-                        if let HookArg::Int(v) = arg {
-                            if *v == SRC_WINDOW_ID {
+                        if let HookArg::Int(v) = arg
+                            && *v == SRC_WINDOW_ID {
                                 *v = DST_WINDOW_ID;
                                 rewrote_onload = true;
                             }
-                        }
                     }
                 }
             }

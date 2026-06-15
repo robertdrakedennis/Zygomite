@@ -6,7 +6,7 @@
 //! Oracle (NEVER edit — these are the committed regression artifacts the tool
 //! must reproduce):
 //!   * `server/cache-patches/relic-system-948/fonts/metrics/<id>.bin`
-//!     — FontMetrics (archive 13) raster payload from `FontRaster.encodeMetrics`.
+//!     — `FontMetrics` (archive 13) raster payload from `FontRaster.encodeMetrics`.
 //!   * `server/cache-patches/relic-system-948/fonts/sprites/<id>.bin`
 //!     — glyph-atlas (archive 8) raster payload from `FontRaster.encodeSprite`.
 //!   * `server/cache-patches/relic-system-948/fonts/groups/{fontmetrics,sprites}/<id>.dat`
@@ -93,8 +93,8 @@ fn fixture_ids_match() {
     assert_eq!(ids, FONT_IDS);
 }
 
-/// Decode → re-encode the FontMetrics oracle and assert byte-identity. Locks the
-/// archive-13 format port (FontRaster.encodeMetrics / client FontMetrics ctor).
+/// Decode → re-encode the `FontMetrics` oracle and assert byte-identity. Locks the
+/// archive-13 format port (FontRaster.encodeMetrics / client `FontMetrics` ctor).
 #[test]
 fn metrics_decode_encode_byte_identical() {
     for (id, metrics_bin, _, _, _) in oracles() {
@@ -167,7 +167,7 @@ fn group_dat_decompresses_to_bin_payload() {
     }
 }
 
-/// FontRaster invariant: the pen advance equals the atlas cell width for every
+/// `FontRaster` invariant: the pen advance equals the atlas cell width for every
 /// inked glyph (`field8573[c][2] = field8574[c]`), so the bitmap text path
 /// spaces glyphs exactly as wide as their atlas sub-rect.
 #[test]

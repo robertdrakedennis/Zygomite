@@ -140,7 +140,7 @@ fn main() {
     if let Some((id, name)) = showcase {
         let locals = &result[id];
         println!("\n=== {name}: rendered locals (G3.3 policy) ===");
-        println!("  {:<22} {:<14} -> {}", "slot", "today", "with G3");
+        println!("  {:<22} {:<14} -> with G3", "slot", "today");
         let mut entries: Vec<_> = locals.iter().collect();
         entries.sort_by_key(|((d, i), _)| (format!("{d:?}"), *i));
         let unknown = lattice().wk().unknown;

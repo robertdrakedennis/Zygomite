@@ -322,7 +322,7 @@ struct TtfDump {
 fn metrics_dump(archive: u32, group: u32, m: &FontMetrics) -> MetricsDump {
     let ink_glyphs = m.glyph_height.iter().filter(|&&h| h > 0).count() as u32;
     let mut sample_glyphs = Vec::new();
-    for &byte in &[b'A', b'a', b'M', b'g', b'0', b'.', b' '] {
+    for &byte in b"AaMg0. " {
         let c = byte as usize;
         sample_glyphs.push(GlyphDump {
             byte,
@@ -860,7 +860,7 @@ fn run_diff(a: u32, b: u32, pack_root: &Path, json: bool) -> Result<()> {
             y_d += 1;
         }
     }
-    for &byte in &[b'A', b'a', b'M', b'g', b'0'] {
+    for &byte in b"AaMg0" {
         let c = byte as usize;
         sample.push(GlyphDiff {
             byte,

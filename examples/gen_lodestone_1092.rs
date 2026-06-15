@@ -2,7 +2,7 @@
 //! 910's NATIVE interface 1092, driven entirely by the live 948 cache layout
 //! (zero hand-transcribed coordinates).
 //!
-//! 948 redrew the lodestone map (graphic_35673, 560x320 vs 910's 23194 at
+//! 948 redrew the lodestone map (`graphic_35673`, 560x320 vs 910's 23194 at
 //! 496x294) and added Fort Forinthry (27103), City of Um (31776) and
 //! Wendlewick (35676). Its component numbering, however, shifts every
 //! destination (948 com8..com40 vs 910 com9..com35), which would break 910's
@@ -14,7 +14,7 @@
 //! viewport, scaling the 948 layout into it:
 //!
 //!   * com7 (map graphic) keeps its 496x294 rect but swaps the art to 948's
-//!     graphic_35673 (if3 graphics render scaled to the component rect),
+//!     `graphic_35673` (if3 graphics render scaled to the component rect),
 //!   * every destination icon com9..com35 is REPOSITIONED to 948's (x,y) for
 //!     the same icon graphic, scaled by 496/560 x 294/320 to match the
 //!     downscaled map art,
@@ -85,7 +85,7 @@ fn load_group(cache_dir: &str) -> Result<BTreeMap<u32, Vec<u8>>> {
 }
 
 /// 948 icon graphic id -> (x, y) on the 560x320 map.
-fn read_948_positions(files: &BTreeMap<u32, Vec<u8>>) -> Result<BTreeMap<i32, (i16, i16)>> {
+fn read_948_positions(files: &BTreeMap<u32, Vec<u8>>) -> BTreeMap<i32, (i16, i16)> {
     let mut positions = BTreeMap::new();
     for data in files.values() {
         if data.get(1).copied().unwrap_or(0) & 0x7F != 5 {
@@ -101,7 +101,7 @@ fn read_948_positions(files: &BTreeMap<u32, Vec<u8>>) -> Result<BTreeMap<i32, (i
             positions.insert(g.graphic, (c.x, c.y));
         }
     }
-    Ok(positions)
+    positions
 }
 
 fn main() -> Result<()> {
@@ -119,7 +119,7 @@ fn main() -> Result<()> {
 
     let files_910 = load_group(&cache_910)?;
     let files_948 = load_group(&cache_948)?;
-    let positions_948 = read_948_positions(&files_948)?;
+    let positions_948 = read_948_positions(&files_948);
 
     let decode = |id: u32| -> Component {
         decode_raw(

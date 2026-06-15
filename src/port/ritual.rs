@@ -36,11 +36,11 @@ use crate::script::script_to_asm;
 /// `table<<12|column<<4|tuple` packing → re-packed to the 910 `table<<8|column`
 /// layout (the `>>4`). Exactly `RITUAL_DB_FIELDS` in the Python.
 const RITUAL_DB_FIELDS: &[i32] = &[
-    958480, 958545, 958592, // table 234 (cols 1/5/8)
-    962560, 962576, 962592, 962608, 962609, 962610, 962611, 962640, // table 235
-    962656, 962672, 962688, 962704, 962720, 962736, 962768, 962784, // table 235
-    962800, 962832, // table 235
-    966674, 966704, 966736, 966768, 966784, 966800, 966816, // table 236
+    958_480, 958_545, 958_592, // table 234 (cols 1/5/8)
+    962_560, 962_576, 962_592, 962_608, 962_609, 962_610, 962_611, 962_640, // table 235
+    962_656, 962_672, 962_688, 962_704, 962_720, 962_736, 962_768, 962_784, // table 235
+    962_800, 962_832, // table 235
+    966_674, 966_704, 966_736, 966_768, 966_784, 966_800, 966_816, // table 236
 ];
 
 /// The 12 closure scripts owned by `SKILL_29_GUIDE_CORE_SCRIPT_PATCHES` (a cache
@@ -103,7 +103,7 @@ const STYLESHEET_STUB_OLD_IDS: &[i32] = &[5360, 10684, 16748];
 const RUNEDAY_STUB_OLD_IDS: &[i32] = &[11205];
 
 /// The donor `text_body_default` colour (dbrow 344/2100): 0xE3D7CF.
-const RITUAL_TEXT_COLOUR: i32 = 14931919;
+const RITUAL_TEXT_COLOUR: i32 = 14_931_919;
 /// The rasterized body font present in the 1224 overlay (26 is absent).
 const RITUAL_TEXT_FONT: i32 = 58;
 

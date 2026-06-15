@@ -1,12 +1,12 @@
-//! G1.3 — corpus round-trip verification for the RuneScript surface.
+//! G1.3 — corpus round-trip verification for the `RuneScript` surface.
 //!
-//! For every `*.ts` reversible script: parse it to the structured IR, render RuneScript, parse the
-//! RuneScript back, and re-render. If the parser faithfully inverts the emitter, the two RuneScript
+//! For every `*.ts` reversible script: parse it to the structured IR, render `RuneScript`, parse the
+//! `RuneScript` back, and re-render. If the parser faithfully inverts the emitter, the two `RuneScript`
 //! texts are identical (emit∘parse∘emit == emit). This is the presentation-level proof that the
-//! RuneScript surface round-trips; the authoritative byte gate lands when the surface is wired into
+//! `RuneScript` surface round-trips; the authoritative byte gate lands when the surface is wired into
 //! the transpile CLI (G1.4), reusing the existing `ReverseCompileContext`.
 //!
-//! Usage: cargo run --example roundtrip_runescript [DIR]
+//! Usage: cargo run --example `roundtrip_runescript` [DIR]
 
 use rs3_cache_rs::transpile::{
     RuneScriptContext, parse_reversible_source, parse_runescript, parse_structured_typescript,

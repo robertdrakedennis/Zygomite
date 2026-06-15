@@ -1320,8 +1320,8 @@ mod tests {
         let slots = multi_slots(&ops);
         assert_eq!(slots.len(), 3);
         assert_eq!(slots[1].value, Some(1));
-        assert_eq!(slots[1].child, 116440);
-        assert_eq!(multi_children(&ops), vec![115415, 116440, 119870]);
+        assert_eq!(slots[1].child, 116_440);
+        assert_eq!(multi_children(&ops), vec![115_415, 116_440, 119_870]);
     }
 
     #[test]

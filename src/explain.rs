@@ -170,6 +170,9 @@ fn base_roster_from_pack(base_pack_root: &Path, version: u32) -> Result<SetRoste
 /// group id and the raw→group re-keying in [`MapScriptSource`] is exact. The raw
 /// bytes (a few MB) are shared (via [`Rc`]) by the callee and signature decoders,
 /// avoiding a second copy and any re-open of the cache per visited group.
+// reason: the return type carries two distinct `impl Fn` closure types that cannot
+// be named in a `type` alias (no stable type-alias-impl-trait); used once here.
+#[allow(clippy::type_complexity)]
 fn donor_script_source(
     cache: &FlatCache,
     opcode_book: OpcodeBook,

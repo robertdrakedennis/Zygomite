@@ -311,7 +311,9 @@ fn patch_sibling(path: &Path) -> Option<PathBuf> {
     let name = path.file_name()?.to_str()?;
     let stem = name.strip_suffix(".js5")?;
     // Guard against double-patching: a `.patch.js5` has no further sibling.
-    if stem.ends_with(".patch") {
+    // (Case-sensitive by design — mirrors the client's exact `.patch.js5` suffix;
+    // `Path::extension` is the dot-segment after the final `.` of the stem.)
+    if Path::new(stem).extension() == Some(std::ffi::OsStr::new("patch")) {
         return None;
     }
     Some(path.with_file_name(format!("{stem}.patch.js5")))

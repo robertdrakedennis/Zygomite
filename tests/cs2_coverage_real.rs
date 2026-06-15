@@ -96,7 +96,7 @@ fn coverage_scan_runs_against_real_pack() {
         .map(|f| (f.kind.as_str(), f.group, f.opcode.unwrap_or(0)))
         .collect();
     let mut sorted = keys.clone();
-    sorted.sort();
+    sorted.sort_unstable();
     assert_eq!(keys, sorted, "findings must be sorted");
 
     // opcode_usage is sorted by id and non-empty.
