@@ -1282,12 +1282,14 @@ pub fn run(cli: Cli) -> Result<()> {
     } = &cli.command
     {
         let default_schema = cli.data_dir.join("protocol").join("910");
-        let drift = crate::protocol_registry::run_generate(&crate::protocol_registry::GenerateProtocolOpts {
-            schema_dir: schema_dir.as_deref().unwrap_or(&default_schema),
-            server_root,
-            client_root,
-            check: *check,
-        })?;
+        let drift = crate::protocol_registry::run_generate(
+            &crate::protocol_registry::GenerateProtocolOpts {
+                schema_dir: schema_dir.as_deref().unwrap_or(&default_schema),
+                server_root,
+                client_root,
+                check: *check,
+            },
+        )?;
         if drift {
             std::process::exit(3);
         }
@@ -1340,13 +1342,15 @@ pub fn run(cli: Cli) -> Result<()> {
             data_dir: cli.data_dir.as_path(),
             base_pack_root: base_pack_root.as_path(),
         });
-        return Ok(crate::explain::run(&crate::explain::ExplainInterfaceOptions {
-            interface: *id,
-            build: *decode_build,
-            source,
-            json: *json,
-            transitive: transitive_opts,
-        })?);
+        return Ok(crate::explain::run(
+            &crate::explain::ExplainInterfaceOptions {
+                interface: *id,
+                build: *decode_build,
+                source,
+                json: *json,
+                transitive: transitive_opts,
+            },
+        )?);
     }
     if let Command::Decode {
         archive,
@@ -1375,13 +1379,14 @@ pub fn run(cli: Cli) -> Result<()> {
     } = &cli.command
     {
         let Command::Cs2 {
-            command: Some(Cs2Command::LintSplice {
-                scripts,
-                target_book,
-                donor_book,
-                fix,
-                json,
-            }),
+            command:
+                Some(Cs2Command::LintSplice {
+                    scripts,
+                    target_book,
+                    donor_book,
+                    fix,
+                    json,
+                }),
             ..
         } = &cli.command
         else {
@@ -1445,18 +1450,20 @@ pub fn run(cli: Cli) -> Result<()> {
             },
     } = &cli.command
     {
-        return Ok(crate::port::config::run(&crate::port::config::ConfigPortOptions {
-            archive: *archive,
-            group: *group,
-            from: *from,
-            to: *to,
-            donor_semantic: donor_semantic.as_path(),
-            donor_raw: donor_raw.as_path(),
-            base_raw: base_raw.as_path(),
-            data_dir: cli.data_dir.as_path(),
-            out_dir: out_dir.as_deref(),
-            json: *json,
-        })?);
+        return Ok(crate::port::config::run(
+            &crate::port::config::ConfigPortOptions {
+                archive: *archive,
+                group: *group,
+                from: *from,
+                to: *to,
+                donor_semantic: donor_semantic.as_path(),
+                donor_raw: donor_raw.as_path(),
+                base_raw: base_raw.as_path(),
+                data_dir: cli.data_dir.as_path(),
+                out_dir: out_dir.as_deref(),
+                json: *json,
+            },
+        )?);
     }
     // `interface transcode` reads the donor group from a raw `.dat` or the runtime
     // pack directly and validates through the in-process 910 mirror; no flat cache
@@ -1611,10 +1618,7 @@ pub fn run(cli: Cli) -> Result<()> {
         ),
         Command::Audio { out_dir, max_files } => crate::commands::audio::run(
             &ctx,
-            crate::commands::audio::AudioOpts {
-                out_dir,
-                max_files,
-            },
+            crate::commands::audio::AudioOpts { out_dir, max_files },
         ),
         Command::Unpack {
             out_dir,
@@ -1869,4 +1873,3 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::OverlayPlan { .. } => unreachable!("handled before cache open"),
     }
 }
-

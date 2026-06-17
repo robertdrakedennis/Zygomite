@@ -1,4 +1,4 @@
-use super::{gsmart2or4s, OpListEntry};
+use super::{OpListEntry, gsmart2or4s};
 use crate::cache_bail as bail;
 use crate::error::Result;
 use crate::packet::Packet;

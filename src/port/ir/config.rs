@@ -147,8 +147,11 @@ mod tests {
     use std::path::PathBuf;
 
     fn descriptor(build: u32) -> BuildDescriptor {
-        BuildDescriptor::load(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("data"), build)
-            .expect("load descriptor")
+        BuildDescriptor::load(
+            &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("data"),
+            build,
+        )
+        .expect("load descriptor")
     }
 
     #[test]

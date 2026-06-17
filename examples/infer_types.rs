@@ -32,8 +32,13 @@ fn base_unrefined(name: &str) -> bool {
 }
 
 fn main() {
-    let dir = std::env::args().nth(1).unwrap_or_else(|| "/tmp/948-transpile".to_string());
-    let build: u32 = std::env::args().nth(2).and_then(|s| s.parse().ok()).unwrap_or(948);
+    let dir = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "/tmp/948-transpile".to_string());
+    let build: u32 = std::env::args()
+        .nth(2)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(948);
     let sigs = SignatureTable::embedded(build);
 
     // Parse every script; key by both its packed id and its group id (gosub may use
@@ -75,7 +80,13 @@ fn main() {
     // gosub-free subset — used to check whether `conflict`s come from the ret=0
     // gosub approximation (misaligned stack) vs a real stack-discipline bug.
     let no_callee = std::env::var("INFER_NO_CALLEE").is_ok();
-    let callee = |id: i32| if no_callee { None } else { callee_map.get(&id).copied() };
+    let callee = |id: i32| {
+        if no_callee {
+            None
+        } else {
+            callee_map.get(&id).copied()
+        }
+    };
     let (result, conflict_hist) = infer_program_diag(&refs, sigs, &callee);
 
     let total = scripts.len();
@@ -131,7 +142,10 @@ fn main() {
     let showcase = result
         .iter()
         .map(|(id, locals)| {
-            let refined = locals.values().filter(|t| !base_unrefined(t.name())).count();
+            let refined = locals
+                .values()
+                .filter(|t| !base_unrefined(t.name()))
+                .count();
             (id, refined)
         })
         .filter(|(_, refined)| *refined >= 2)
@@ -147,7 +161,11 @@ fn main() {
         for ((domain, index), ty) in entries.into_iter().take(30) {
             let base = render_local_type(unknown, *domain); // today's base VM type
             let rendered = render_local_type(*ty, *domain);
-            let marker = if rendered == base { "" } else { "  <-- refined" };
+            let marker = if rendered == base {
+                ""
+            } else {
+                "  <-- refined"
+            };
             println!("  $local_{domain:?}_{index:<10} def_{base:<10} def_{rendered}{marker}");
         }
     }

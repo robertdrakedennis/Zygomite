@@ -64,7 +64,9 @@ pub fn encode_component(component: &Component, target: &BuildDescriptor) -> Resu
         ),
     };
 
-    let mut w = ByteWriter::with_capacity(component.header_tail.len() + body.len() + component.tail.len() + 2);
+    let mut w = ByteWriter::with_capacity(
+        component.header_tail.len() + body.len() + component.tail.len() + 2,
+    );
     // Re-emit the header with the forced target version (9) + the component type,
     // preserving the name-present bit. `write_header` takes the ORIGINAL header
     // bytes (version + type + header-tail) to read the name bit; reconstruct that
@@ -92,7 +94,11 @@ fn version_byte(version: i16) -> u8 {
 /// Encode every component of the (already-lowered) IR group, validate each through
 /// the 910 mirror, and re-pack into a raw group `.dat`. The roster must be the
 /// dense `0..n` range the interface archive uses.
-pub fn encode_group(ir: &InterfaceIr, target: &BuildDescriptor, version: u16) -> Result<EncodedGroup> {
+pub fn encode_group(
+    ir: &InterfaceIr,
+    target: &BuildDescriptor,
+    version: u16,
+) -> Result<EncodedGroup> {
     let mut components = BTreeMap::new();
     for (id, component) in ir.components.iter().enumerate() {
         let id = id as u32;
@@ -120,9 +126,7 @@ pub fn encode_group(ir: &InterfaceIr, target: &BuildDescriptor, version: u16) ->
     for (expected, &id) in roster.iter().enumerate() {
         let expected = expected as u32;
         if id != expected {
-            bail!(
-                "interface group roster is not dense from 0 (got {id} at slot {expected})"
-            );
+            bail!("interface group roster is not dense from 0 (got {id} at slot {expected})");
         }
     }
     let ordered: Vec<Vec<u8>> = roster.iter().map(|id| components[id].clone()).collect();

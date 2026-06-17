@@ -106,8 +106,9 @@ const OPEN_INTERFACE_OPCODE: &str = "if_opensubclient";
 
 /// Generic English words and UI chrome that carry no feature signal.
 const STOPWORDS: &[&str] = &[
-    "with", "from", "this", "that", "your", "have", "into", "more", "menu", "none", "null", "click",
-    "here", "back", "next", "page", "open", "close", "cancel", "select", "view", "examine", "press",
+    "with", "from", "this", "that", "your", "have", "into", "more", "menu", "none", "null",
+    "click", "here", "back", "next", "page", "open", "close", "cancel", "select", "view",
+    "examine", "press",
 ];
 
 // ───────────────────────────── output model ─────────────────────────────
@@ -349,7 +350,10 @@ impl<'ctx> LocIndex<'ctx> {
                         reads_varp.entry(id).or_default().insert(u32::from(var.id));
                     }
                     Operand::VarBitRef(var) => {
-                        reads_varbit.entry(id).or_default().insert(u32::from(var.id));
+                        reads_varbit
+                            .entry(id)
+                            .or_default()
+                            .insert(u32::from(var.id));
                     }
                     Operand::Script(called) if *called >= 0 => {
                         calls.entry(id).or_default().insert(*called as u32);
@@ -743,8 +747,11 @@ impl<'ctx> LocIndex<'ctx> {
                 .copied()
                 .collect();
 
-            let gating_block_varps: Vec<u32> =
-                block_set.iter().filter(|v| read_varps.contains(v)).copied().collect();
+            let gating_block_varps: Vec<u32> = block_set
+                .iter()
+                .filter(|v| read_varps.contains(v))
+                .copied()
+                .collect();
             // Related varps: those read by a closure script that ALSO reads a block
             // varp (same feature reader), but which sit outside the contiguous block
             // — e.g. a sibling unlock bitset packed far from the gate's base.
@@ -763,9 +770,8 @@ impl<'ctx> LocIndex<'ctx> {
             // them is feature-specific (all are widely shared) — the combat / action-
             // bar false-positive pattern. Feature-specific reads (few readers) mark a
             // candidate as a real domain match, not generic chrome.
-            let has_specific_block_varp = gating_block_varps
-                .iter()
-                .any(|&v| !self.is_generic_varp(v));
+            let has_specific_block_varp =
+                gating_block_varps.iter().any(|&v| !self.is_generic_varp(v));
             let generic_block_match =
                 broad_block && !gating_block_varps.is_empty() && !has_specific_block_varp;
 
@@ -779,12 +785,12 @@ impl<'ctx> LocIndex<'ctx> {
             // Confidence: High only when a cache open edge ties this interface to the
             // gate — a clientscript in its closure opens it AND the closure reads the
             // gating var. Otherwise the open is server-side and this is a heuristic.
-            let confidence = if self.has_cache_open_edge(iface, &closure, gating_varbit, gating_varp)
-            {
-                Confidence::High
-            } else {
-                Confidence::Low
-            };
+            let confidence =
+                if self.has_cache_open_edge(iface, &closure, gating_varbit, gating_varp) {
+                    Confidence::High
+                } else {
+                    Confidence::Low
+                };
 
             let (enums, dbtables, title) = self.interface_summary(iface);
 
@@ -846,9 +852,11 @@ impl<'ctx> LocIndex<'ctx> {
         gating_varbit: Option<u32>,
         gating_varp: Option<u32>,
     ) -> bool {
-        let opens_this = closure
-            .iter()
-            .any(|s| self.opens_interface.get(s).is_some_and(|set| set.contains(&iface)));
+        let opens_this = closure.iter().any(|s| {
+            self.opens_interface
+                .get(s)
+                .is_some_and(|set| set.contains(&iface))
+        });
         if !opens_this {
             return false;
         }
@@ -1258,7 +1266,11 @@ pub fn render_human(explained: &ExplainedLoc) -> String {
             candidate.score
         );
         if !candidate.matched_tokens.is_empty() {
-            let _ = writeln!(out, "       tokens: {}", candidate.matched_tokens.join(", "));
+            let _ = writeln!(
+                out,
+                "       tokens: {}",
+                candidate.matched_tokens.join(", ")
+            );
         }
         if !candidate.gating_block_varps.is_empty() {
             let _ = writeln!(
@@ -1298,7 +1310,10 @@ fn gate_label(explained: &ExplainedLoc) -> String {
 
 /// Comma-join ids.
 fn join_ids(ids: &[u32]) -> String {
-    ids.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ")
+    ids.iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 #[cfg(test)]
@@ -1355,8 +1370,14 @@ mod tests {
     fn banner_names_gate_readers_and_heuristic() {
         // Zero readers (the monolith gate): banner says so and flags heuristic-only.
         let none = server_binding_banner(Some(49357), None, 0, &[]);
-        assert!(none.contains("gating varbit 49357 has no clientscript readers"), "{none}");
-        assert!(none.contains("no cache binding") && none.contains("heuristic"), "{none}");
+        assert!(
+            none.contains("gating varbit 49357 has no clientscript readers"),
+            "{none}"
+        );
+        assert!(
+            none.contains("no cache binding") && none.contains("heuristic"),
+            "{none}"
+        );
 
         // A reader that opens nothing (the ritual gate, 1 reader) is still reported,
         // and the generic-match phrasing kicks in when a candidate is generic.

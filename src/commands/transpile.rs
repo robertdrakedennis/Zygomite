@@ -24,10 +24,13 @@ use crate::commands::ts_export::{
 };
 use crate::constants::ARCHIVE_CLIENTSCRIPTS;
 use crate::dep_tree::ResolverContext;
-use crate::script::{CompiledScript, OpcodeBook, Operand, decode_script, encode_script, parse_cs2_asm};
+use crate::script::{
+    CompiledScript, OpcodeBook, Operand, decode_script, encode_script, parse_cs2_asm,
+};
 use crate::transpile::{
-    ReverseCompileContext, ScriptCatalog, Transpiler, is_reversible_source, lower_structured_script,
-    parse_reversible_source, parse_structured_typescript, render_reversible_source,
+    ReverseCompileContext, ScriptCatalog, Transpiler, is_reversible_source,
+    lower_structured_script, parse_reversible_source, parse_structured_typescript,
+    render_reversible_source,
 };
 
 /// Options for `transpile-scripts`.
@@ -124,7 +127,10 @@ fn finalize_reversible_transpile_output(
         && let Err(block) =
             recompile_fidelity_check_runescript(&parsed, &metadata, reverse_ctx, opcode_book)
     {
-        push_unique_diagnostic(&mut metadata.blocking_diagnostics, "runescript_gate".to_string());
+        push_unique_diagnostic(
+            &mut metadata.blocking_diagnostics,
+            "runescript_gate".to_string(),
+        );
         if let Some(cause) = block.cause {
             push_unique_diagnostic(
                 &mut metadata.blocking_diagnostics,
@@ -311,7 +317,6 @@ fn finalize_with_linear_fallback(
         })
     }
 }
-
 
 fn output_style_fallback_reason(
     output_style: TranspileOutputStyle,
@@ -631,7 +636,6 @@ fn recompile_divergence(
         "recompile differs in header/locals/args only".to_string(),
     )
 }
-
 
 #[expect(
     clippy::too_many_arguments,
@@ -1758,5 +1762,4 @@ export function script0(): void {
             coverage.fallback_gate_blockers.get("recompile_mismatch")
         );
     }
-
 }

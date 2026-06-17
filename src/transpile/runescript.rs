@@ -92,7 +92,10 @@ impl RuneScriptContext {
             if name.is_empty() {
                 continue;
             }
-            if let Some(suffix) = name.strip_prefix("cc_").or_else(|| name.strip_prefix("if_")) {
+            if let Some(suffix) = name
+                .strip_prefix("cc_")
+                .or_else(|| name.strip_prefix("if_"))
+            {
                 let key = strip_underscores(suffix).to_ascii_lowercase();
                 let entry = ui.entry(key).or_default();
                 if name.starts_with("cc_") {
@@ -146,7 +149,10 @@ impl RuneScriptContext {
     /// opcodes are un-stripped, synthetics are passed through verbatim.
     #[must_use]
     pub fn is_canonical_command(&self, name: &str) -> bool {
-        self.generic.get(&strip_underscores(name)).map(String::as_str) == Some(name)
+        self.generic
+            .get(&strip_underscores(name))
+            .map(String::as_str)
+            == Some(name)
     }
 }
 
@@ -272,7 +278,10 @@ impl LocalRenamer {
     }
 
     fn argument_names(&self) -> HashSet<String> {
-        self.arguments.iter().map(|(_, name)| name.clone()).collect()
+        self.arguments
+            .iter()
+            .map(|(_, name)| name.clone())
+            .collect()
     }
 
     fn local(&self, name: &str) -> Option<&str> {
@@ -571,8 +580,16 @@ impl Emitter<'_> {
         let explicit = match method {
             "getText" => Some("if_gettext"),
             "findInterface" => Some("if_find"),
-            "sendToFront" => Some(if n == 1 { "if_sendtofront" } else { "cc_sendtofront" }),
-            "sendToBack" => Some(if n == 1 { "if_sendtoback" } else { "cc_sendtoback" }),
+            "sendToFront" => Some(if n == 1 {
+                "if_sendtofront"
+            } else {
+                "cc_sendtofront"
+            }),
+            "sendToBack" => Some(if n == 1 {
+                "if_sendtoback"
+            } else {
+                "cc_sendtoback"
+            }),
             _ => None,
         };
         let canonical = if let Some(cmd) = explicit {
@@ -901,7 +918,9 @@ mod tests {
             vec![arg("arg_int_0"), arg("arg_int_1")],
             Vec::new(),
             "number",
-            vec![StructuredStmt::Return { value: Some(num(1)) }],
+            vec![StructuredStmt::Return {
+                value: Some(num(1)),
+            }],
         );
         let out = render_runescript(&s, &ctx());
         assert!(

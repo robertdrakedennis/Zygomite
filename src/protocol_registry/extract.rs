@@ -62,7 +62,6 @@ pub struct ExtractOutput {
     pub counts: BTreeMap<String, usize>,
 }
 
-
 fn java_path(client_root: &Path, prot: Prot) -> PathBuf {
     client_root
         .join("client/src/main/java/com/jagex/game/network/protocol")
@@ -282,18 +281,26 @@ fn detect_dups_java(prot: Prot, java: &JavaParse, findings: &mut Vec<Finding>) {
     let mut seen_name: BTreeSet<&str> = BTreeSet::new();
     for p in &java.packets {
         if !seen_op.insert(p.opcode) {
-            findings.push(dup_finding(tag, Some(p.opcode), format!(
-                "{tag} (client {}): duplicate opcode {}",
-                prot.java_file(),
-                p.opcode
-            )));
+            findings.push(dup_finding(
+                tag,
+                Some(p.opcode),
+                format!(
+                    "{tag} (client {}): duplicate opcode {}",
+                    prot.java_file(),
+                    p.opcode
+                ),
+            ));
         }
         if !seen_name.insert(p.name.as_str()) {
-            findings.push(dup_finding(tag, Some(p.opcode), format!(
-                "{tag} (client {}): duplicate name `{}`",
-                prot.java_file(),
-                p.name
-            )));
+            findings.push(dup_finding(
+                tag,
+                Some(p.opcode),
+                format!(
+                    "{tag} (client {}): duplicate name `{}`",
+                    prot.java_file(),
+                    p.name
+                ),
+            ));
         }
     }
 }
@@ -305,18 +312,26 @@ fn detect_dups_ts(prot: Prot, ts: &[TsPacket], findings: &mut Vec<Finding>) {
     let mut seen_name: BTreeSet<&str> = BTreeSet::new();
     for p in ts {
         if !seen_op.insert(p.opcode) {
-            findings.push(dup_finding(tag, Some(p.opcode), format!(
-                "{tag} (server {}): duplicate opcode {}",
-                prot.ts_file(),
-                p.opcode
-            )));
+            findings.push(dup_finding(
+                tag,
+                Some(p.opcode),
+                format!(
+                    "{tag} (server {}): duplicate opcode {}",
+                    prot.ts_file(),
+                    p.opcode
+                ),
+            ));
         }
         if !seen_name.insert(p.name.as_str()) {
-            findings.push(dup_finding(tag, Some(p.opcode), format!(
-                "{tag} (server {}): duplicate name `{}`",
-                prot.ts_file(),
-                p.name
-            )));
+            findings.push(dup_finding(
+                tag,
+                Some(p.opcode),
+                format!(
+                    "{tag} (server {}): duplicate name `{}`",
+                    prot.ts_file(),
+                    p.name
+                ),
+            ));
         }
     }
 }
@@ -385,8 +400,11 @@ fn print_extract_summary(output: &ExtractOutput, out_dir: &Path) {
         );
     }
     for check in ["P1", "P2", "P3", "P4", "P5", "P6"] {
-        let matching: Vec<&Finding> =
-            output.findings.iter().filter(|f| f.check == check).collect();
+        let matching: Vec<&Finding> = output
+            .findings
+            .iter()
+            .filter(|f| f.check == check)
+            .collect();
         println!("{check}: {} finding(s)", matching.len());
         for finding in matching.iter().take(20) {
             println!("  - {}", finding.message);

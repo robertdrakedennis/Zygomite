@@ -63,7 +63,9 @@ fn caches_present() -> bool {
 #[test]
 fn config_port_reproduces_committed_relic_bodies() {
     if !caches_present() {
-        eprintln!("skipping config_port_reproduces_committed_relic_bodies: donor/base caches absent");
+        eprintln!(
+            "skipping config_port_reproduces_committed_relic_bodies: donor/base caches absent"
+        );
         return;
     }
     let inputs = TranscodeInputs::load(&donor_semantic()).expect("load donor semantic json");
@@ -73,7 +75,8 @@ fn config_port_reproduces_committed_relic_bodies() {
 
     let oracle_g40 = decompress_raw_group(GROUP40_DAT).expect("decompress oracle group 40");
     assert_eq!(
-        out.group40_body, oracle_g40,
+        out.group40_body,
+        oracle_g40,
         "IR-ported group-40 body != oracle ({} vs {} bytes)",
         out.group40_body.len(),
         oracle_g40.len()
@@ -86,7 +89,8 @@ fn config_port_reproduces_committed_relic_bodies() {
 
     let oracle_idx = decompress_raw_group(INDEX94_DAT).expect("decompress oracle index 94");
     assert_eq!(
-        out.index94_body, oracle_idx,
+        out.index94_body,
+        oracle_idx,
         "IR-ported index-94 body != oracle ({} vs {} bytes)",
         out.index94_body.len(),
         oracle_idx.len()
@@ -111,12 +115,31 @@ fn config_ir_path_equals_json_path() {
     let target = BuildDescriptor::load(&data_dir(), 910).expect("load 910 descriptor");
 
     let json = transcode_db_groups(&inputs, &base_raw(), &donor_raw()).expect("json transcode");
-    let ir = port_relic_db_groups(&inputs, &base_raw(), &donor_raw(), &target).expect("ir transcode");
+    let ir =
+        port_relic_db_groups(&inputs, &base_raw(), &donor_raw(), &target).expect("ir transcode");
 
-    assert_eq!(ir.group40_body, json.group40_body, "group-40 bodies differ (IR vs JSON)");
-    assert_eq!(ir.group40_roster, json.group40_roster, "group-40 rosters differ");
-    assert_eq!(ir.group40_metadata, json.group40_metadata, "group-40 metadata differ");
-    assert_eq!(ir.index94_body, json.index94_body, "index-94 bodies differ (IR vs JSON)");
-    assert_eq!(ir.index94_roster, json.index94_roster, "index-94 rosters differ");
-    assert_eq!(ir.index94_metadata, json.index94_metadata, "index-94 metadata differ");
+    assert_eq!(
+        ir.group40_body, json.group40_body,
+        "group-40 bodies differ (IR vs JSON)"
+    );
+    assert_eq!(
+        ir.group40_roster, json.group40_roster,
+        "group-40 rosters differ"
+    );
+    assert_eq!(
+        ir.group40_metadata, json.group40_metadata,
+        "group-40 metadata differ"
+    );
+    assert_eq!(
+        ir.index94_body, json.index94_body,
+        "index-94 bodies differ (IR vs JSON)"
+    );
+    assert_eq!(
+        ir.index94_roster, json.index94_roster,
+        "index-94 rosters differ"
+    );
+    assert_eq!(
+        ir.index94_metadata, json.index94_metadata,
+        "index-94 metadata differ"
+    );
 }

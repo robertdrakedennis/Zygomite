@@ -39,8 +39,7 @@ fn registry_book_equals_txt_book_910() {
         return;
     }
 
-    let from_reg =
-        OpcodeBook::from_registry(&registry, 910).expect("from_registry(910)");
+    let from_reg = OpcodeBook::from_registry(&registry, 910).expect("from_registry(910)");
     // 910 is subbuild 0.
     let from_txt = OpcodeBook::load_from_txt(&data_dir(), 910, 0).expect("load_from_txt(910)");
 
@@ -55,7 +54,11 @@ fn registry_book_equals_txt_book_910() {
     }
 
     // by_name, large_by_id (length + element-wise), aliases: full equality.
-    assert_eq!(from_reg.by_name(), from_txt.by_name(), "910: by_name differs");
+    assert_eq!(
+        from_reg.by_name(),
+        from_txt.by_name(),
+        "910: by_name differs"
+    );
     assert_eq!(
         from_reg.large_by_id().len(),
         from_txt.large_by_id().len(),
@@ -69,7 +72,11 @@ fn registry_book_equals_txt_book_910() {
     {
         assert_eq!(reg, txt, "910: large_by_id mismatch at id {id}");
     }
-    assert_eq!(from_reg.aliases(), from_txt.aliases(), "910: aliases differ");
+    assert_eq!(
+        from_reg.aliases(),
+        from_txt.aliases(),
+        "910: aliases differ"
+    );
 }
 
 #[test]
@@ -82,8 +89,7 @@ fn registry_948_diverges_only_by_donor_only_opcodes() {
 
     // The 948 opcode file is unscoped (`opcodes-948.txt`), so subbuild is
     // irrelevant to fallback resolution; pass 1 (the donor subbuild convention).
-    let from_reg =
-        OpcodeBook::from_registry(&registry, 948).expect("from_registry(948)");
+    let from_reg = OpcodeBook::from_registry(&registry, 948).expect("from_registry(948)");
     let from_txt = OpcodeBook::load_from_txt(&data_dir(), 948, 1).expect("load_from_txt(948)");
 
     // Every id the registry-derived 948 book DOES map must agree with the txt

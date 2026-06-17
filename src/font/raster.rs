@@ -251,8 +251,7 @@ pub fn rasterize(face_bytes: &[u8], mode: SizeMode) -> Result<RasterFont> {
         for y in 0..g.h {
             let dst = ((g.atlas_y + y) * atlas_w + g.atlas_x) as usize;
             let src = (y * g.w) as usize;
-            atlas_alpha[dst..dst + g.w as usize]
-                .copy_from_slice(&g.alpha[src..src + g.w as usize]);
+            atlas_alpha[dst..dst + g.w as usize].copy_from_slice(&g.alpha[src..src + g.w as usize]);
         }
     }
 
@@ -346,7 +345,11 @@ fn clamp_u16(v: i32) -> u16 {
 ///
 /// This is the `font preview` sample round-trip; if the encode is correct the
 /// text is legible — proving the client will render it too.
-pub fn render_sample(metrics: &FontMetrics, atlas: &[u8], text: &str) -> Result<(u32, u32, Vec<u8>)> {
+pub fn render_sample(
+    metrics: &FontMetrics,
+    atlas: &[u8],
+    text: &str,
+) -> Result<(u32, u32, Vec<u8>)> {
     let atlas_w = i32::from(metrics.atlas_w);
     let atlas_h = i32::from(metrics.atlas_h);
     if atlas.len() != (atlas_w * atlas_h) as usize {

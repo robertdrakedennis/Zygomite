@@ -156,16 +156,24 @@ mod tests {
 
     #[test]
     fn switch_targets_are_remapped() {
-        let old = [Insn::bare("x"),
+        let old = [
+            Insn::bare("x"),
             Insn {
                 op: "switch".into(),
                 operand: Operand::Switch(vec![
-                    SwitchCase { value: 0, target: 3 },
-                    SwitchCase { value: 1, target: 0 },
+                    SwitchCase {
+                        value: 0,
+                        target: 3,
+                    },
+                    SwitchCase {
+                        value: 1,
+                        target: 0,
+                    },
                 ]),
             },
             Insn::bare("y"),
-            Insn::bare("z")];
+            Insn::bare("z"),
+        ];
         let mut rb = Rebuilder::new();
         for (i, insn) in old.iter().enumerate() {
             rb.begin();

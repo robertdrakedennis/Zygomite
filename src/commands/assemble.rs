@@ -240,8 +240,11 @@ pub fn run_batch(data_dir: &Path, version: RuntimeVersion, opts: AssembleBatchOp
             .with_context(|| format!("parsing ASM pragmas from {}", script.input.display()))?;
         let binary = encode_script(&compiled, &opcode_book, build)
             .with_context(|| format!("encoding script {}", script.script_id))?;
-        fs::write(out_dir.join(format!("script-{}.cs2", script.script_id)), binary)
-            .with_context(|| format!("writing script {}", script.script_id))?;
+        fs::write(
+            out_dir.join(format!("script-{}.cs2", script.script_id)),
+            binary,
+        )
+        .with_context(|| format!("writing script {}", script.script_id))?;
     }
     eprintln!(
         "assemble-script-batch: assembled {} script(s) in {}ms",

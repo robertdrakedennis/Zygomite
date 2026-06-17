@@ -145,11 +145,15 @@ fn patch_11674(
     let mut ir = base_ir(base_source, 11674)?;
     let base = ir.code.len() as i32;
     // The base must end with a bare `return`.
-    let last = ir.code.last().ok_or_else(|| {
-        crate::error::CacheError::message("script11674 is empty")
-    })?;
+    let last = ir
+        .code
+        .last()
+        .ok_or_else(|| crate::error::CacheError::message("script11674 is empty"))?;
     if last.op != "return" {
-        bail!("script11674 does not end with a bare return (got `{}`)", last.op);
+        bail!(
+            "script11674 does not end with a bare return (got `{}`)",
+            last.op
+        );
     }
     let last_idx = ir.code.len() - 1;
     ir.code[last_idx] = branch(base);
@@ -189,10 +193,9 @@ fn find_switch_with_case(ir: &Cs2Ir, value: i32) -> Result<usize> {
 }
 
 fn render_asm(ir: &Cs2Ir, target: &BuildDescriptor, alloc: &ProcAllocator) -> Result<String> {
-    let compiled = ir.to_compiled(
-        &|field| target.encode_db_field(field),
-        &|identity| Ok(alloc.resolve(identity)),
-    )?;
+    let compiled = ir.to_compiled(&|field| target.encode_db_field(field), &|identity| {
+        Ok(alloc.resolve(identity))
+    })?;
     Ok(script_to_asm(&compiled))
 }
 

@@ -150,14 +150,26 @@ pub fn run(opts: &ConfigPortOptions<'_>) -> Result<()> {
             s,
             "  group 40: {} files (donor {} verbatim, {} re-encoded via DbTable IR), body {} bytes",
             out.group40_roster.len(),
-            SERVER_ONLY_TABLES.iter().map(ToString::to_string).collect::<Vec<_>>().join("/"),
-            REENCODE_TABLES.iter().map(ToString::to_string).collect::<Vec<_>>().join("/"),
+            SERVER_ONLY_TABLES
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("/"),
+            REENCODE_TABLES
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("/"),
             out.group40_body.len()
         );
         let _ = writeln!(
             s,
             "  index 94: files {} , body {} bytes",
-            out.index94_roster.iter().map(ToString::to_string).collect::<Vec<_>>().join("/"),
+            out.index94_roster
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("/"),
             out.index94_body.len()
         );
         if opts.out_dir.is_some() {

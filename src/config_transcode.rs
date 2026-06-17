@@ -33,8 +33,7 @@ use crate::packet::ByteWriter;
 
 /// Default donor semantic config dir (crate-relative). Holds `dbtables.json` /
 /// `dbrows.json` for the 948 donor.
-pub const DEFAULT_DONOR_SEMANTIC: &str =
-    "../../cache/rs3-cache/948-all/config";
+pub const DEFAULT_DONOR_SEMANTIC: &str = "../../cache/rs3-cache/948-all/config";
 /// Default donor raw-flat root (for the server-only tables 88/89 ride-along).
 pub const DEFAULT_DONOR_RAW: &str = "../../cache/rs3-cache/948-all/raw-flat";
 /// Default base (910) raw-flat root.
@@ -146,7 +145,10 @@ fn encode_schema_columns(table_id: u32, columns: &[SchemaColumn<'_>]) -> Result<
         }
         if has_defaults {
             buf.psmart1or2(u16::try_from(column.defaults.len()).with_context(|| {
-                format!("table {table_id} col {} default count overflow", column.column)
+                format!(
+                    "table {table_id} col {} default count overflow",
+                    column.column
+                )
             })?)?;
             for field in &column.defaults {
                 if field.len() != column.tuple_types.len() {
@@ -204,11 +206,14 @@ fn semantic_table_to_ir(table: &SemanticTable) -> Result<crate::port::ir::config
             let mut tuple = Vec::with_capacity(field.len());
             for (i, type_id) in column.tuple_types.iter().enumerate() {
                 tuple.push(match dbtype_base(*type_id) {
-                    DbTypeBase::Int => {
-                        ScalarValue::Int(i32::try_from(value_as_i64(&field[i])?).with_context(
-                            || format!("table {} col {} int value out of i32 range", table.id, column.column),
-                        )?)
-                    }
+                    DbTypeBase::Int => ScalarValue::Int(
+                        i32::try_from(value_as_i64(&field[i])?).with_context(|| {
+                            format!(
+                                "table {} col {} int value out of i32 range",
+                                table.id, column.column
+                            )
+                        })?,
+                    ),
                     DbTypeBase::Long => ScalarValue::Long(value_as_i64(&field[i])?),
                     DbTypeBase::String => ScalarValue::Str(value_as_str(&field[i])?.to_string()),
                 });
@@ -379,9 +384,11 @@ fn build_raw_group(body: &[u8], version: u16) -> Result<Vec<u8>> {
 /// Read and decode the archive index for `archive` from a raw-flat root
 /// (`<root>/255/<archive>.dat`).
 fn read_index(raw_root: &Path, archive: u32) -> Result<ArchiveIndex> {
-    let path = raw_root.join(ARCHIVE_SET.to_string()).join(format!("{archive}.dat"));
-    let bytes = std::fs::read(&path)
-        .with_context(|| format!("read archive index {}", path.display()))?;
+    let path = raw_root
+        .join(ARCHIVE_SET.to_string())
+        .join(format!("{archive}.dat"));
+    let bytes =
+        std::fs::read(&path).with_context(|| format!("read archive index {}", path.display()))?;
     let decompressed = decompress(&bytes)
         .with_context(|| format!("decompress archive index {}", path.display()))?;
     ArchiveIndex::decode(&decompressed)
@@ -396,9 +403,10 @@ fn read_group_files(
     archive: u32,
     group: u32,
 ) -> Result<BTreeMap<u32, Vec<u8>>> {
-    let path = raw_root.join(archive.to_string()).join(format!("{group}.dat"));
-    let bytes = std::fs::read(&path)
-        .with_context(|| format!("read group {}", path.display()))?;
+    let path = raw_root
+        .join(archive.to_string())
+        .join(format!("{group}.dat"));
+    let bytes = std::fs::read(&path).with_context(|| format!("read group {}", path.display()))?;
     // Strip the 2-byte version trailer before decompressing (raw groups carry it).
     let container = &bytes[..bytes.len().saturating_sub(2)];
     unpack_group(index, group, container)
@@ -419,11 +427,7 @@ struct GroupMetadata {
 
 impl GroupMetadata {
     fn new(roster: &[u32]) -> Result<Self> {
-        let max = roster
-            .iter()
-            .copied()
-            .max()
-            .context("empty group roster")?;
+        let max = roster.iter().copied().max().context("empty group roster")?;
         Ok(Self {
             group_size: roster.len(),
             group_capacity: max + 1,
@@ -541,8 +545,11 @@ fn build_group40_body(
 /// Build the DbTableIndex group-94 body (files 0 / 1 / 10). Port of section 2 of
 /// `build-relic-db-910.ts`.
 fn build_index94_body(inputs: &TranscodeInputs) -> (Vec<u8>, Vec<u32>) {
-    let relic_rows: Vec<&SemanticRow> =
-        inputs.rows.iter().filter(|r| r.table == RELIC_TABLE).collect();
+    let relic_rows: Vec<&SemanticRow> = inputs
+        .rows
+        .iter()
+        .filter(|r| r.table == RELIC_TABLE)
+        .collect();
 
     // Mirror the TS `col`: read column `column`'s first row's first tuple cell,
     // returning it only when it is a number (string cells yield `None`).
@@ -653,8 +660,11 @@ fn build_index94_body_ir(
     target: &crate::port::book::BuildDescriptor,
 ) -> (Vec<u8>, Vec<u32>) {
     use crate::port::ir::config::DbTableIndex;
-    let relic_rows: Vec<&SemanticRow> =
-        inputs.rows.iter().filter(|r| r.table == RELIC_TABLE).collect();
+    let relic_rows: Vec<&SemanticRow> = inputs
+        .rows
+        .iter()
+        .filter(|r| r.table == RELIC_TABLE)
+        .collect();
 
     let col = |row: &SemanticRow, column: u8| -> Option<i32> {
         let entry = row.columns.iter().find(|c| c.column == column)?;
@@ -695,7 +705,8 @@ pub fn transcode_db_groups_ir(
     donor_raw: &Path,
     target: &crate::port::book::BuildDescriptor,
 ) -> Result<TranscodedDbGroup> {
-    let (group40_body, group40_roster) = build_group40_body_ir(inputs, base_raw, donor_raw, target)?;
+    let (group40_body, group40_roster) =
+        build_group40_body_ir(inputs, base_raw, donor_raw, target)?;
     let group40_metadata = GroupMetadata::new(&group40_roster)?.to_json();
     let (index94_body, index94_roster) = build_index94_body_ir(inputs, target);
     let index94_metadata = GroupMetadata::new(&index94_roster)?.to_json();
@@ -724,8 +735,11 @@ pub fn write_transcoded_db_group(out: &TranscodedDbGroup, dir: &Path) -> Result<
 
     let group40_dat = build_raw_group(&out.group40_body, 1)?;
     std::fs::write(config_dir.join("40-948.dat"), &group40_dat).context("write 40-948.dat")?;
-    std::fs::write(config_dir.join("40-948.metadata.json"), &out.group40_metadata)
-        .context("write 40-948.metadata.json")?;
+    std::fs::write(
+        config_dir.join("40-948.metadata.json"),
+        &out.group40_metadata,
+    )
+    .context("write 40-948.metadata.json")?;
 
     let index94_dat = build_raw_group(&out.index94_body, 1)?;
     std::fs::write(index_dir.join("94.dat"), &index94_dat).context("write 94.dat")?;
@@ -786,10 +800,8 @@ pub fn run(opts: &TranscodeOptions<'_>) -> Result<()> {
         );
     }
 
-    let target = crate::port::book::BuildDescriptor::load(
-        &crate::cs2::lint::default_data_dir(),
-        opts.to,
-    )?;
+    let target =
+        crate::port::book::BuildDescriptor::load(&crate::cs2::lint::default_data_dir(), opts.to)?;
     let inputs = TranscodeInputs::load(opts.donor_semantic)?;
     let out = transcode_db_groups_ir(&inputs, opts.base_raw, opts.donor_raw, &target)?;
 

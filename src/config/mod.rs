@@ -73,7 +73,10 @@ pub struct OpListEntry {
     pub ops: Vec<String>,
 }
 
-pub(crate) fn parse_multi_variants_block(packet: &mut Packet<'_>, ops: &mut Vec<String>) -> Result<()> {
+pub(crate) fn parse_multi_variants_block(
+    packet: &mut Packet<'_>,
+    ops: &mut Vec<String>,
+) -> Result<()> {
     let _unused = packet.g2()?;
     let varbit = packet.g2null()?;
     let varplayer = packet.g2null()?;

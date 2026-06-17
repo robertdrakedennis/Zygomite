@@ -90,7 +90,5 @@ fn main() {
             None => parse_fail += 1,
         }
     }
-    eprintln!(
-        "corpus: {total} scripts; rendered {rendered}; parse/render failures {parse_fail}"
-    );
+    eprintln!("corpus: {total} scripts; rendered {rendered}; parse/render failures {parse_fail}");
 }

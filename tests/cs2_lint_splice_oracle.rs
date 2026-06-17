@@ -83,7 +83,10 @@ fn committed_relic_listings_lint_clean() {
         }
         total_findings += result.findings.len();
     }
-    assert_eq!(total_findings, 0, "committed relic listings must lint clean");
+    assert_eq!(
+        total_findings, 0,
+        "committed relic listings must lint clean"
+    );
 }
 
 /// `--fix` is idempotent on the committed (already-ported) listings: re-running
@@ -100,7 +103,10 @@ fn fix_is_idempotent_on_committed_listings() {
         // With no findings, the core does not even produce fixed text; when it
         // does (defensive), it must equal the input.
         if let Some(fixed) = result.fixed_text {
-            assert_eq!(fixed, text, "{file}: --fix mutated an already-ported listing");
+            assert_eq!(
+                fixed, text,
+                "{file}: --fix mutated an already-ported listing"
+            );
         }
     }
 }
@@ -145,7 +151,10 @@ fn fix_reproduces_builder_rewrites_on_synthetic_donor() {
     let result = lint_text(donor, None, &data, 910, 948, true).expect("lint synthetic");
     // Every finding is fixable (no manual).
     assert!(
-        result.findings.iter().all(|f| f.severity == Severity::Fixable),
+        result
+            .findings
+            .iter()
+            .all(|f| f.severity == Severity::Fixable),
         "synthetic donor listing should yield only fixable findings: {:?}",
         result.findings
     );

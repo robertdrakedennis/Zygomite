@@ -97,7 +97,9 @@ fn main() -> Result<()> {
 
     for (&src_sub, &dst_sub) in &remap {
         let bytes = files.get(&src_sub).ok_or_else(|| {
-            CacheError::message(format!("source component com{src_sub} missing in group {IFACE_GROUP}"))
+            CacheError::message(format!(
+                "source component com{src_sub} missing in group {IFACE_GROUP}"
+            ))
         })?;
         let mut component = decode_raw(bytes, BUILD)?;
 
@@ -114,10 +116,11 @@ fn main() -> Result<()> {
                 if hook.script == 8409 {
                     for arg in &mut hook.args {
                         if let HookArg::Int(v) = arg
-                            && *v == SRC_COMBAT_ID {
-                                *v = DST_COMBAT_ID;
-                                rewrote_onload = true;
-                            }
+                            && *v == SRC_COMBAT_ID
+                        {
+                            *v = DST_COMBAT_ID;
+                            rewrote_onload = true;
+                        }
                     }
                 }
             }
@@ -137,12 +140,14 @@ fn main() -> Result<()> {
 
     if !rewrote_onload {
         return Err(CacheError::message(
-            "expected to rewrite com72 onload combat-id arg 1034 -> 1039 (1477 layout changed?)".to_string(),
+            "expected to rewrite com72 onload combat-id arg 1034 -> 1039 (1477 layout changed?)"
+                .to_string(),
         ));
     }
     if !rewrote_parent {
         return Err(CacheError::message(
-            "expected to re-parent at least one child layer com72 -> com856 (1477 layout changed?)".to_string(),
+            "expected to re-parent at least one child layer com72 -> com856 (1477 layout changed?)"
+                .to_string(),
         ));
     }
 

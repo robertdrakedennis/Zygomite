@@ -48,7 +48,10 @@ impl ModernFontRef {
         match fmt {
             2 => {
                 if payload.len() < 6 {
-                    cache_bail!("fmt=2 fontmetrics2 payload too short ({} bytes)", payload.len());
+                    cache_bail!(
+                        "fmt=2 fontmetrics2 payload too short ({} bytes)",
+                        payload.len()
+                    );
                 }
                 let mut p = Packet::with_pos(payload, 1)?;
                 // faceId is a big-endian u32 (matches build-fonts.ts shifts).
@@ -64,15 +67,22 @@ impl ModernFontRef {
                 // from the end, robust regardless of the middle table layout:
                 // [line, f8568, f8567, ascent, descent, divisor].
                 if payload.len() < 6 {
-                    cache_bail!("fmt=1 fontmetrics2 payload too short ({} bytes)", payload.len());
+                    cache_bail!(
+                        "fmt=1 fontmetrics2 payload too short ({} bytes)",
+                        payload.len()
+                    );
                 }
                 let n = payload.len();
                 let line_height = payload[n - 6];
                 let ascent = payload[n - 3];
                 let descent = payload[n - 2];
-                let divisor = if payload[n - 1] == 0 { 1 } else { payload[n - 1] };
-                let target_ascent =
-                    u8::try_from((u32::from(ascent) / u32::from(divisor)).max(1)).unwrap_or(u8::MAX);
+                let divisor = if payload[n - 1] == 0 {
+                    1
+                } else {
+                    payload[n - 1]
+                };
+                let target_ascent = u8::try_from((u32::from(ascent) / u32::from(divisor)).max(1))
+                    .unwrap_or(u8::MAX);
                 Ok(Self::Fmt1Bitmap {
                     target_ascent,
                     ascent,
@@ -81,7 +91,10 @@ impl ModernFontRef {
                     line_height,
                 })
             }
-            other => cache_bail!("unexpected fontmetrics2 fmt={other} (len={})", payload.len()),
+            other => cache_bail!(
+                "unexpected fontmetrics2 fmt={other} (len={})",
+                payload.len()
+            ),
         }
     }
 
@@ -111,7 +124,10 @@ impl ExtractedFace {
     /// Validate + classify a JS5-decompressed archive-59 face payload.
     pub fn from_payload(payload: Vec<u8>) -> Result<Self> {
         let kind = classify_face(&payload)?;
-        Ok(Self { kind, bytes: payload })
+        Ok(Self {
+            kind,
+            bytes: payload,
+        })
     }
 }
 

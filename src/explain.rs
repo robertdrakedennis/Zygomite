@@ -21,7 +21,9 @@ use crate::error::{Context, Result};
 use crate::explain_transitive::{
     MapScriptSource, SetRoster, TransitiveScripts, script_callees, transitive_script_closure,
 };
-use crate::interface::component::{ExplainedInterface, decode_interface_group_raw, explain_interface_group};
+use crate::interface::component::{
+    ExplainedInterface, decode_interface_group_raw, explain_interface_group,
+};
 use crate::js5pack::PackArchive;
 use crate::script::{OpcodeBook, ScriptArgSignature, decode_script, decode_script_arg_signature};
 
@@ -385,16 +387,16 @@ pub fn render_human(explained: &ExplainedInterface) -> String {
     // Header row, pre-aligned to the same column widths used per component
     // below ({:>5}  {:<14} {:>8}  {:<10} {:<22} …). Written as one literal so
     // there are no format arguments (clippy::write_literal).
-    out.push_str(
-        "  idx  type               font  colour     bounds(x,y,w,h)        text/ops\n",
-    );
+    out.push_str("  idx  type               font  colour     bounds(x,y,w,h)        text/ops\n");
     for c in &explained.components {
         // Skip empty/legacy components (no type body) to keep the table focused
         // on the meaningful rows, matching how the relic scan read the group.
         if c.component_type == "unsupported" && c.text.is_none() && c.ops.is_empty() {
             continue;
         }
-        let font = c.textfont.map_or_else(|| "-".to_string(), |f| f.to_string());
+        let font = c
+            .textfont
+            .map_or_else(|| "-".to_string(), |f| f.to_string());
         let colour = c.colour.clone().unwrap_or_else(|| "-".to_string());
         let bounds = format!(
             "{},{},{},{}",

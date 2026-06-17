@@ -11,8 +11,8 @@ pub(crate) mod plan_output;
 pub(crate) mod refs;
 
 use builder::{
-    build_selections, finalize_plan, manifest_fingerprint, print_json, read_semantic_manifest,
-    resolve_roots, seed_imports, write_json, write_overlay_plan_audit, PlanBuilder,
+    PlanBuilder, build_selections, finalize_plan, manifest_fingerprint, print_json,
+    read_semantic_manifest, resolve_roots, seed_imports, write_json, write_overlay_plan_audit,
 };
 use manifest::CacheOverlayManifest;
 use plan_output::{OverlayProofIssue, Rs3CacheManifest};

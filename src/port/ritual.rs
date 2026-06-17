@@ -249,11 +249,8 @@ pub fn flat_cache_source<'a>(
     move |group_id: i32| {
         let gid = u32::try_from(group_id)
             .with_context(|| format!("negative clientscript group id {group_id}"))?;
-        let files = cache.group_files_with_index(
-            index,
-            crate::constants::ARCHIVE_CLIENTSCRIPTS,
-            gid,
-        )?;
+        let files =
+            cache.group_files_with_index(index, crate::constants::ARCHIVE_CLIENTSCRIPTS, gid)?;
         let (_, bytes) = files
             .into_iter()
             .min_by_key(|(file, _)| *file)
@@ -310,10 +307,9 @@ fn apply_common_rewrites(_sid: i32, ir: &mut Cs2Ir, _target: &BuildDescriptor) -
 /// resolving db-field packing + call ids through the target descriptor/allocator.
 /// This is the exact `script_to_asm` codepath, so the lines match byte-for-byte.
 fn render_asm(ir: &Cs2Ir, target: &BuildDescriptor, alloc: &ProcAllocator) -> Result<String> {
-    let compiled = ir.to_compiled(
-        &|field| target.encode_db_field(field),
-        &|identity| Ok(alloc.resolve(identity)),
-    )?;
+    let compiled = ir.to_compiled(&|field| target.encode_db_field(field), &|identity| {
+        Ok(alloc.resolve(identity))
+    })?;
     Ok(script_to_asm(&compiled))
 }
 
@@ -482,7 +478,10 @@ fn return_int_count(ir: &Cs2Ir) -> usize {
     while j >= 0 {
         let insn = &ir.code[j as usize];
         if insn.op == "push_constant_string"
-            && matches!(insn.operand, Operand::TypedIntConst(_) | Operand::DbFieldConst(_))
+            && matches!(
+                insn.operand,
+                Operand::TypedIntConst(_) | Operand::DbFieldConst(_)
+            )
         {
             count += 1;
             j -= 1;

@@ -231,10 +231,18 @@ pub fn parse_ts(source: &str, class: &str, path: &Path) -> Result<Vec<TsPacket>>
 fn parse_ts_args(args: &str, path: &Path, line_no: usize) -> Result<(i32, i32)> {
     let mut parts = args.split(',').map(str::trim);
     let op_text = parts.next().with_context(|| {
-        format!("{}:{}: TS declaration missing opcode", path.display(), line_no)
+        format!(
+            "{}:{}: TS declaration missing opcode",
+            path.display(),
+            line_no
+        )
     })?;
     let size_text = parts.next().with_context(|| {
-        format!("{}:{}: TS declaration missing size", path.display(), line_no)
+        format!(
+            "{}:{}: TS declaration missing size",
+            path.display(),
+            line_no
+        )
     })?;
     let opcode: i32 = op_text.parse().with_context(|| {
         format!(

@@ -72,9 +72,7 @@ pub fn port_interface_group(
     let downcodes: Vec<(u32, Downcoded)> = report
         .into_iter()
         .enumerate()
-        .map(|(i, d)| {
-            (i as u32, d)
-        })
+        .map(|(i, d)| (i as u32, d))
         .collect();
 
     Ok(PortedInterface {

@@ -18,9 +18,7 @@
 
 use crate::cache_bail;
 use crate::config::{EnumEntry, parse_enum, parse_struct};
-use crate::constants::{
-    CONFIG_GROUP_VAR_BIT, CONFIG_GROUP_VAR_CLIENT, CONFIG_GROUP_VAR_PLAYER,
-};
+use crate::constants::{CONFIG_GROUP_VAR_BIT, CONFIG_GROUP_VAR_CLIENT, CONFIG_GROUP_VAR_PLAYER};
 use crate::error::{Context, Result};
 use crate::js5pack::PackArchive;
 use crate::vars::{VarDomain, parse_var, parse_varbit};
@@ -73,8 +71,8 @@ fn load_simple_map(names_dir: &Path, file: &str, domain: &str) -> Result<Vec<(u3
     if !path.is_file() {
         return Ok(Vec::new());
     }
-    let text = fs::read_to_string(&path)
-        .with_context(|| format!("failed reading {}", path.display()))?;
+    let text =
+        fs::read_to_string(&path).with_context(|| format!("failed reading {}", path.display()))?;
     let raw: BTreeMap<String, String> = serde_json::from_str(&text)
         .with_context(|| format!("failed parsing {}", path.display()))?;
     let mut out: Vec<(u32, String)> = Vec::with_capacity(raw.len());
@@ -97,8 +95,8 @@ fn load_interfaces(names_dir: &Path) -> Result<Vec<InterfaceName>> {
     if !path.is_file() {
         return Ok(Vec::new());
     }
-    let text = fs::read_to_string(&path)
-        .with_context(|| format!("failed reading {}", path.display()))?;
+    let text =
+        fs::read_to_string(&path).with_context(|| format!("failed reading {}", path.display()))?;
     let raw: BTreeMap<String, InterfaceNameEntry> = serde_json::from_str(&text)
         .with_context(|| format!("failed parsing {}", path.display()))?;
     let mut out = Vec::with_capacity(raw.len());
@@ -128,11 +126,7 @@ fn load_interfaces(names_dir: &Path) -> Result<Vec<InterfaceName>> {
 
 /// Check that the names within one domain are unique `SCREAMING_SNAKE`
 /// identifiers and that no id repeats, pushing every violation onto `violations`.
-fn check_uniqueness(
-    domain: &str,
-    pairs: &[(u32, &str)],
-    violations: &mut Vec<String>,
-) {
+fn check_uniqueness(domain: &str, pairs: &[(u32, &str)], violations: &mut Vec<String>) {
     let mut seen_names: BTreeMap<&str, u32> = BTreeMap::new();
     let mut seen_ids: BTreeMap<u32, &str> = BTreeMap::new();
     for &(id, name) in pairs {
@@ -187,11 +181,7 @@ fn split_group_file(id: u32, bit_shift: u32) -> (u32, u32) {
 }
 
 /// Fetch one file's bytes from a legacy config group (archive 2, file = id).
-fn legacy_config_file(
-    config: &PackArchive,
-    group: u32,
-    id: u32,
-) -> Result<Option<Vec<u8>>> {
+fn legacy_config_file(config: &PackArchive, group: u32, id: u32) -> Result<Option<Vec<u8>>> {
     let Some(files) = config.group_files(group)? else {
         return Ok(None);
     };
@@ -199,11 +189,7 @@ fn legacy_config_file(
 }
 
 /// Fetch one file's bytes from a split config archive (enum/struct).
-fn split_config_file(
-    pack: &PackArchive,
-    id: u32,
-    bit_shift: u32,
-) -> Result<Option<Vec<u8>>> {
+fn split_config_file(pack: &PackArchive, id: u32, bit_shift: u32) -> Result<Option<Vec<u8>>> {
     let (group, file) = split_group_file(id, bit_shift);
     let Some(files) = pack.group_files(group)? else {
         return Ok(None);
@@ -258,10 +244,12 @@ fn resolve(opts: &GenerateTsIdsOpts<'_>) -> Result<Resolved> {
     // present — exactly as the runtime client loads it. `open_with_patch` is a
     // plain open when no patch file exists (e.g. scripts), so this is safe for
     // every archive.
-    let interfaces_pack = PackArchive::open_with_patch(&opts.pack_root.join("client.interfaces.js5"))?;
+    let interfaces_pack =
+        PackArchive::open_with_patch(&opts.pack_root.join("client.interfaces.js5"))?;
     let config_pack = PackArchive::open_with_patch(&opts.pack_root.join("client.config.js5"))?;
     let enum_pack = PackArchive::open_with_patch(&opts.pack_root.join("client.enum.config.js5"))?;
-    let struct_pack = PackArchive::open_with_patch(&opts.pack_root.join("client.struct.config.js5"))?;
+    let struct_pack =
+        PackArchive::open_with_patch(&opts.pack_root.join("client.struct.config.js5"))?;
     let scripts_pack = PackArchive::open_with_patch(&opts.pack_root.join("client.scripts.js5"))?;
 
     // Interfaces (archive 3): group = interface id, files = components.
@@ -464,7 +452,11 @@ fn render_interfaces(resolved: &Resolved) -> String {
             continue;
         }
         let obj = pascal_case(&iface.name);
-        let _ = write!(out, "\nexport const {obj} = {{\n    id: {},\n    com: {{\n", iface.id);
+        let _ = write!(
+            out,
+            "\nexport const {obj} = {{\n    id: {},\n    com: {{\n",
+            iface.id
+        );
         for (cid, cname) in &iface.components {
             let _ = writeln!(out, "        {cname}: {cid},");
         }
@@ -621,7 +613,10 @@ fn build_manifest(resolved: &Resolved, files: &[(String, String)]) -> String {
 pub fn run(opts: &GenerateTsIdsOpts<'_>) -> Result<bool> {
     let resolved = resolve(opts)?;
     let mut files = render_all(&resolved);
-    files.push(("manifest.json".to_owned(), build_manifest(&resolved, &files)));
+    files.push((
+        "manifest.json".to_owned(),
+        build_manifest(&resolved, &files),
+    ));
 
     if opts.check {
         let mut drift: Vec<String> = Vec::new();
@@ -633,7 +628,10 @@ pub fn run(opts: &GenerateTsIdsOpts<'_>) -> Result<bool> {
             }
         }
         if drift.is_empty() {
-            println!("generate-ts-ids --check: all {} file(s) up to date", files.len());
+            println!(
+                "generate-ts-ids --check: all {} file(s) up to date",
+                files.len()
+            );
             return Ok(false);
         }
         println!("generate-ts-ids --check: {} file(s) differ:", drift.len());
@@ -647,8 +645,7 @@ pub fn run(opts: &GenerateTsIdsOpts<'_>) -> Result<bool> {
         .with_context(|| format!("failed creating {}", opts.out_dir.display()))?;
     for (name, body) in &files {
         let path = opts.out_dir.join(name);
-        fs::write(&path, body)
-            .with_context(|| format!("failed writing {}", path.display()))?;
+        fs::write(&path, body).with_context(|| format!("failed writing {}", path.display()))?;
         println!("wrote {}", path.display());
     }
     Ok(false)
@@ -659,15 +656,69 @@ pub fn run(opts: &GenerateTsIdsOpts<'_>) -> Result<bool> {
 // ---------------------------------------------------------------------------
 
 const SHA256_K: [u32; 64] = [
-    0x428a_2f98, 0x7137_4491, 0xb5c0_fbcf, 0xe9b5_dba5, 0x3956_c25b, 0x59f1_11f1, 0x923f_82a4,
-    0xab1c_5ed5, 0xd807_aa98, 0x1283_5b01, 0x2431_85be, 0x550c_7dc3, 0x72be_5d74, 0x80de_b1fe,
-    0x9bdc_06a7, 0xc19b_f174, 0xe49b_69c1, 0xefbe_4786, 0x0fc1_9dc6, 0x240c_a1cc, 0x2de9_2c6f,
-    0x4a74_84aa, 0x5cb0_a9dc, 0x76f9_88da, 0x983e_5152, 0xa831_c66d, 0xb003_27c8, 0xbf59_7fc7,
-    0xc6e0_0bf3, 0xd5a7_9147, 0x06ca_6351, 0x1429_2967, 0x27b7_0a85, 0x2e1b_2138, 0x4d2c_6dfc,
-    0x5338_0d13, 0x650a_7354, 0x766a_0abb, 0x81c2_c92e, 0x9272_2c85, 0xa2bf_e8a1, 0xa81a_664b,
-    0xc24b_8b70, 0xc76c_51a3, 0xd192_e819, 0xd699_0624, 0xf40e_3585, 0x106a_a070, 0x19a4_c116,
-    0x1e37_6c08, 0x2748_774c, 0x34b0_bcb5, 0x391c_0cb3, 0x4ed8_aa4a, 0x5b9c_ca4f, 0x682e_6ff3,
-    0x748f_82ee, 0x78a5_636f, 0x84c8_7814, 0x8cc7_0208, 0x90be_fffa, 0xa450_6ceb, 0xbef9_a3f7,
+    0x428a_2f98,
+    0x7137_4491,
+    0xb5c0_fbcf,
+    0xe9b5_dba5,
+    0x3956_c25b,
+    0x59f1_11f1,
+    0x923f_82a4,
+    0xab1c_5ed5,
+    0xd807_aa98,
+    0x1283_5b01,
+    0x2431_85be,
+    0x550c_7dc3,
+    0x72be_5d74,
+    0x80de_b1fe,
+    0x9bdc_06a7,
+    0xc19b_f174,
+    0xe49b_69c1,
+    0xefbe_4786,
+    0x0fc1_9dc6,
+    0x240c_a1cc,
+    0x2de9_2c6f,
+    0x4a74_84aa,
+    0x5cb0_a9dc,
+    0x76f9_88da,
+    0x983e_5152,
+    0xa831_c66d,
+    0xb003_27c8,
+    0xbf59_7fc7,
+    0xc6e0_0bf3,
+    0xd5a7_9147,
+    0x06ca_6351,
+    0x1429_2967,
+    0x27b7_0a85,
+    0x2e1b_2138,
+    0x4d2c_6dfc,
+    0x5338_0d13,
+    0x650a_7354,
+    0x766a_0abb,
+    0x81c2_c92e,
+    0x9272_2c85,
+    0xa2bf_e8a1,
+    0xa81a_664b,
+    0xc24b_8b70,
+    0xc76c_51a3,
+    0xd192_e819,
+    0xd699_0624,
+    0xf40e_3585,
+    0x106a_a070,
+    0x19a4_c116,
+    0x1e37_6c08,
+    0x2748_774c,
+    0x34b0_bcb5,
+    0x391c_0cb3,
+    0x4ed8_aa4a,
+    0x5b9c_ca4f,
+    0x682e_6ff3,
+    0x748f_82ee,
+    0x78a5_636f,
+    0x84c8_7814,
+    0x8cc7_0208,
+    0x90be_fffa,
+    0xa450_6ceb,
+    0xbef9_a3f7,
     0xc671_78f2,
 ];
 
@@ -675,7 +726,13 @@ const SHA256_K: [u32; 64] = [
 /// manifest. Self-contained so the crate needs no new dependency.
 fn sha256_hex(data: &[u8]) -> String {
     let mut h: [u32; 8] = [
-        0x6a09_e667, 0xbb67_ae85, 0x3c6e_f372, 0xa54f_f53a, 0x510e_527f, 0x9b05_688c, 0x1f83_d9ab,
+        0x6a09_e667,
+        0xbb67_ae85,
+        0x3c6e_f372,
+        0xa54f_f53a,
+        0x510e_527f,
+        0x9b05_688c,
+        0x1f83_d9ab,
         0x5be0_cd19,
     ];
 
@@ -765,11 +822,7 @@ mod tests {
     #[test]
     fn uniqueness_flags_duplicate_id_and_name() {
         let mut v = Vec::new();
-        check_uniqueness(
-            "x",
-            &[(1, "A"), (2, "A"), (1, "B")],
-            &mut v,
-        );
+        check_uniqueness("x", &[(1, "A"), (2, "A"), (1, "B")], &mut v);
         assert!(v.iter().any(|m| m.contains("duplicate name A")));
         assert!(v.iter().any(|m| m.contains("duplicate id 1")));
     }

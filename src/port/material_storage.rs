@@ -285,7 +285,10 @@ fn translate_block(base: i32, epilogue_910: i32) -> Result<Vec<Insn>> {
         out.push(insn);
     }
     if out.len() != expected {
-        bail!("translated block has {} instructions, expected {expected}", out.len());
+        bail!(
+            "translated block has {} instructions, expected {expected}",
+            out.len()
+        );
     }
     Ok(out)
 }
@@ -306,11 +309,11 @@ fn parse_block_insn(op: &str, operand_text: &str) -> Result<Insn> {
                 bail!("unsupported push_constant_string operand in block: {operand_text}");
             }
         }
-        "push_string_local" => Operand::LocalRef(
-            operand_text
-                .parse()
-                .map_err(|_| crate::error::CacheError::message("bad string-local index in block"))?,
-        ),
+        "push_string_local" => {
+            Operand::LocalRef(operand_text.parse().map_err(|_| {
+                crate::error::CacheError::message("bad string-local index in block")
+            })?)
+        }
         "gosub_with_params" => Operand::Call(crate::port::ir::cs2::ProcIdentity::from_source_id(
             operand_text
                 .parse()
@@ -343,7 +346,10 @@ fn parse_block_insn(op: &str, operand_text: &str) -> Result<Insn> {
 /// Strip surrounding quotes from a `str:"…"` operand and unescape the minimal
 /// set the block uses (`\"` only; the block has no `\n`/`\\`).
 fn unquote(s: &str) -> String {
-    let trimmed = s.strip_prefix('"').and_then(|x| x.strip_suffix('"')).unwrap_or(s);
+    let trimmed = s
+        .strip_prefix('"')
+        .and_then(|x| x.strip_suffix('"'))
+        .unwrap_or(s);
     trimmed.replace("\\\"", "\"")
 }
 
@@ -361,10 +367,9 @@ fn is_branch_op(op: &str) -> bool {
 }
 
 fn render_asm(ir: &Cs2Ir, target: &BuildDescriptor, alloc: &ProcAllocator) -> Result<String> {
-    let compiled = ir.to_compiled(
-        &|field| target.encode_db_field(field),
-        &|identity| Ok(alloc.resolve(identity)),
-    )?;
+    let compiled = ir.to_compiled(&|field| target.encode_db_field(field), &|identity| {
+        Ok(alloc.resolve(identity))
+    })?;
     Ok(script_to_asm(&compiled))
 }
 

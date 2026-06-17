@@ -62,7 +62,8 @@ impl DbFieldPacking {
         let packed = packed as u32;
         let table = packed >> self.table_shift;
         if self.has_tuple {
-            let column = (packed >> self.column_shift) & ((1 << (self.table_shift - self.column_shift)) - 1);
+            let column =
+                (packed >> self.column_shift) & ((1 << (self.table_shift - self.column_shift)) - 1);
             let tuple = packed & ((1 << self.column_shift) - 1);
             DbField {
                 table,
@@ -83,9 +84,7 @@ impl DbFieldPacking {
     #[must_use]
     pub fn encode(&self, field: &DbField) -> i32 {
         let packed = if self.has_tuple {
-            (field.table << self.table_shift)
-                | (field.column << self.column_shift)
-                | field.tuple
+            (field.table << self.table_shift) | (field.column << self.column_shift) | field.tuple
         } else {
             (field.table << self.table_shift) | field.column
         };
@@ -347,9 +346,10 @@ mod tests {
     fn db_field_repack_equals_shift_for_every_ritual_field() {
         // Every db-field the ritual splice touches re-packs to exactly `v >> 4`.
         for v in [
-            958_480, 958_545, 958_592, 962_560, 962_576, 962_592, 962_608, 962_609, 962_610, 962_611, 962_640,
-            962_656, 962_672, 962_688, 962_704, 962_720, 962_736, 962_768, 962_784, 962_800, 962_832, 966_674,
-            966_704, 966_736, 966_768, 966_784, 966_800, 966_816,
+            958_480, 958_545, 958_592, 962_560, 962_576, 962_592, 962_608, 962_609, 962_610,
+            962_611, 962_640, 962_656, 962_672, 962_688, 962_704, 962_720, 962_736, 962_768,
+            962_784, 962_800, 962_832, 966_674, 966_704, 966_736, 966_768, 966_784, 966_800,
+            966_816,
         ] {
             let field = DbFieldPacking::DONOR_948.decode(v);
             assert_eq!(

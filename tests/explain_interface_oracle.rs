@@ -34,8 +34,9 @@ const RELIC_SPRITE_GROUPS_USED_BY_691: [u32; 4] = [10270, 10314, 10316, 10319];
 
 /// The members of `RELIC_SYSTEM_948_SCRIPT_PATCHES` that interface 691's
 /// component hooks call (the donor-authored relic scripts spliced for 691).
-const RELIC_SCRIPTS_USED_BY_691: [u32; 9] =
-    [14459, 14847, 14848, 14849, 14854, 14859, 14867, 19821, 19822];
+const RELIC_SCRIPTS_USED_BY_691: [u32; 9] = [
+    14459, 14847, 14848, 14849, 14854, 14859, 14867, 19821, 19822,
+];
 
 /// Decode the embedded relic 691 group and return its closure.
 fn closure() -> rs3_cache_rs::interface::component::InterfaceClosure {
@@ -133,9 +134,7 @@ fn interface_691_raw_decode_recovers_all_components() {
 // committed relic-691 depth-1 seed, and (b) the live numbers for 691 and 1224
 // against the donor (948) cache + 910-base roster when those are present.
 
-use rs3_cache_rs::explain_transitive::{
-    BaseRoster, ScriptSource, transitive_script_closure,
-};
+use rs3_cache_rs::explain_transitive::{BaseRoster, ScriptSource, transitive_script_closure};
 use std::collections::BTreeSet;
 
 /// The relic 691 depth-1 component-bound script set the tool decodes from the
@@ -279,10 +278,7 @@ fn transitive_closure_691_and_1224_against_donor_cache() {
     // Invariants: burden ⊆ closure; closure is the larger, full set.
     assert!(t691.missing_from_910.is_subset(&t691.closure));
     assert!(t1224.missing_from_910.is_subset(&t1224.closure));
-    assert!(
-        t691.closure_len() >= t691.missing_len()
-            && t1224.closure_len() >= t1224.missing_len()
-    );
+    assert!(t691.closure_len() >= t691.missing_len() && t1224.closure_len() >= t1224.missing_len());
 
     // 1224 is a large port: the road-test put its full closure in the hundreds
     // and its splice burden near ~193. Assert sane lower bounds (the closure is

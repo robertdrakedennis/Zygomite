@@ -6,8 +6,8 @@ use std::path::Path;
 use anyhow::{Result, bail};
 
 use crate::cli::context::CommandContext;
-use crate::cli::{ConfigKindArg, VarDomainArg};
 use crate::cli::shared::write_json;
+use crate::cli::{ConfigKindArg, VarDomainArg};
 use crate::dep_tree::{DependencyTree, EntityRef, EntityType, ResolverContext, build_tree};
 
 /// Shared options for the dep-tree commands that key off a single id.

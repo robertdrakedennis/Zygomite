@@ -75,8 +75,7 @@ fn interface_port_reproduces_committed_1224_910_byte_for_byte() {
         INTERFACE_1224_910.len()
     );
     assert_eq!(
-        ported.group.dat,
-        INTERFACE_1224_910,
+        ported.group.dat, INTERFACE_1224_910,
         "ported 1224 .dat does not reproduce the committed 1224-910.dat byte-for-byte"
     );
 }
@@ -86,8 +85,8 @@ fn interface_port_reproduces_committed_1224_910_byte_for_byte() {
 #[test]
 fn port_1224_downcodes_only_widgets() {
     let donor = files(INTERFACE_1224_DONOR);
-    let ported = port_interface_group(1224, &donor, BUILD, &target_910(), 9)
-        .expect("port interface 1224");
+    let ported =
+        port_interface_group(1224, &donor, BUILD, &target_910(), 9).expect("port interface 1224");
     assert_eq!(ported.component_count, 50, "1224 has 50 components");
 
     let mut from_types: Vec<u8> = ported
@@ -96,13 +95,24 @@ fn port_1224_downcodes_only_widgets() {
         .filter_map(|(_, d)| downcode_from(d).map(ComponentKind::type_id))
         .collect();
     from_types.sort_unstable();
-    assert_eq!(from_types, vec![10, 10, 12], "only the 2 buttons + 1 check are rewritten");
+    assert_eq!(
+        from_types,
+        vec![10, 10, 12],
+        "only the 2 buttons + 1 check are rewritten"
+    );
 
     // com49 (check → text): the "Show Locked" label survives as a text component.
     let com49 = decode_component_910(&ported.group.components[&49]).expect("decode com49");
-    assert_eq!(com49.type_id, 4, "labelled check downcodes to a text component");
+    assert_eq!(
+        com49.type_id, 4,
+        "labelled check downcodes to a text component"
+    );
     assert_eq!(com49.text, "Show Locked", "the downcoded label survives");
-    assert_eq!(com49.ops, vec!["Select".to_string()], "op preserved via the verbatim tail");
+    assert_eq!(
+        com49.ops,
+        vec!["Select".to_string()],
+        "op preserved via the verbatim tail"
+    );
     assert!(com49.scripts.contains(&10642), "onload hook preserved");
 }
 
@@ -111,16 +121,23 @@ fn port_1224_downcodes_only_widgets() {
 #[test]
 fn port_691_is_noop_equivalent() {
     let donor = files(INTERFACE_691_DONOR);
-    let ported = port_interface_group(691, &donor, BUILD, &target_910(), 9)
-        .expect("port interface 691");
+    let ported =
+        port_interface_group(691, &donor, BUILD, &target_910(), 9).expect("port interface 691");
     assert_eq!(ported.component_count, 225, "691 has 225 components");
-    assert!(ported.rewritten().is_empty(), "no 691 component is a composite widget");
+    assert!(
+        ported.rewritten().is_empty(),
+        "no 691 component is a composite widget"
+    );
 
     for (id, bytes) in &ported.group.components {
         let decoded = decode_component_910(bytes)
             .unwrap_or_else(|e| panic!("910 mirror rejected ported 691 com{id}: {e}"));
         assert_eq!(decoded.version, 9, "kept components written at version 9");
-        assert_eq!(decoded.end_pos, bytes.len(), "ported 691 com{id} not buffer-sized");
+        assert_eq!(
+            decoded.end_pos,
+            bytes.len(),
+            "ported 691 com{id} not buffer-sized"
+        );
     }
 }
 
@@ -129,14 +146,17 @@ fn port_691_is_noop_equivalent() {
 #[test]
 fn ported_1224_group_roundtrips() {
     let donor = files(INTERFACE_1224_DONOR);
-    let ported = port_interface_group(1224, &donor, BUILD, &target_910(), 9)
-        .expect("port interface 1224");
+    let ported =
+        port_interface_group(1224, &donor, BUILD, &target_910(), 9).expect("port interface 1224");
     let reparsed = decode_interface_group_raw(&ported.group.dat, BUILD)
         .expect("re-decode ported group .dat")
         .files()
         .clone();
     assert_eq!(reparsed.len(), ported.group.components.len());
     for (id, bytes) in &ported.group.components {
-        assert_eq!(&reparsed[id], bytes, "packed group re-decode changed com{id}");
+        assert_eq!(
+            &reparsed[id], bytes,
+            "packed group re-decode changed com{id}"
+        );
     }
 }

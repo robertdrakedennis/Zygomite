@@ -356,10 +356,7 @@ fn net_stack_findings(listing: &Listing, books: &Books) -> Vec<Finding> {
         if op == "gosub_with_params" || is_variadic_op(op) {
             return Vec::new();
         }
-        if op != "push_constant_string"
-            && !books.stack.contains_key(op)
-            && !is_control_op(op)
-        {
+        if op != "push_constant_string" && !books.stack.contains_key(op) && !is_control_op(op) {
             return Vec::new();
         }
     }
@@ -479,8 +476,8 @@ pub fn run(opts: &LintOptions<'_>) -> Result<()> {
 /// Collect `*.asm.ts` listing paths under `dir`.
 fn collect_listings(dir: &Path) -> Result<Vec<PathBuf>> {
     let mut out = Vec::new();
-    let entries = std::fs::read_dir(dir)
-        .with_context(|| format!("read scripts dir {}", dir.display()))?;
+    let entries =
+        std::fs::read_dir(dir).with_context(|| format!("read scripts dir {}", dir.display()))?;
     for entry in entries {
         let entry = entry.context("read dir entry")?;
         let path = entry.path();
@@ -506,8 +503,8 @@ fn lint_file(path: &Path, books: &Books, fix: bool) -> Result<ScriptReport> {
         .to_string();
     let script = parse_script_id(&file);
 
-    let listing = parse_listing(&text)
-        .with_context(|| format!("parse listing {}", path.display()))?;
+    let listing =
+        parse_listing(&text).with_context(|| format!("parse listing {}", path.display()))?;
     let findings = diagnose(&listing, books, script);
 
     let mut fixed = false;
@@ -673,8 +670,9 @@ fn diagnose(listing: &Listing, books: &Books, script: Option<u32>) -> Vec<Findin
                     line: instr.line_no,
                     rule: "sub_to_add",
                     severity: Severity::Fixable,
-                    detail: "`sub` has no target opcode; negate the preceding constant and use `add`"
-                        .to_string(),
+                    detail:
+                        "`sub` has no target opcode; negate the preceding constant and use `add`"
+                            .to_string(),
                 });
             } else {
                 findings.push(Finding {
@@ -1080,7 +1078,10 @@ mod tests {
         let listing = parse_listing(text).unwrap();
         let fixed = apply_fixes(&listing, &books(), None).unwrap();
         // 385024 >> 4 == 24064
-        assert_eq!(render_listing(&fixed), "// @cs2 push_constant_string int:24064\n");
+        assert_eq!(
+            render_listing(&fixed),
+            "// @cs2 push_constant_string int:24064\n"
+        );
     }
 
     #[test]

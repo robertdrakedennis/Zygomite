@@ -438,10 +438,7 @@ const fn format_label(format: Format) -> &'static str {
 fn render_human(opts: &DecodeOptions<'_>, value: &Value) -> String {
     use std::fmt::Write as _;
     let mut out = String::new();
-    let format = value
-        .get("format")
-        .and_then(Value::as_str)
-        .unwrap_or("?");
+    let format = value.get("format").and_then(Value::as_str).unwrap_or("?");
     let count = value.get("file_count").and_then(Value::as_u64).unwrap_or(0);
     // Prefer the group actually read (config formats override `--group` with
     // their canonical config group, e.g. dbtable → 40).

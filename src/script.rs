@@ -87,9 +87,8 @@ impl OpcodeBook {
         if build != 910 && build != 948 {
             bail!("from_registry only supports builds 910 and 948, got {build}");
         }
-        let content = fs::read_to_string(registry_path).with_context(|| {
-            format!("failed reading registry file {}", registry_path.display())
-        })?;
+        let content = fs::read_to_string(registry_path)
+            .with_context(|| format!("failed reading registry file {}", registry_path.display()))?;
         let doc: RegistryDoc = serde_json::from_str(&content)
             .with_context(|| format!("failed parsing registry file {}", registry_path.display()))?;
         if doc.schema != REGISTRY_SCHEMA {
@@ -1615,7 +1614,14 @@ mod tests {
         };
         let bytes = encode_script(&script, &opcode_book, MIN_SCRIPT_BUILD)?;
         let sig = decode_script_arg_signature(&bytes, MIN_SCRIPT_BUILD)?;
-        assert_eq!(sig, ScriptArgSignature { int: 2, obj: 0, long: 0 });
+        assert_eq!(
+            sig,
+            ScriptArgSignature {
+                int: 2,
+                obj: 0,
+                long: 0
+            }
+        );
         assert_eq!(sig.display(), "(2i,0o,0l)");
         assert_eq!(script.arg_signature(), sig);
 
@@ -1629,7 +1635,14 @@ mod tests {
         };
         let other_bytes = encode_script(&other, &opcode_book, MIN_SCRIPT_BUILD)?;
         let other_sig = decode_script_arg_signature(&other_bytes, MIN_SCRIPT_BUILD)?;
-        assert_eq!(other_sig, ScriptArgSignature { int: 5, obj: 1, long: 0 });
+        assert_eq!(
+            other_sig,
+            ScriptArgSignature {
+                int: 5,
+                obj: 1,
+                long: 0
+            }
+        );
         assert_ne!(sig, other_sig, "differing arg counts must compare unequal");
         Ok(())
     }

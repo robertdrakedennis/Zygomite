@@ -325,11 +325,10 @@ impl Report {
 /// Run the `cs2-coverage` scan. Returns `Ok(true)` when error-severity findings
 /// exist (the caller maps that to exit code 4), `Ok(false)` for a clean scan.
 pub fn run(opts: &Cs2CoverageOpts<'_>) -> Result<bool> {
-    let out_file: PathBuf = opts.out_file.map(Path::to_path_buf).unwrap_or_else(|| {
-        opts.data_dir
-            .join("cs2")
-            .join("coverage-910.report.json")
-    });
+    let out_file: PathBuf = opts
+        .out_file
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| opts.data_dir.join("cs2").join("coverage-910.report.json"));
 
     let report = scan(opts)?;
 
@@ -392,7 +391,10 @@ pub fn scan(opts: &Cs2CoverageOpts<'_>) -> Result<Report> {
     }
     findings.sort_by(|a, b| a.sort_key().cmp(&b.sort_key()));
 
-    let decode_failures = findings.iter().filter(|f| f.kind == "decode_failure").count();
+    let decode_failures = findings
+        .iter()
+        .filter(|f| f.kind == "decode_failure")
+        .count();
     let unassigned_opcode_findings = findings
         .iter()
         .filter(|f| f.kind == "unassigned_opcode")
@@ -462,7 +464,10 @@ fn print_human_summary(report: &Report, out_file: &Path) {
     println!("groups_present: {}", s.groups_present);
     println!("groups_decoded: {}", s.groups_decoded);
     println!("decode_failures: {}", s.decode_failures);
-    println!("unassigned_opcode_findings: {}", s.unassigned_opcode_findings);
+    println!(
+        "unassigned_opcode_findings: {}",
+        s.unassigned_opcode_findings
+    );
     println!("unknown_opcode_findings: {}", s.unknown_opcode_findings);
     println!("distinct_opcodes_used: {}", s.distinct_opcodes_used);
     println!("implemented_unused: {}", s.implemented_unused);

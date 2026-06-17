@@ -72,7 +72,13 @@ macro_rules! oracle {
     };
 }
 
-type Oracle = (u32, &'static [u8], &'static [u8], &'static [u8], &'static [u8]);
+type Oracle = (
+    u32,
+    &'static [u8],
+    &'static [u8],
+    &'static [u8],
+    &'static [u8],
+);
 
 fn oracles() -> Vec<Oracle> {
     vec![
@@ -272,7 +278,12 @@ fn awt_rasterizer_reproduces_golden_bins() {
             .unwrap_or_else(|e| panic!("read relic face {face_id}: {e}"));
         let face = ExtractedFace::from_payload(bytes)
             .unwrap_or_else(|e| panic!("classify relic face {face_id}: {e}"));
-        items.push(AwtWorkItem { font_id, face_id, face, mode });
+        items.push(AwtWorkItem {
+            font_id,
+            face_id,
+            face,
+            mode,
+        });
     }
 
     let outputs = raster_awt::rasterize_awt(&items).expect("AWT FontRaster rasterize");
@@ -320,9 +331,7 @@ fn font_rasterize_awt_pipeline_reproduces_golden_group_payloads() {
         return;
     }
     let pack = pack_root();
-    if !pack.join("client.fontmetrics2.js5").is_file()
-        || !pack.join("client.ttf.js5").is_file()
-    {
+    if !pack.join("client.fontmetrics2.js5").is_file() || !pack.join("client.ttf.js5").is_file() {
         eprintln!(
             "skipping font_rasterize_awt_pipeline_reproduces_golden_group_payloads: runtime pack \
              absent under {}",
@@ -333,7 +342,11 @@ fn font_rasterize_awt_pipeline_reproduces_golden_group_payloads() {
 
     let fonts: BTreeSet<u32> = FONT_IDS.iter().copied().collect();
     let artifacts = rasterize_fonts_awt(&pack, &fonts, &[]).expect("AWT rasterize from pack");
-    assert_eq!(artifacts.len(), FONT_IDS.len(), "one artifact per relic font");
+    assert_eq!(
+        artifacts.len(),
+        FONT_IDS.len(),
+        "one artifact per relic font"
+    );
 
     let goldens = golden_bins();
     for art in &artifacts {

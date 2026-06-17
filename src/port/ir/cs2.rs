@@ -15,7 +15,9 @@
 //! asm reproduces the committed artifacts exactly.
 
 use crate::error::{Context, Result};
-use crate::script::{CompiledScript, Instruction, Operand as RawOperand, SwitchCase, VarRef, VarBitRef};
+use crate::script::{
+    CompiledScript, Instruction, Operand as RawOperand, SwitchCase, VarBitRef, VarRef,
+};
 
 /// A script's typed local/argument counts (the `(int, obj, long)` triples from
 /// the header). Build-neutral.
@@ -264,11 +266,11 @@ fn lower_operand(
         Operand::VarBitRef(vbr) => RawOperand::VarBitRef(vbr.clone()),
         Operand::Jump(t) => RawOperand::Branch(*t),
         Operand::Switch(cases) => RawOperand::Switch(cases.clone()),
-        Operand::Call(identity) => RawOperand::Script(
-            call_id(identity).with_context(|| {
+        Operand::Call(identity) => {
+            RawOperand::Script(call_id(identity).with_context(|| {
                 format!("resolving call target for proc {}", identity.source_id)
-            })?,
-        ),
+            })?)
+        }
         Operand::ArrayRef(v) => RawOperand::Array(*v),
         Operand::Count(v) => RawOperand::Count(*v),
         Operand::Byte(b) => RawOperand::Byte(*b),
@@ -332,9 +334,7 @@ mod tests {
         };
         let ir = Cs2Ir::from_compiled(&script, &no_db);
         // Identity call resolution: source id passes through.
-        let back = ir.to_compiled(&|f| (f.table << 8 | f.column) as i32, &|p| {
-            Ok(p.source_id)
-        })?;
+        let back = ir.to_compiled(&|f| (f.table << 8 | f.column) as i32, &|p| Ok(p.source_id))?;
         // The asm serialization of the round-trip must be byte-identical.
         assert_eq!(script_to_asm(&script), script_to_asm(&back));
         Ok(())

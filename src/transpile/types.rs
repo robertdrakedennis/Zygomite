@@ -157,7 +157,9 @@ impl TypeLattice {
     }
 
     pub fn wk(&self) -> &WellKnown {
-        self.well_known.as_ref().expect("lattice well-known not set")
+        self.well_known
+            .as_ref()
+            .expect("lattice well-known not set")
     }
 
     /// `a <= b`: is `a` the same as, or more specific than, `b`?

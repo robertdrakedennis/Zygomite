@@ -31,7 +31,10 @@ fn extract_real_registry_invariants() {
     let client_root = client_root();
     let sr_path = script_runner_path(&client_root);
     if !sr_path.is_file() {
-        eprintln!("skip: client ScriptRunner.java absent at {}", sr_path.display());
+        eprintln!(
+            "skip: client ScriptRunner.java absent at {}",
+            sr_path.display()
+        );
         return;
     }
 
@@ -134,8 +137,8 @@ fn extract_real_registry_invariants() {
     // the real opcodes-910.txt to assert no C1 (every switch id has a name) and no
     // C2 (every named id has a switch case).
     let data_dir = crate_dir().join("data");
-    let names_910 = std::fs::read_to_string(data_dir.join("opcodes-910.txt"))
-        .expect("read opcodes-910.txt");
+    let names_910 =
+        std::fs::read_to_string(data_dir.join("opcodes-910.txt")).expect("read opcodes-910.txt");
     let mut named_ids = std::collections::BTreeSet::new();
     for line in names_910.lines() {
         let line = line.trim();

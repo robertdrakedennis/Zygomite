@@ -32,7 +32,10 @@ impl R<'_> {
 
 fn main() -> anyhow::Result<()> {
     let cache_dir = std::env::args().nth(1).expect("usage: <cache-dir> <id>...");
-    let ids: Vec<u32> = std::env::args().skip(2).map(|s| s.parse().unwrap()).collect();
+    let ids: Vec<u32> = std::env::args()
+        .skip(2)
+        .map(|s| s.parse().unwrap())
+        .collect();
     let cache = FlatCache::open(std::path::Path::new(&cache_dir))?;
     for id in ids {
         let files = cache.group_files(47, id)?;
@@ -47,12 +50,18 @@ fn main() -> anyhow::Result<()> {
         let c2 = r.g1();
         let c3 = r.g1();
         let c4 = if version >= 5 { r.g1() } else { 0 };
-        println!("== model {id}: len={} format={format} version={version} flags=0x{flags:02x} meshes={mesh_count} counts={c0},{c1},{c2},{c3},{c4}", data.len());
+        println!(
+            "== model {id}: len={} format={format} version={version} flags=0x{flags:02x} meshes={mesh_count} counts={c0},{c1},{c2},{c3},{c4}",
+            data.len()
+        );
         let gf = r.g1();
         let unkint = r.g1();
         let face_count = r.g2();
         let vc = r.g4() as usize;
-        println!("   meshdata: group_flags=0x{gf:02x} unkint={unkint} face_count={face_count} verts={vc} pos_after_header={}", r.p);
+        println!(
+            "   meshdata: group_flags=0x{gf:02x} unkint={unkint} face_count={face_count} verts={vc} pos_after_header={}",
+            r.p
+        );
         let has_vertices = gf & 1 != 0;
         let has_facebones = gf & 4 != 0;
         let has_boneids = gf & 8 != 0;
@@ -83,14 +92,20 @@ fn main() -> anyhow::Result<()> {
                 }
                 let idc = r.g2();
                 if idc > 16 {
-                    println!("   SKIN vertex {i}: id_count={idc} (implausible) pos={}", r.p - 2);
+                    println!(
+                        "   SKIN vertex {i}: id_count={idc} (implausible) pos={}",
+                        r.p - 2
+                    );
                     bad = true;
                     break;
                 }
                 r.skip(idc as usize * 2);
                 let wc = r.g2();
                 if wc > 16 {
-                    println!("   SKIN vertex {i}: weight_count={wc} (implausible) pos={}", r.p - 2);
+                    println!(
+                        "   SKIN vertex {i}: weight_count={wc} (implausible) pos={}",
+                        r.p - 2
+                    );
                     bad = true;
                     break;
                 }
@@ -100,7 +115,11 @@ fn main() -> anyhow::Result<()> {
             if bad {
                 continue;
             }
-            println!("   after skin: pos={} left={} max_ids_per_vert={max_ids}", r.p, r.left());
+            println!(
+                "   after skin: pos={} left={} max_ids_per_vert={max_ids}",
+                r.p,
+                r.left()
+            );
         }
         if has_vertices {
             r.skip(vc * 2);
@@ -124,10 +143,19 @@ fn main() -> anyhow::Result<()> {
             let unkb2 = r.g1();
             let len = r.g2() as usize;
             let isz = if vc <= 0xffff { 2 } else { 4 };
-            println!("   render {m}: gf=0x{rgf:02x} unkint={unkint} mat={mat} b2={unkb2} indices={len} ({isz}B each) pos={} left_after={}", r.p, r.left() - (len * isz) as isize);
+            println!(
+                "   render {m}: gf=0x{rgf:02x} unkint={unkint} mat={mat} b2={unkb2} indices={len} ({isz}B each) pos={} left_after={}",
+                r.p,
+                r.left() - (len * isz) as isize
+            );
             r.skip(len * isz);
         }
-        println!("   END pos={} len={} leftover={}", r.p, data.len(), r.left());
+        println!(
+            "   END pos={} len={} leftover={}",
+            r.p,
+            data.len(),
+            r.left()
+        );
     }
     Ok(())
 }

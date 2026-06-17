@@ -190,17 +190,17 @@ pub fn transitive_script_closure(
     // Pass 1 — FULL closure: descend through every reachable script. Unresolved
     // refs are recorded here (the splice-burden pass sees a subset of edges).
     let mut full_stack: Vec<u32> = Vec::new();
-    let visit_full = |result: &mut TransitiveScripts, stack: &mut Vec<u32>, raw: i32| {
-        match source.resolve(raw) {
-            Some(group) => {
-                if result.closure.insert(group) {
-                    stack.push(group);
-                }
+    let visit_full = |result: &mut TransitiveScripts, stack: &mut Vec<u32>, raw: i32| match source
+        .resolve(raw)
+    {
+        Some(group) => {
+            if result.closure.insert(group) {
+                stack.push(group);
             }
-            None => {
-                if raw >= 0 {
-                    result.unresolved.insert(raw as u32);
-                }
+        }
+        None => {
+            if raw >= 0 {
+                result.unresolved.insert(raw as u32);
             }
         }
     };
@@ -238,14 +238,11 @@ pub fn transitive_script_closure(
                 && donor_sig != base_sig
             {
                 // Collision: same id, different proc. Remap required.
-                result
-                    .collisions
-                    .entry(group)
-                    .or_insert(ScriptCollision {
-                        group,
-                        donor: donor_sig,
-                        base: base_sig,
-                    });
+                result.collisions.entry(group).or_insert(ScriptCollision {
+                    group,
+                    donor: donor_sig,
+                    base: base_sig,
+                });
                 if result.missing_from_910.insert(group) {
                     stack.push(group);
                 }
@@ -505,12 +502,8 @@ mod tests {
     #[test]
     fn closure_walks_to_fixpoint() {
         // 100 -> 101 -> 102 ; 100 -> 103 ; 102 -> 103 (shared) ; 103 leaf.
-        let source = AdjSource::new(&[
-            (100, &[101, 103]),
-            (101, &[102]),
-            (102, &[103]),
-            (103, &[]),
-        ]);
+        let source =
+            AdjSource::new(&[(100, &[101, 103]), (101, &[102]), (102, &[103]), (103, &[])]);
         let base = SetRoster::new(BTreeSet::new()); // nothing in base
         let result = transitive_script_closure([100], &source, &base);
         assert_eq!(
@@ -519,7 +512,10 @@ mod tests {
             "closure must reach every transitively-called script once"
         );
         // With an empty base, every closure member is donor-new.
-        assert_eq!(result.missing_from_910, BTreeSet::from([100, 101, 102, 103]));
+        assert_eq!(
+            result.missing_from_910,
+            BTreeSet::from([100, 101, 102, 103])
+        );
         assert!(result.unresolved.is_empty());
     }
 
@@ -574,13 +570,7 @@ mod tests {
     fn missing_is_subset_of_closure() {
         // Mixed base/donor graph; the splice burden must always be a subset of the
         // full closure.
-        let source = AdjSource::new(&[
-            (1, &[2, 3]),
-            (2, &[4]),
-            (3, &[5]),
-            (4, &[]),
-            (5, &[]),
-        ]);
+        let source = AdjSource::new(&[(1, &[2, 3]), (2, &[4]), (3, &[5]), (4, &[]), (5, &[])]);
         let base = SetRoster::new(BTreeSet::from([3, 4]));
         let result = transitive_script_closure([1], &source, &base);
         assert!(
@@ -637,8 +627,22 @@ mod tests {
         // 5360 is flagged as a collision with both signatures recorded.
         assert_eq!(result.collision_len(), 1);
         let c = result.collisions.get(&5360).expect("5360 collision");
-        assert_eq!(c.donor, ScriptArgSignature { int: 2, obj: 0, long: 0 });
-        assert_eq!(c.base, ScriptArgSignature { int: 5, obj: 0, long: 0 });
+        assert_eq!(
+            c.donor,
+            ScriptArgSignature {
+                int: 2,
+                obj: 0,
+                long: 0
+            }
+        );
+        assert_eq!(
+            c.base,
+            ScriptArgSignature {
+                int: 5,
+                obj: 0,
+                long: 0
+            }
+        );
         // It is in the splice/remap burden, NOT pruned …
         assert!(result.missing_from_910.contains(&5360));
         // … and the walk descended through it to reach the donor-only 700.
@@ -658,9 +662,19 @@ mod tests {
         let base = base_with_sigs(&[(5360, 2, 0, 0)]); // identical signature
         let result = transitive_script_closure([100], &source, &base);
 
-        assert_eq!(result.collision_len(), 0, "identical signature is no collision");
-        assert!(!result.missing_from_910.contains(&5360), "matching base proc is pruned");
-        assert!(!result.missing_from_910.contains(&700), "its subtree is shielded");
+        assert_eq!(
+            result.collision_len(),
+            0,
+            "identical signature is no collision"
+        );
+        assert!(
+            !result.missing_from_910.contains(&5360),
+            "matching base proc is pruned"
+        );
+        assert!(
+            !result.missing_from_910.contains(&700),
+            "its subtree is shielded"
+        );
         assert_eq!(result.missing_from_910, BTreeSet::from([100]));
         // The full closure still reaches everything.
         assert_eq!(result.closure, BTreeSet::from([100, 5360, 700]));
@@ -676,7 +690,11 @@ mod tests {
         let base = SetRoster::with_signatures(BTreeMap::from([(5360_u32, None)]));
         let result = transitive_script_closure([100], &source, &base);
 
-        assert_eq!(result.collision_len(), 0, "unknown base sig must not collide");
+        assert_eq!(
+            result.collision_len(),
+            0,
+            "unknown base sig must not collide"
+        );
         assert!(!result.missing_from_910.contains(&5360));
         assert!(!result.missing_from_910.contains(&700));
     }

@@ -386,7 +386,12 @@ pub fn validate_payload(name: &str, packet: &PayloadPacket, size: i32) -> Result
                 field.arg
             ))
         })?;
-        validate_expr(&expr, &scalars, &arrays, &format!("payload `{name}` field {idx} arg"))?;
+        validate_expr(
+            &expr,
+            &scalars,
+            &arrays,
+            &format!("payload `{name}` field {idx} arg"),
+        )?;
     }
 
     // Size: fixed packets must have sum-of-fixed-widths == schema size; variable
@@ -406,9 +411,7 @@ pub fn validate_payload(name: &str, packet: &PayloadPacket, size: i32) -> Result
     // A computed `alloc` is validated against the same grammar/param model.
     if let Some(alloc) = &packet.alloc {
         let expr = parse_expr(alloc).map_err(|e| {
-            crate::error::CacheError::message(format!(
-                "payload `{name}` alloc `{alloc}`: {e}"
-            ))
+            crate::error::CacheError::message(format!("payload `{name}` alloc `{alloc}`: {e}"))
         })?;
         validate_expr(&expr, &scalars, &arrays, &format!("payload `{name}` alloc"))?;
     }
@@ -516,8 +519,11 @@ pub fn render_encoders_ts(payloads: &Payloads, server: &Schema) -> Result<String
             payloads.schema
         )));
     }
-    let size_by_name: BTreeMap<&str, i32> =
-        server.packets.iter().map(|p| (p.name.as_str(), p.size)).collect();
+    let size_by_name: BTreeMap<&str, i32> = server
+        .packets
+        .iter()
+        .map(|p| (p.name.as_str(), p.size))
+        .collect();
 
     // Validate every packet before emitting anything.
     for (name, packet) in &payloads.packets {
@@ -551,8 +557,8 @@ fn load_payloads(schema_dir: &Path) -> Result<Option<Payloads>> {
     }
     let text =
         fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
-    let payloads: Payloads =
-        serde_json::from_str(&text).with_context(|| format!("failed to parse {}", path.display()))?;
+    let payloads: Payloads = serde_json::from_str(&text)
+        .with_context(|| format!("failed to parse {}", path.display()))?;
     Ok(Some(payloads))
 }
 
@@ -574,10 +580,16 @@ pub fn run_generate(opts: &GenerateProtocolOpts<'_>) -> Result<bool> {
             }
         }
         if drift.is_empty() {
-            println!("generate-protocol --check: all {} artifact(s) up to date", artifacts.len());
+            println!(
+                "generate-protocol --check: all {} artifact(s) up to date",
+                artifacts.len()
+            );
             return Ok(false);
         }
-        println!("generate-protocol --check: {} artifact(s) differ:", drift.len());
+        println!(
+            "generate-protocol --check: {} artifact(s) differ:",
+            drift.len()
+        );
         for path in &drift {
             println!("  - {}", path.display());
         }

@@ -121,7 +121,11 @@ fn transcoded_1224_rewrites_only_widgets_and_preserves_interactivity() {
     rewritten.sort_unstable();
     from_types.sort_unstable();
     // Exactly two type-10 buttons and one type-12 check.
-    assert_eq!(from_types, vec![10, 10, 12], "only buttons+check are rewritten");
+    assert_eq!(
+        from_types,
+        vec![10, 10, 12],
+        "only buttons+check are rewritten"
+    );
     assert_eq!(rewritten.len(), 3);
 
     // com46 (button → layer): op "Select", cursor 46, hooks 10642 (onload) +
@@ -135,16 +139,26 @@ fn transcoded_1224_rewrites_only_widgets_and_preserves_interactivity() {
     // com49 (check → text): label "Show Locked" survives as a text component, op
     // "Select", hooks 10642 (onload) + 17789 (onbuttonclick).
     let com49 = decode_component_910(&transcoded[&49].bytes).expect("decode com49");
-    assert_eq!(com49.type_id, 4, "labelled check downcodes to a text component");
+    assert_eq!(
+        com49.type_id, 4,
+        "labelled check downcodes to a text component"
+    );
     assert_eq!(com49.ops, vec!["Select".to_string()]);
     assert_eq!(com49.op_cursors, vec![(0, 46)]);
     assert!(com49.scripts.contains(&10642) && com49.scripts.contains(&17789));
     // The "Show Locked" label maps onto a real type-4 text body the 910 client
     // renders (the donor check uses the default font, so no explicit font ref).
-    assert!(
-        matches!(transcoded[&49].downcode, Downcode::Rewritten { target: TargetType::Text, .. })
+    assert!(matches!(
+        transcoded[&49].downcode,
+        Downcode::Rewritten {
+            target: TargetType::Text,
+            ..
+        }
+    ));
+    assert_eq!(
+        com49.text, "Show Locked",
+        "the downcoded label text survives"
     );
-    assert_eq!(com49.text, "Show Locked", "the downcoded label text survives");
 }
 
 /// The window's load-bearing refs survive the transcode: the title host script
@@ -216,7 +230,11 @@ fn transcoded_691_is_noop_equivalent_through_910_mirror() {
 fn repacked_1224_group_roundtrips_and_decodes() {
     let files = files(INTERFACE_1224_DAT);
     let group = transcode_and_pack(&files, BUILD, 9).expect("transcode + pack 1224");
-    assert_eq!(group.roster, (0..50).collect::<Vec<u32>>(), "dense 0..50 roster");
+    assert_eq!(
+        group.roster,
+        (0..50).collect::<Vec<u32>>(),
+        "dense 0..50 roster"
+    );
 
     // Re-decode the packed .dat without an index, as the overlay applier would.
     let reparsed = decode_interface_group_raw(&group.dat, BUILD)
@@ -247,7 +265,10 @@ fn repacked_691_group_roundtrips_and_decodes() {
         .clone();
     assert_eq!(reparsed.len(), 225);
     for (id, tc) in &group.components {
-        assert_eq!(&reparsed[id], &tc.bytes, "packed 691 re-decode changed com{id}");
+        assert_eq!(
+            &reparsed[id], &tc.bytes,
+            "packed 691 re-decode changed com{id}"
+        );
         decode_component_910(&reparsed[id])
             .unwrap_or_else(|e| panic!("repacked 691 com{id} failed the mirror: {e}"));
     }

@@ -290,7 +290,13 @@ impl Stacks {
         self.vec(stack).push(Slot::bare(node));
     }
 
-    fn push_const(&mut self, stack: Stack, node: Node, int_lit: Option<i32>, str_lit: Option<String>) {
+    fn push_const(
+        &mut self,
+        stack: Stack,
+        node: Node,
+        int_lit: Option<i32>,
+        str_lit: Option<String>,
+    ) {
         self.vec(stack).push(Slot {
             node,
             int_lit,
@@ -382,7 +388,11 @@ pub fn generate(
             // ── constants (literal value retained for data-dependent arities) ──
             "push_constant_int" => {
                 let n = inf.constant(wk.unknown_int);
-                let lit = if let Operand::Int(v) = ins.operand { Some(v) } else { None };
+                let lit = if let Operand::Int(v) = ins.operand {
+                    Some(v)
+                } else {
+                    None
+                };
                 stacks.push_const(Stack::Int, n, lit, None);
             }
             "push_constant_string" => {
@@ -395,7 +405,11 @@ pub fn generate(
                     }
                     other => {
                         let n = inf.constant(wk.unknown_int);
-                        let lit = if let Operand::Int(v) = other { Some(*v) } else { None };
+                        let lit = if let Operand::Int(v) = other {
+                            Some(*v)
+                        } else {
+                            None
+                        };
                         stacks.push_const(Stack::Int, n, lit, None);
                     }
                 }
@@ -406,12 +420,24 @@ pub fn generate(
             }
 
             // ── locals ──
-            "push_int_local" => stacks.push(Stack::Int, local_node(script_id, LocalDomain::Integer, &ins.operand)?),
-            "push_string_local" => stacks.push(Stack::Obj, local_node(script_id, LocalDomain::Object, &ins.operand)?),
-            "push_long_local" => stacks.push(Stack::Long, local_node(script_id, LocalDomain::Long, &ins.operand)?),
+            "push_int_local" => stacks.push(
+                Stack::Int,
+                local_node(script_id, LocalDomain::Integer, &ins.operand)?,
+            ),
+            "push_string_local" => stacks.push(
+                Stack::Obj,
+                local_node(script_id, LocalDomain::Object, &ins.operand)?,
+            ),
+            "push_long_local" => stacks.push(
+                Stack::Long,
+                local_node(script_id, LocalDomain::Long, &ins.operand)?,
+            ),
             "pop_int_local" => {
                 let v = stacks.pop(Stack::Int).ok_or(Unmodellable)?;
-                inf.assign(v, local_node(script_id, LocalDomain::Integer, &ins.operand)?);
+                inf.assign(
+                    v,
+                    local_node(script_id, LocalDomain::Integer, &ins.operand)?,
+                );
             }
             "pop_string_local" => {
                 let v = stacks.pop(Stack::Obj).ok_or(Unmodellable)?;
@@ -448,14 +474,21 @@ pub fn generate(
             "branch_if_true" | "branch_if_false" => {
                 stacks.pop(Stack::Int).ok_or(Unmodellable)?;
             }
-            "branch_not" | "branch_equals" | "branch_less_than" | "branch_greater_than"
-            | "branch_less_than_or_equals" | "branch_greater_than_or_equals" => {
+            "branch_not"
+            | "branch_equals"
+            | "branch_less_than"
+            | "branch_greater_than"
+            | "branch_less_than_or_equals"
+            | "branch_greater_than_or_equals" => {
                 let b = stacks.pop(Stack::Int).ok_or(Unmodellable)?;
                 let a = stacks.pop(Stack::Int).ok_or(Unmodellable)?;
                 inf.compare(a, b);
             }
-            "long_branch_not" | "long_branch_equals" | "long_branch_less_than"
-            | "long_branch_greater_than" | "long_branch_less_than_or_equals"
+            "long_branch_not"
+            | "long_branch_equals"
+            | "long_branch_less_than"
+            | "long_branch_greater_than"
+            | "long_branch_less_than_or_equals"
             | "long_branch_greater_than_or_equals" => {
                 let b = stacks.pop(Stack::Long).ok_or(Unmodellable)?;
                 let a = stacks.pop(Stack::Long).ok_or(Unmodellable)?;
@@ -502,7 +535,11 @@ pub fn generate(
     Ok(())
 }
 
-fn local_node(script_id: i32, domain: LocalDomain, operand: &Operand) -> Result<Node, Unmodellable> {
+fn local_node(
+    script_id: i32,
+    domain: LocalDomain,
+    operand: &Operand,
+) -> Result<Node, Unmodellable> {
     match operand {
         Operand::Local(i) => Ok(Node::Local(script_id, domain, *i as u32)),
         _ => Err(Unmodellable),
@@ -531,8 +568,8 @@ fn hook(cmd: &str, stacks: &mut Stacks) -> Result<(), Unmodellable> {
     if let Some(stripped) = signature.strip_suffix('Y') {
         signature = stripped;
         let count_slot = stacks.pop_slot(Stack::Int).ok_or(Unmodellable)?;
-        let count = usize::try_from(count_slot.int_lit.ok_or(Unmodellable)?)
-            .map_err(|_| Unmodellable)?;
+        let count =
+            usize::try_from(count_slot.int_lit.ok_or(Unmodellable)?).map_err(|_| Unmodellable)?;
         for _ in 0..count {
             stacks.pop(Stack::Int).ok_or(Unmodellable)?; // watcher var id
         }
@@ -569,12 +606,38 @@ fn varbit_node(operand: &Operand) -> Result<Node, Unmodellable> {
     }
 }
 
-fn gosub(target: i32, sig: CalleeSig, stacks: &mut Stacks, inf: &mut TypeInfer) -> Result<(), Unmodellable> {
+fn gosub(
+    target: i32,
+    sig: CalleeSig,
+    stacks: &mut Stacks,
+    inf: &mut TypeInfer,
+) -> Result<(), Unmodellable> {
     // Pop args off each stack and bind them to the callee's parameter locals
     // (parameters occupy the callee's first local slots, per storage class).
-    bind_args(stacks, inf, Stack::Long, target, LocalDomain::Long, sig.arg_long)?;
-    bind_args(stacks, inf, Stack::Obj, target, LocalDomain::Object, sig.arg_obj)?;
-    bind_args(stacks, inf, Stack::Int, target, LocalDomain::Integer, sig.arg_int)?;
+    bind_args(
+        stacks,
+        inf,
+        Stack::Long,
+        target,
+        LocalDomain::Long,
+        sig.arg_long,
+    )?;
+    bind_args(
+        stacks,
+        inf,
+        Stack::Obj,
+        target,
+        LocalDomain::Object,
+        sig.arg_obj,
+    )?;
+    bind_args(
+        stacks,
+        inf,
+        Stack::Int,
+        target,
+        LocalDomain::Integer,
+        sig.arg_int,
+    )?;
 
     // Push the callee's results back (untyped: v1 keeps the stacks balanced; the
     // call site's consumer refines each value).
@@ -700,9 +763,27 @@ pub fn infer_program_diag(
             continue;
         }
         let mut locals: LocalTypes = HashMap::new();
-        read_locals(&inf, id, LocalDomain::Integer, script.local_count_int, &mut locals);
-        read_locals(&inf, id, LocalDomain::Object, script.local_count_object, &mut locals);
-        read_locals(&inf, id, LocalDomain::Long, script.local_count_long, &mut locals);
+        read_locals(
+            &inf,
+            id,
+            LocalDomain::Integer,
+            script.local_count_int,
+            &mut locals,
+        );
+        read_locals(
+            &inf,
+            id,
+            LocalDomain::Object,
+            script.local_count_object,
+            &mut locals,
+        );
+        read_locals(
+            &inf,
+            id,
+            LocalDomain::Long,
+            script.local_count_long,
+            &mut locals,
+        );
         out.insert(id, locals);
     }
 
@@ -755,11 +836,7 @@ pub fn annotate_local_declarations(source: &str, inferred: &LocalTypes) -> Strin
         .map(|line| rewrite_local_decl(line, inferred).unwrap_or_else(|| line.to_string()))
         .collect::<Vec<_>>()
         .join("\n");
-    if trailing_newline {
-        body + "\n"
-    } else {
-        body
-    }
+    if trailing_newline { body + "\n" } else { body }
 }
 
 fn rewrite_local_decl(line: &str, inferred: &LocalTypes) -> Option<String> {
@@ -792,7 +869,13 @@ fn parse_local_name(name: &str) -> Option<(LocalDomain, u32)> {
     Some((domain, index.parse().ok()?))
 }
 
-fn read_locals(inf: &TypeInfer, script_id: i32, domain: LocalDomain, count: u16, out: &mut LocalTypes) {
+fn read_locals(
+    inf: &TypeInfer,
+    script_id: i32,
+    domain: LocalDomain,
+    count: u16,
+    out: &mut LocalTypes,
+) {
     for index in 0..u32::from(count) {
         let ty = inf.type_of(Node::Local(script_id, domain, index));
         out.insert((domain, index), ty);
@@ -832,7 +915,9 @@ mod tests {
     #[test]
     fn parses_typed_and_build_gated_signatures() {
         let table = SignatureTable::from_sources(
-            &["[command,paint](component $x1)\n[command,db_find](dbcolumn $x1, int $x2, basevartype $x3) 919"],
+            &[
+                "[command,paint](component $x1)\n[command,db_find](dbcolumn $x1, int $x2, basevartype $x3) 919",
+            ],
             "",
             948,
         );
@@ -929,7 +1014,10 @@ mod tests {
         // recognisable typed signature.
         let table = SignatureTable::embedded(948);
         assert!(table.typed.contains_key("add"));
-        assert_eq!(table.typed["add"].results.first().map(|t| t.name()), Some("int"));
+        assert_eq!(
+            table.typed["add"].results.first().map(|t| t.name()),
+            Some("int")
+        );
     }
 
     // Helper: the test corpus owns the table; pass a borrow.
@@ -948,9 +1036,15 @@ mod tests {
         let source = "export function f(): void {\n    let local_int_0: number;\n    let local_int_1: number;\n    let local_obj_0: string;\n}\n";
         let out = annotate_local_declarations(source, &inferred);
         assert!(out.contains("let local_int_0: component;"), "{out}");
-        assert!(out.contains("let local_int_1: number;"), "conflict keeps TS annotation");
+        assert!(
+            out.contains("let local_int_1: number;"),
+            "conflict keeps TS annotation"
+        );
         assert!(out.contains("let local_obj_0: string;"), "base unchanged");
-        assert!(out.contains("export function f(): void {"), "signature untouched");
+        assert!(
+            out.contains("export function f(): void {"),
+            "signature untouched"
+        );
         assert!(out.ends_with("}\n"), "trailing newline preserved");
     }
 
@@ -960,16 +1054,31 @@ mod tests {
         let l = lattice();
         let wk = l.wk();
         // refined semantic types render as their keyword
-        assert_eq!(render_local_type(l.by_name("component"), LocalDomain::Integer), "component");
-        assert_eq!(render_local_type(l.by_name("loc"), LocalDomain::Integer), "loc");
+        assert_eq!(
+            render_local_type(l.by_name("component"), LocalDomain::Integer),
+            "component"
+        );
+        assert_eq!(
+            render_local_type(l.by_name("loc"), LocalDomain::Integer),
+            "loc"
+        );
         assert_eq!(render_local_type(wk.string, LocalDomain::Object), "string");
         // conflict / unknown / generic-int fall back to the slot's base VM type
         assert_eq!(render_local_type(wk.conflict, LocalDomain::Integer), "int");
-        assert_eq!(render_local_type(wk.unknown_int, LocalDomain::Integer), "int");
+        assert_eq!(
+            render_local_type(wk.unknown_int, LocalDomain::Integer),
+            "int"
+        );
         assert_eq!(render_local_type(wk.int_int, LocalDomain::Integer), "int");
         assert_eq!(render_local_type(wk.unknown, LocalDomain::Integer), "int");
-        assert_eq!(render_local_type(wk.conflict, LocalDomain::Object), "string");
+        assert_eq!(
+            render_local_type(wk.conflict, LocalDomain::Object),
+            "string"
+        );
         assert_eq!(render_local_type(wk.conflict, LocalDomain::Long), "long");
-        assert_eq!(render_local_type(wk.unknown_object, LocalDomain::Object), "string");
+        assert_eq!(
+            render_local_type(wk.unknown_object, LocalDomain::Object),
+            "string"
+        );
     }
 }

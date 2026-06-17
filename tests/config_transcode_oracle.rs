@@ -26,7 +26,7 @@ use std::path::{Path, PathBuf};
 
 use rs3_cache_rs::config::parse_dbtable;
 use rs3_cache_rs::config_transcode::{
-    TranscodeInputs, encode_int_index, encode_dbtable_schema, transcode_db_groups,
+    TranscodeInputs, encode_dbtable_schema, encode_int_index, transcode_db_groups,
 };
 use rs3_cache_rs::font::cli::decompress_raw_group;
 
@@ -144,7 +144,8 @@ fn oracle_schemas_round_trip_opcode1() {
         let re = encode_dbtable_schema(&decoded)
             .unwrap_or_else(|e| panic!("re-encode table {table_id}: {e}"));
         assert_eq!(
-            re, *oracle,
+            re,
+            *oracle,
             "table {table_id}: re-encoded opcode-1 schema != oracle ({} vs {} bytes)",
             re.len(),
             oracle.len()
@@ -168,7 +169,8 @@ fn oracle_index_files_round_trip() {
         let entries = decode_int_index(bytes);
         let re = encode_int_index(&entries);
         assert_eq!(
-            re, *bytes,
+            re,
+            *bytes,
             "index file {fid}: re-encoded != oracle ({} vs {} bytes)",
             re.len(),
             bytes.len()
@@ -241,7 +243,8 @@ fn full_transcode_reproduces_oracle_bodies() {
 
     let oracle_g40 = decompress_raw_group(GROUP40_DAT).expect("decompress oracle group 40");
     assert_eq!(
-        out.group40_body, oracle_g40,
+        out.group40_body,
+        oracle_g40,
         "transcoded group-40 body != oracle ({} vs {} bytes)",
         out.group40_body.len(),
         oracle_g40.len()
@@ -254,7 +257,8 @@ fn full_transcode_reproduces_oracle_bodies() {
 
     let oracle_idx = decompress_raw_group(INDEX94_DAT).expect("decompress oracle index 94");
     assert_eq!(
-        out.index94_body, oracle_idx,
+        out.index94_body,
+        oracle_idx,
         "transcoded index-94 body != oracle ({} vs {} bytes)",
         out.index94_body.len(),
         oracle_idx.len()

@@ -193,23 +193,63 @@ impl CollisionMap {
     pub fn add_wall(&mut self, x: i32, z: i32, shape: u8, rotation: u8, block_proj: bool) {
         match shape {
             0 => match rotation & 3 {
-                0 => { self.mark(x, z, WALL_W, block_proj); self.mark(x - 1, z, WALL_E, block_proj); }
-                1 => { self.mark(x, z, WALL_N, block_proj); self.mark(x, z + 1, WALL_S, block_proj); }
-                2 => { self.mark(x, z, WALL_E, block_proj); self.mark(x + 1, z, WALL_W, block_proj); }
-                _ => { self.mark(x, z, WALL_S, block_proj); self.mark(x, z - 1, WALL_N, block_proj); }
+                0 => {
+                    self.mark(x, z, WALL_W, block_proj);
+                    self.mark(x - 1, z, WALL_E, block_proj);
+                }
+                1 => {
+                    self.mark(x, z, WALL_N, block_proj);
+                    self.mark(x, z + 1, WALL_S, block_proj);
+                }
+                2 => {
+                    self.mark(x, z, WALL_E, block_proj);
+                    self.mark(x + 1, z, WALL_W, block_proj);
+                }
+                _ => {
+                    self.mark(x, z, WALL_S, block_proj);
+                    self.mark(x, z - 1, WALL_N, block_proj);
+                }
             },
             // diagonal/pillar — matches the NXT DAT tables at 0x100d3fe80
             1 | 3 => match rotation & 3 {
-                0 => { self.mark(x, z, WALL_NW, block_proj); self.mark(x - 1, z + 1, WALL_SE, block_proj); }
-                1 => { self.mark(x, z, WALL_NE, block_proj); self.mark(x + 1, z + 1, WALL_SW, block_proj); }
-                2 => { self.mark(x, z, WALL_SE, block_proj); self.mark(x + 1, z - 1, WALL_NW, block_proj); }
-                _ => { self.mark(x, z, WALL_SW, block_proj); self.mark(x - 1, z - 1, WALL_NE, block_proj); }
+                0 => {
+                    self.mark(x, z, WALL_NW, block_proj);
+                    self.mark(x - 1, z + 1, WALL_SE, block_proj);
+                }
+                1 => {
+                    self.mark(x, z, WALL_NE, block_proj);
+                    self.mark(x + 1, z + 1, WALL_SW, block_proj);
+                }
+                2 => {
+                    self.mark(x, z, WALL_SE, block_proj);
+                    self.mark(x + 1, z - 1, WALL_NW, block_proj);
+                }
+                _ => {
+                    self.mark(x, z, WALL_SW, block_proj);
+                    self.mark(x - 1, z - 1, WALL_NE, block_proj);
+                }
             },
             2 => match rotation & 3 {
-                0 => { self.mark(x, z, WALL_W | WALL_N, block_proj); self.mark(x - 1, z, WALL_E, block_proj); self.mark(x, z + 1, WALL_S, block_proj); }
-                1 => { self.mark(x, z, WALL_N | WALL_E, block_proj); self.mark(x, z + 1, WALL_S, block_proj); self.mark(x + 1, z, WALL_W, block_proj); }
-                2 => { self.mark(x, z, WALL_E | WALL_S, block_proj); self.mark(x + 1, z, WALL_W, block_proj); self.mark(x, z - 1, WALL_N, block_proj); }
-                _ => { self.mark(x, z, WALL_S | WALL_W, block_proj); self.mark(x, z - 1, WALL_N, block_proj); self.mark(x - 1, z, WALL_E, block_proj); }
+                0 => {
+                    self.mark(x, z, WALL_W | WALL_N, block_proj);
+                    self.mark(x - 1, z, WALL_E, block_proj);
+                    self.mark(x, z + 1, WALL_S, block_proj);
+                }
+                1 => {
+                    self.mark(x, z, WALL_N | WALL_E, block_proj);
+                    self.mark(x, z + 1, WALL_S, block_proj);
+                    self.mark(x + 1, z, WALL_W, block_proj);
+                }
+                2 => {
+                    self.mark(x, z, WALL_E | WALL_S, block_proj);
+                    self.mark(x + 1, z, WALL_W, block_proj);
+                    self.mark(x, z - 1, WALL_N, block_proj);
+                }
+                _ => {
+                    self.mark(x, z, WALL_S | WALL_W, block_proj);
+                    self.mark(x, z - 1, WALL_N, block_proj);
+                    self.mark(x - 1, z, WALL_E, block_proj);
+                }
             },
             _ => {}
         }
@@ -217,7 +257,15 @@ impl CollisionMap {
 
     /// `AddLoc` — OR `BLOCK_LOC` (+ `BLOCK_PROJ_LOC`) over a `width×length`
     /// footprint, transposing for rotations 1/3 (NXT §3.2).
-    pub fn add_object(&mut self, x: i32, z: i32, width: u8, length: u8, rotation: u8, block_proj: bool) {
+    pub fn add_object(
+        &mut self,
+        x: i32,
+        z: i32,
+        width: u8,
+        length: u8,
+        rotation: u8,
+        block_proj: bool,
+    ) {
         let (sx, sz) = if rotation & 1 == 1 {
             (i32::from(length), i32::from(width))
         } else {
@@ -248,7 +296,11 @@ impl CollisionMap {
     #[must_use]
     pub fn to_rows(&self) -> Vec<Vec<i32>> {
         (0..self.size)
-            .map(|x| (0..self.size).map(|z| self.flags[x * self.size + z]).collect())
+            .map(|x| {
+                (0..self.size)
+                    .map(|z| self.flags[x * self.size + z])
+                    .collect()
+            })
             .collect()
     }
 
@@ -329,7 +381,14 @@ where
         if is_wall_shape(loc.shape) {
             grid.add_wall(x, z, loc.shape, loc.angle, clip.block_projectile);
         } else if is_object_shape(loc.shape) {
-            grid.add_object(x, z, clip.width, clip.length, loc.angle, clip.block_projectile);
+            grid.add_object(
+                x,
+                z,
+                clip.width,
+                clip.length,
+                loc.angle,
+                clip.block_projectile,
+            );
         } else if is_ground_decor_shape(loc.shape) && clip.block_projectile {
             // ground decor blocks walk only when fully solid (blockwalk == 1)
             grid.add_ground_decor(x, z);
@@ -362,9 +421,19 @@ fn trace_line(grid: &CollisionMap, x0: i32, z0: i32, x1: i32, z1: i32, proj: boo
         return true;
     }
     let (m_e, m_w, m_n, m_s) = if proj {
-        (CONSULT_PROJ_E, CONSULT_PROJ_W, CONSULT_PROJ_N, CONSULT_PROJ_S)
+        (
+            CONSULT_PROJ_E,
+            CONSULT_PROJ_W,
+            CONSULT_PROJ_N,
+            CONSULT_PROJ_S,
+        )
     } else {
-        (CONSULT_WALK_E, CONSULT_WALK_W, CONSULT_WALK_N, CONSULT_WALK_S)
+        (
+            CONSULT_WALK_E,
+            CONSULT_WALK_W,
+            CONSULT_WALK_N,
+            CONSULT_WALK_S,
+        )
     };
     let dx = x1 - x0;
     let dz = z1 - z0;

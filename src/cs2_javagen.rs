@@ -107,9 +107,7 @@ const CATEGORY_RULES: &[(&[&str], &str)] = &[
         "AudioOps",
     ),
     (
-        &[
-            "oc_", "lc_", "nc_", "struct_", "enum", "_enum", "bas_",
-        ],
+        &["oc_", "lc_", "nc_", "struct_", "enum", "_enum", "bas_"],
         "ConfigOps",
     ),
     (&["quest"], "QuestOps"),
@@ -391,7 +389,11 @@ fn build_categories_json(
         if method_iter.peek().is_some() {
             out.push('\n');
             while let Some(method) = method_iter.next() {
-                let comma = if method_iter.peek().is_some() { "," } else { "" };
+                let comma = if method_iter.peek().is_some() {
+                    ","
+                } else {
+                    ""
+                };
                 let _ = writeln!(out, "      \"{method}\"{comma}");
             }
             out.push_str("    ]");
@@ -447,7 +449,10 @@ pub fn run(opts: &Cs2JavaGenOpts<'_>) -> Result<()> {
             }
         }
         if diffs.is_empty() {
-            println!("generate-cs2-java --check: all {} file(s) up to date", emissions.len());
+            println!(
+                "generate-cs2-java --check: all {} file(s) up to date",
+                emissions.len()
+            );
             return Ok(());
         }
         println!("generate-cs2-java --check: {} file(s) differ:", diffs.len());
@@ -589,14 +594,34 @@ mod tests {
         let doc = RegistryDoc {
             commands: vec![
                 // declaration order B(order0,id9), A(order1,id2)
-                cmd("b", 9, Some("FIELD_B"), Some(0), None, false, call(None, "b", &["$state"])),
-                cmd("a", 2, Some("FIELD_A"), Some(1), None, false, call(None, "a", &["$state"])),
+                cmd(
+                    "b",
+                    9,
+                    Some("FIELD_B"),
+                    Some(0),
+                    None,
+                    false,
+                    call(None, "b", &["$state"]),
+                ),
+                cmd(
+                    "a",
+                    2,
+                    Some("FIELD_A"),
+                    Some(1),
+                    None,
+                    false,
+                    call(None, "a", &["$state"]),
+                ),
             ],
         };
         let out = emit_client_script_command(&doc);
         // Declaration order: FIELD_B first, then FIELD_A.
-        let b_pos = out.find("ClientScriptCommand FIELD_B").expect("FIELD_B decl");
-        let a_pos = out.find("ClientScriptCommand FIELD_A").expect("FIELD_A decl");
+        let b_pos = out
+            .find("ClientScriptCommand FIELD_B")
+            .expect("FIELD_B decl");
+        let a_pos = out
+            .find("ClientScriptCommand FIELD_A")
+            .expect("FIELD_A decl");
         assert!(b_pos < a_pos, "declarations in enum_order");
         // values() array is sorted by id ascending: FIELD_A (id2) before FIELD_B (id9).
         let arr = out
@@ -612,8 +637,24 @@ mod tests {
     fn dispatch_cases_state_substitution_and_unassigned_grouping() {
         let doc = RegistryDoc {
             commands: vec![
-                cmd("foo", 0, None, None, None, false, call(None, "foo", &["$state"])),
-                cmd("if_bar", 1, None, None, None, false, call(None, "if_bar", &["true", "$state"])),
+                cmd(
+                    "foo",
+                    0,
+                    None,
+                    None,
+                    None,
+                    false,
+                    call(None, "foo", &["$state"]),
+                ),
+                cmd(
+                    "if_bar",
+                    1,
+                    None,
+                    None,
+                    None,
+                    false,
+                    call(None, "if_bar", &["true", "$state"]),
+                ),
                 cmd("u1", 2, None, None, None, false, unassigned()),
                 cmd("u2", 3, None, None, None, false, unassigned()),
                 cmd(
@@ -631,19 +672,43 @@ mod tests {
         // $state substituted to `state`.
         assert!(dispatch.contains("\t\t\tcase 0:\n\t\t\t\tMiscOps.foo(state);\n\t\t\t\treturn;\n"));
         // boolean-variant keeps order.
-        assert!(dispatch.contains("\t\t\tcase 1:\n\t\t\t\tIfOps.if_bar(true, state);\n\t\t\t\treturn;\n"));
+        assert!(
+            dispatch
+                .contains("\t\t\tcase 1:\n\t\t\t\tIfOps.if_bar(true, state);\n\t\t\t\treturn;\n")
+        );
         // explicit donor class preserved.
-        assert!(dispatch.contains("\t\t\tcase 4:\n\t\t\t\tTwitchCommands.ttv(state);\n\t\t\t\treturn;\n"));
+        assert!(
+            dispatch
+                .contains("\t\t\tcase 4:\n\t\t\t\tTwitchCommands.ttv(state);\n\t\t\t\treturn;\n")
+        );
         // unassigned grouped before default.
-        assert!(dispatch.contains("\t\t\tcase 2:\n\t\t\tcase 3:\n\t\t\tdefault:\n\t\t\t\tthrow new RuntimeException();\n"));
+        assert!(dispatch.contains(
+            "\t\t\tcase 2:\n\t\t\tcase 3:\n\t\t\tdefault:\n\t\t\t\tthrow new RuntimeException();\n"
+        ));
     }
 
     #[test]
     fn categories_excludes_donor_classes() {
         let doc = RegistryDoc {
             commands: vec![
-                cmd("foo", 0, None, None, None, false, call(None, "foo", &["$state"])),
-                cmd("if_a", 1, None, None, None, false, call(None, "if_a", &["$state"])),
+                cmd(
+                    "foo",
+                    0,
+                    None,
+                    None,
+                    None,
+                    false,
+                    call(None, "foo", &["$state"]),
+                ),
+                cmd(
+                    "if_a",
+                    1,
+                    None,
+                    None,
+                    None,
+                    false,
+                    call(None, "if_a", &["$state"]),
+                ),
                 cmd(
                     "tw",
                     2,
@@ -669,8 +734,24 @@ mod tests {
         // if_sendtofront / if_sendtoback both -> IfOps via name, shared method if_sendto.
         let doc = RegistryDoc {
             commands: vec![
-                cmd("if_sendtofront", 0, None, None, None, false, call(None, "if_sendto", &["true", "$state"])),
-                cmd("if_sendtoback", 1, None, None, None, false, call(None, "if_sendto", &["false", "$state"])),
+                cmd(
+                    "if_sendtofront",
+                    0,
+                    None,
+                    None,
+                    None,
+                    false,
+                    call(None, "if_sendto", &["true", "$state"]),
+                ),
+                cmd(
+                    "if_sendtoback",
+                    1,
+                    None,
+                    None,
+                    None,
+                    false,
+                    call(None, "if_sendto", &["false", "$state"]),
+                ),
             ],
         };
         let (_dispatch, cats) = emit_dispatch_and_categories(&doc).expect("emit");
@@ -684,8 +765,24 @@ mod tests {
         // Two names mapping the same method to different classes must fail.
         let doc = RegistryDoc {
             commands: vec![
-                cmd("if_x", 0, None, None, None, false, call(None, "shared", &["$state"])),
-                cmd("cc_x", 1, None, None, None, false, call(None, "shared", &["$state"])),
+                cmd(
+                    "if_x",
+                    0,
+                    None,
+                    None,
+                    None,
+                    false,
+                    call(None, "shared", &["$state"]),
+                ),
+                cmd(
+                    "cc_x",
+                    1,
+                    None,
+                    None,
+                    None,
+                    false,
+                    call(None, "shared", &["$state"]),
+                ),
             ],
         };
         let result = emit_dispatch_and_categories(&doc);

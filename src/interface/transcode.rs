@@ -188,7 +188,10 @@ pub fn transcode_component(bytes: &[u8], build: u32) -> Result<TranscodedCompone
         match target {
             TargetType::Layer => write_layer_body_v9(&mut w),
             TargetType::Text => {
-                let tp = seg.text_part.as_ref().expect("text target needs a text part");
+                let tp = seg
+                    .text_part
+                    .as_ref()
+                    .expect("text target needs a text part");
                 write_text_body_v9(&mut w, tp)?;
             }
         }
@@ -237,7 +240,9 @@ fn build_raw_group(body: &[u8], version: u16) -> Result<Vec<u8>> {
     use std::io::Write as _;
 
     let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
-    encoder.write_all(body).context("gzip-compress group body")?;
+    encoder
+        .write_all(body)
+        .context("gzip-compress group body")?;
     let gz = encoder.finish().context("finish gzip stream")?;
 
     let gz_len = gz.len() as u32;
@@ -297,7 +302,10 @@ pub fn transcode_and_pack(
             );
         }
     }
-    let ordered: Vec<Vec<u8>> = roster.iter().map(|id| components[id].bytes.clone()).collect();
+    let ordered: Vec<Vec<u8>> = roster
+        .iter()
+        .map(|id| components[id].bytes.clone())
+        .collect();
     let body = pack_group_files(&ordered);
     let dat = build_raw_group(&body, version)?;
     Ok(TranscodedGroup {
@@ -804,10 +812,8 @@ pub fn run(opts: &InterfaceTranscodeOptions<'_>) -> Result<()> {
         );
     }
 
-    let target = crate::port::book::BuildDescriptor::load(
-        &crate::cs2::lint::default_data_dir(),
-        opts.to,
-    )?;
+    let target =
+        crate::port::book::BuildDescriptor::load(&crate::cs2::lint::default_data_dir(), opts.to)?;
     let files = read_group_files(&opts.source, opts.group, opts.decode_build)?;
     let component_count = files.len();
     let ported = crate::port::interface::port_interface_group(

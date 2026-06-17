@@ -163,13 +163,9 @@ fn cs2_port_reproduces_committed_material_storage_scripts_byte_for_byte() {
 
     let donor_source = ritual::flat_cache_source(&c948, &i948, &book_948, 948);
     let base_source = ritual::flat_cache_source(&c910, &i910, &book_910, 910);
-    let ported = material_storage::port_material_storage_scripts(
-        &donor_source,
-        &base_source,
-        &d948,
-        &d910,
-    )
-    .expect("port material-storage scripts through layer");
+    let ported =
+        material_storage::port_material_storage_scripts(&donor_source, &base_source, &d948, &d910)
+            .expect("port material-storage scripts through layer");
     assert_family_byte_exact(&ported, "material-storage-948");
 }
 
@@ -253,7 +249,10 @@ fn committed_script_ids() -> std::collections::BTreeSet<i32> {
 fn first_diff_line(a: &str, b: &str) -> String {
     for (i, (la, lb)) in a.lines().zip(b.lines()).enumerate() {
         if la != lb {
-            return format!("line {} differs\n    committed: {la:?}\n    produced:  {lb:?}", i + 1);
+            return format!(
+                "line {} differs\n    committed: {la:?}\n    produced:  {lb:?}",
+                i + 1
+            );
         }
     }
     let (na, nb) = (a.lines().count(), b.lines().count());

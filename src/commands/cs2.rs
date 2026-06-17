@@ -211,8 +211,7 @@ pub fn run_port(ctx: &CommandContext, opts: Cs2PortOpts) -> Result<()> {
             let base_cache = FlatCache::open(&base_dir)?;
             let base_index = base_cache.archive_index(ARCHIVE_CLIENTSCRIPTS)?;
             let book_910 = OpcodeBook::load(data_dir, 910, 0)?;
-            let base_source =
-                ritual::flat_cache_source(&base_cache, &base_index, &book_910, 910);
+            let base_source = ritual::flat_cache_source(&base_cache, &base_index, &book_910, 910);
             material_storage::port_material_storage_scripts(&source, &base_source, &d948, &d910)?
         }
         1092 => {
@@ -223,8 +222,7 @@ pub fn run_port(ctx: &CommandContext, opts: Cs2PortOpts) -> Result<()> {
             let base_cache = FlatCache::open(&base_dir)?;
             let base_index = base_cache.archive_index(ARCHIVE_CLIENTSCRIPTS)?;
             let book_910 = OpcodeBook::load(data_dir, 910, 0)?;
-            let base_source =
-                ritual::flat_cache_source(&base_cache, &base_index, &book_910, 910);
+            let base_source = ritual::flat_cache_source(&base_cache, &base_index, &book_910, 910);
             lodestone::port_lodestone_scripts(&base_source, &d910)?
         }
         other => bail!("unsupported interface {other}"),
@@ -236,8 +234,7 @@ pub fn run_port(ctx: &CommandContext, opts: Cs2PortOpts) -> Result<()> {
             .with_context(|| format!("create out dir {}", dir.display()))?;
         for p in &ported {
             let path = dir.join(format!("script{}.asm.ts", p.out_id));
-            std::fs::write(&path, &p.text)
-                .with_context(|| format!("write {}", path.display()))?;
+            std::fs::write(&path, &p.text).with_context(|| format!("write {}", path.display()))?;
         }
     }
 
@@ -295,7 +292,9 @@ pub fn run_port(ctx: &CommandContext, opts: Cs2PortOpts) -> Result<()> {
         }
         if check_oracle {
             if mismatches.is_empty() {
-                println!("  oracle: BYTE-EXACT ({checked} listing(s) match the committed artifacts)");
+                println!(
+                    "  oracle: BYTE-EXACT ({checked} listing(s) match the committed artifacts)"
+                );
             } else {
                 println!(
                     "  oracle: {} of {} listing(s) DIFFER: {:?}",

@@ -73,7 +73,9 @@ fn index_container_sizes(file: &[u8]) -> Result<(usize, usize)> {
     let base = header
         .checked_add(clen)
         .context("index container size overflow")?;
-    let with_trailer = base.checked_add(2).context("index container size overflow")?;
+    let with_trailer = base
+        .checked_add(2)
+        .context("index container size overflow")?;
     Ok((base, with_trailer))
 }
 
@@ -82,8 +84,7 @@ impl PackArchive {
     pub fn open(path: &Path) -> Result<Self> {
         let file = fs::read(path)
             .with_context(|| format!("failed reading pack file {}", path.display()))?;
-        Self::from_bytes(file)
-            .with_context(|| format!("failed reading pack {}", path.display()))
+        Self::from_bytes(file).with_context(|| format!("failed reading pack {}", path.display()))
     }
 
     /// Decode an in-memory single-file `.js5` pack. The layout is exactly as
@@ -94,8 +95,7 @@ impl PackArchive {
         // Decode the index from the container at offset 0. `decompress` reads the
         // header (compression byte + lengths) itself and stops at the payload end,
         // so passing the whole file is safe even with trailing group bytes.
-        let index_bytes =
-            decompress(&file).context("failed to decompress pack archive index")?;
+        let index_bytes = decompress(&file).context("failed to decompress pack archive index")?;
         let index = ArchiveIndex::decode(&index_bytes)
             .context("failed to decode pack archive index container")?;
         let n = index.group_count;
@@ -110,10 +110,11 @@ impl PackArchive {
         let mut total: usize = 0;
         for i in 0..n {
             let off = trailer_off + i * 4;
-            let len =
-                u32::from_be_bytes([file[off], file[off + 1], file[off + 2], file[off + 3]]);
+            let len = u32::from_be_bytes([file[off], file[off + 1], file[off + 2], file[off + 3]]);
             let len = usize::try_from(len).context("group length overflow")?;
-            total = total.checked_add(len).context("group length sum overflow")?;
+            total = total
+                .checked_add(len)
+                .context("group length sum overflow")?;
             lengths.push(len);
         }
 
@@ -216,7 +217,10 @@ impl PackArchive {
     #[must_use]
     pub fn has_group(&self, group: u32) -> bool {
         self.ranges.contains_key(&group)
-            || self.patch.as_ref().is_some_and(|p| p.ranges.contains_key(&group))
+            || self
+                .patch
+                .as_ref()
+                .is_some_and(|p| p.ranges.contains_key(&group))
     }
 
     /// The raw container bytes (`<archive>/<group>.dat` form) for a group, or
@@ -328,7 +332,11 @@ mod tests {
     fn container0(payload: &[u8]) -> Vec<u8> {
         let mut out = Vec::new();
         out.push(0u8);
-        out.extend_from_slice(&u32::try_from(payload.len()).expect("len fits u32").to_be_bytes());
+        out.extend_from_slice(
+            &u32::try_from(payload.len())
+                .expect("len fits u32")
+                .to_be_bytes(),
+        );
         out.extend_from_slice(payload);
         out
     }
@@ -503,7 +511,10 @@ mod tests {
             "base must win on an overlapping group"
         );
         let files = m.group_files(5).expect("ok").expect("present");
-        assert_eq!(files.get(&1).map(Vec::as_slice), Some(b"BASE_FIVE".as_ref()));
+        assert_eq!(
+            files.get(&1).map(Vec::as_slice),
+            Some(b"BASE_FIVE".as_ref())
+        );
     }
 
     #[test]
@@ -523,8 +534,14 @@ mod tests {
         let m = merged(base, patch);
 
         let files = m.group_files(7).expect("ok").expect("present");
-        assert_eq!(files.get(&10).map(Vec::as_slice), Some(b"BASEFILE".as_ref()));
-        assert_eq!(files.get(&20).map(Vec::as_slice), Some(b"PATCHFILE".as_ref()));
+        assert_eq!(
+            files.get(&10).map(Vec::as_slice),
+            Some(b"BASEFILE".as_ref())
+        );
+        assert_eq!(
+            files.get(&20).map(Vec::as_slice),
+            Some(b"PATCHFILE".as_ref())
+        );
         assert_eq!(files.len(), 2, "union should hold both files");
     }
 
@@ -544,7 +561,10 @@ mod tests {
 
         let files = m.group_files(7).expect("ok").expect("present");
         assert_eq!(files.len(), 1);
-        assert_eq!(files.get(&10).map(Vec::as_slice), Some(b"BASEFILE".as_ref()));
+        assert_eq!(
+            files.get(&10).map(Vec::as_slice),
+            Some(b"BASEFILE".as_ref())
+        );
     }
 
     #[test]
@@ -568,12 +588,21 @@ mod tests {
         std::fs::write(&patch_path, &patch).expect("write patch");
 
         let plain = PackArchive::open(&base_path).expect("open base");
-        assert!(!plain.has_group(2), "plain open must NOT see the patch group");
+        assert!(
+            !plain.has_group(2),
+            "plain open must NOT see the patch group"
+        );
 
         let merged = PackArchive::open_with_patch(&base_path).expect("open_with_patch");
-        assert!(merged.has_group(2), "open_with_patch must see the patch group");
+        assert!(
+            merged.has_group(2),
+            "open_with_patch must see the patch group"
+        );
         assert_eq!(merged.group_ids().collect::<Vec<_>>(), vec![0, 2]);
-        assert_eq!(merged.group_container(2), Some(container0(b"PATCH2").as_slice()));
+        assert_eq!(
+            merged.group_container(2),
+            Some(container0(b"PATCH2").as_slice())
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -586,7 +615,10 @@ mod tests {
             patch_sibling(Path::new("/p/client.enum.config.js5")),
             Some(PathBuf::from("/p/client.enum.config.patch.js5"))
         );
-        assert_eq!(patch_sibling(Path::new("/p/client.enum.config.patch.js5")), None);
+        assert_eq!(
+            patch_sibling(Path::new("/p/client.enum.config.patch.js5")),
+            None
+        );
         assert_eq!(patch_sibling(Path::new("/p/notapack.bin")), None);
     }
 }

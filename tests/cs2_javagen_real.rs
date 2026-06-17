@@ -29,8 +29,7 @@ fn registry_path() -> PathBuf {
 }
 
 fn skip_if_tree_absent() -> bool {
-    let sr = client_root()
-        .join("client/src/main/java/rs2/client/clientscript/ScriptRunner.java");
+    let sr = client_root().join("client/src/main/java/rs2/client/clientscript/ScriptRunner.java");
     if !sr.is_file() {
         eprintln!("skip: client tree absent at {}", sr.display());
         return true;

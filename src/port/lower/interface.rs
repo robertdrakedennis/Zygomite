@@ -58,7 +58,10 @@ pub enum Downcoded {
 /// The pass mutates `body` in place: a downcoded component's body becomes a
 /// [`Body::Raw`] holding the synthesized v9 layer/text body, and its `kind` /
 /// `version` are rewritten so the encoder emits a 910-decodable component.
-pub fn list_to_server_driven(ir: &mut InterfaceIr, target: &BuildDescriptor) -> Result<Vec<Downcoded>> {
+pub fn list_to_server_driven(
+    ir: &mut InterfaceIr,
+    target: &BuildDescriptor,
+) -> Result<Vec<Downcoded>> {
     let mut report = Vec::with_capacity(ir.components.len());
     for component in &mut ir.components {
         report.push(downcode_component(component, target)?);
@@ -144,19 +147,31 @@ mod tests {
                 kind: ComponentKind::Button,
                 name_bit: false,
                 header_tail: vec![],
-                body: Body::Composite { text: None, raw_len: 52 },
+                body: Body::Composite {
+                    text: None,
+                    raw_len: 52,
+                },
                 tail: vec![],
             }],
         };
         let report = list_to_server_driven(&mut ir, &target_910()).expect("lower");
-        assert_eq!(report[0], Downcoded::ToLayer { from: ComponentKind::Button, dropped: 52 });
+        assert_eq!(
+            report[0],
+            Downcoded::ToLayer {
+                from: ComponentKind::Button,
+                dropped: 52
+            }
+        );
         assert_eq!(ir.components[0].kind, ComponentKind::Layer);
         assert!(matches!(ir.components[0].body, Body::Raw(_)));
     }
 
     #[test]
     fn check_with_label_downcodes_to_text() {
-        let tp = TextPart { text: "Show Locked".to_string(), ..TextPart::default() };
+        let tp = TextPart {
+            text: "Show Locked".to_string(),
+            ..TextPart::default()
+        };
         let mut ir = InterfaceIr {
             group: 0,
             components: vec![Component {
@@ -164,12 +179,21 @@ mod tests {
                 kind: ComponentKind::Check,
                 name_bit: false,
                 header_tail: vec![],
-                body: Body::Composite { text: Some(tp), raw_len: 58 },
+                body: Body::Composite {
+                    text: Some(tp),
+                    raw_len: 58,
+                },
                 tail: vec![],
             }],
         };
         let report = list_to_server_driven(&mut ir, &target_910()).expect("lower");
-        assert_eq!(report[0], Downcoded::ToText { from: ComponentKind::Check, dropped: 58 });
+        assert_eq!(
+            report[0],
+            Downcoded::ToText {
+                from: ComponentKind::Check,
+                dropped: 58
+            }
+        );
         assert_eq!(ir.components[0].kind, ComponentKind::Text);
     }
 

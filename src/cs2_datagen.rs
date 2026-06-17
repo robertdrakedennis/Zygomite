@@ -88,9 +88,10 @@ const OPCODE_ALIASES_910_HEADER: &str = "\
 /// Run the `generate-cs2-data` subcommand. Returns `true` when `--check` found
 /// drift (the CLI maps that to exit code 3).
 pub fn run(opts: &Cs2DataGenOpts<'_>) -> Result<bool> {
-    let registry_path: PathBuf = opts
-        .registry
-        .map_or_else(|| opts.data_dir.join("cs2").join("registry-910.json"), Path::to_path_buf);
+    let registry_path: PathBuf = opts.registry.map_or_else(
+        || opts.data_dir.join("cs2").join("registry-910.json"),
+        Path::to_path_buf,
+    );
     let out_dir: PathBuf = opts
         .out_dir
         .map_or_else(|| opts.data_dir.to_path_buf(), Path::to_path_buf);
@@ -119,7 +120,10 @@ pub fn run(opts: &Cs2DataGenOpts<'_>) -> Result<bool> {
             }
         }
         if drift.is_empty() {
-            println!("generate-cs2-data --check: all {} view(s) up to date", views.len());
+            println!(
+                "generate-cs2-data --check: all {} view(s) up to date",
+                views.len()
+            );
             return Ok(false);
         }
         println!("generate-cs2-data --check: {} view(s) differ:", drift.len());
@@ -131,8 +135,7 @@ pub fn run(opts: &Cs2DataGenOpts<'_>) -> Result<bool> {
 
     for (name, body) in &views {
         let path = out_dir.join(name);
-        fs::write(&path, body)
-            .with_context(|| format!("failed writing {}", path.display()))?;
+        fs::write(&path, body).with_context(|| format!("failed writing {}", path.display()))?;
         println!("wrote {}", path.display());
     }
     Ok(false)
@@ -253,19 +256,27 @@ mod tests {
         assert!(!drift);
 
         // Capture bytes, run again, assert byte-identical.
-        let first: Vec<Vec<u8>> = ["opcodes-910.txt", "opcodes-large-910.txt", "opcode-aliases-910.txt"]
-            .iter()
-            .map(|n| fs::read(dir.path().join(n)).expect("read generated view"))
-            .collect();
+        let first: Vec<Vec<u8>> = [
+            "opcodes-910.txt",
+            "opcodes-large-910.txt",
+            "opcode-aliases-910.txt",
+        ]
+        .iter()
+        .map(|n| fs::read(dir.path().join(n)).expect("read generated view"))
+        .collect();
         run(&Cs2DataGenOpts {
             registry: Some(&registry),
             out_dir: Some(dir.path()),
             data_dir: dir.path(),
             check: false,
         })?;
-        for (i, n) in ["opcodes-910.txt", "opcodes-large-910.txt", "opcode-aliases-910.txt"]
-            .iter()
-            .enumerate()
+        for (i, n) in [
+            "opcodes-910.txt",
+            "opcodes-large-910.txt",
+            "opcode-aliases-910.txt",
+        ]
+        .iter()
+        .enumerate()
         {
             assert_eq!(
                 first[i],

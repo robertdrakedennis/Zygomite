@@ -63,9 +63,8 @@ pub fn run(ctx: &CommandContext, opts: BuildCollisionOpts) -> Result<()> {
         .with_context(|| format!("load mapsquare group {group} ({map_x}_{map_z})"))?;
     let map = decode_map_square_best_effort(&files, build);
     let clips = load_loc_clips(cache)?;
-    let grids = crate::collision::build_collision(&map, |id| {
-        clips.get(&id).copied().unwrap_or_default()
-    });
+    let grids =
+        crate::collision::build_collision(&map, |id| clips.get(&id).copied().unwrap_or_default());
 
     #[derive(serde::Serialize)]
     struct LevelSummary {

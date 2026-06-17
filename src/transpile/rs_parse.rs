@@ -1056,7 +1056,10 @@ fn build_return_type(returns: &[(String, Option<String>)]) -> String {
         .map(|(ty, _)| runescript_type_to_ts(ty))
         .collect();
     if mapped.len() == 1 {
-        mapped.into_iter().next().unwrap_or_else(|| "void".to_string())
+        mapped
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| "void".to_string())
     } else {
         format!("[{}]", mapped.join(", "))
     }

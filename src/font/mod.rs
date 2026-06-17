@@ -109,7 +109,10 @@ mod tests {
     #[test]
     fn cp1252_undefined_bytes_and_nul() {
         for b in [0u8, 0x81, 0x8D, 0x8F, 0x90, 0x9D] {
-            assert!(cp1252_byte_to_char(b).is_none(), "byte {b:#x} must be undefined");
+            assert!(
+                cp1252_byte_to_char(b).is_none(),
+                "byte {b:#x} must be undefined"
+            );
         }
     }
 

@@ -166,19 +166,21 @@ fn read_single_file_group(pack_root: &Path, archive: u32, group: u32) -> Result<
     let pack_path = crate::pack_root::resolve_noting(pack_root, pack_name, group)?;
     let pack = PackArchive::open(&pack_path)
         .with_context(|| format!("open pack {}", pack_path.display()))?;
-    let files = pack
-        .group_files(group)?
-        .ok_or_else(|| crate::error::CacheError::message(format!(
+    let files = pack.group_files(group)?.ok_or_else(|| {
+        crate::error::CacheError::message(format!(
             "archive {archive} group {group} absent in {}",
             pack_path.display()
-        )))?;
+        ))
+    })?;
     files
         .into_iter()
         .next()
         .map(|(_, bytes)| bytes)
-        .ok_or_else(|| crate::error::CacheError::message(format!(
-            "archive {archive} group {group} has no files"
-        )))
+        .ok_or_else(|| {
+            crate::error::CacheError::message(format!(
+                "archive {archive} group {group} has no files"
+            ))
+        })
 }
 
 /// Default Cinzel face assignment for fmt=1 fonts (mirrors `build-fonts.ts`
@@ -201,15 +203,18 @@ fn resolve_modern_font(
     let ref_payload = read_single_file_group(pack_root, ARCHIVE_FONTMETRICS2, font)?;
     let font_ref = ModernFontRef::decode(&ref_payload)?;
     let (face_id, mode) = match font_ref {
-        ModernFontRef::TtfRef { face, size_px } => {
-            (face_override.unwrap_or(face), SizeMode::Px(f32::from(size_px)))
-        }
+        ModernFontRef::TtfRef { face, size_px } => (
+            face_override.unwrap_or(face),
+            SizeMode::Px(f32::from(size_px)),
+        ),
         ModernFontRef::Fmt1Bitmap { target_ascent, .. } => {
             let face = face_override
                 .or_else(|| default_fmt1_face(font))
-                .ok_or_else(|| crate::error::CacheError::message(format!(
-                    "font {font}: fmt=1 has no face reference; pass --face / --fmt1-face"
-                )))?;
+                .ok_or_else(|| {
+                    crate::error::CacheError::message(format!(
+                        "font {font}: fmt=1 has no face reference; pass --face / --fmt1-face"
+                    ))
+                })?;
             (face, SizeMode::Ascent(f32::from(target_ascent)))
         }
     };
@@ -230,12 +235,12 @@ fn discover_interface_fonts(pack_root: &Path, interface: u32) -> Result<BTreeSet
     let pack_path = crate::pack_root::resolve_noting(pack_root, pack_name, interface)?;
     let pack = PackArchive::open(&pack_path)
         .with_context(|| format!("open interfaces pack {}", pack_path.display()))?;
-    let files = pack
-        .group_files(interface)?
-        .ok_or_else(|| crate::error::CacheError::message(format!(
+    let files = pack.group_files(interface)?.ok_or_else(|| {
+        crate::error::CacheError::message(format!(
             "interface {interface} absent in {}",
             pack_path.display()
-        )))?;
+        ))
+    })?;
     let mut fonts = BTreeSet::new();
     for (component_id, bytes) in files {
         // Build 910 is the runtime base; the codec branches on build internally.
@@ -433,7 +438,15 @@ fn print_decode_human(dump: &DecodeDump) {
         DecodeDump::Metrics(m) => {
             println!(
                 "FontMetrics[{}] group {}: atlas {}x{} ascent={} descent={} line={} divisor={} ink_glyphs={}",
-                m.archive, m.group, m.atlas_w, m.atlas_h, m.ascent, m.descent, m.line_height, m.divisor, m.ink_glyphs
+                m.archive,
+                m.group,
+                m.atlas_w,
+                m.atlas_h,
+                m.ascent,
+                m.descent,
+                m.line_height,
+                m.divisor,
+                m.ink_glyphs
             );
             for g in &m.sample_glyphs {
                 println!(
@@ -542,8 +555,7 @@ fn run_preview(
 /// `decompress(group)` round-trips to the input. See `font::tests`.
 fn wrap_raw_group(payload: &[u8], version: u16) -> Result<Vec<u8>> {
     use std::io::Write as _;
-    let mut encoder =
-        flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
     encoder.write_all(payload)?;
     let mut gz = encoder.finish()?;
     // Js5.packGroup zeroes the gzip OS byte (offset 9).
@@ -592,7 +604,10 @@ fn write_font_outputs(
             (&sprites_grp_dir, sprite_bytes),
         ] {
             std::fs::write(dir.join(format!("{font}.dat")), wrap_raw_group(payload, 1)?)?;
-            std::fs::write(dir.join(format!("{font}.metadata.json")), SINGLE_FILE_GROUP_META)?;
+            std::fs::write(
+                dir.join(format!("{font}.metadata.json")),
+                SINGLE_FILE_GROUP_META,
+            )?;
         }
     }
     Ok((metrics_path, sprite_path))
@@ -700,8 +715,13 @@ fn rasterize_awt_targets(
     let outputs = raster_awt::rasterize_awt(&items)?;
     let mut reports = Vec::with_capacity(outputs.len());
     for out in outputs {
-        let (metrics_path, sprite_path) =
-            write_font_outputs(out_dir, out.font_id, &out.metrics_bin, &out.sprite_bin, groups)?;
+        let (metrics_path, sprite_path) = write_font_outputs(
+            out_dir,
+            out.font_id,
+            &out.metrics_bin,
+            &out.sprite_bin,
+            groups,
+        )?;
         // Decode the AWT FontMetrics to surface the atlas/ascent/line + ink count.
         let m = FontMetrics::decode(&out.metrics_bin)?;
         let ink_glyphs = m.glyph_height.iter().filter(|&&h| h > 0).count() as u32;
@@ -726,11 +746,11 @@ fn rasterize_awt_targets(
 fn parse_fmt1_face(specs: &[String]) -> Result<Vec<(u32, u32)>> {
     let mut out = Vec::new();
     for spec in specs {
-        let (font, face) = spec
-            .split_once(':')
-            .ok_or_else(|| crate::error::CacheError::message(format!(
+        let (font, face) = spec.split_once(':').ok_or_else(|| {
+            crate::error::CacheError::message(format!(
                 "--fmt1-face entry '{spec}' must be font:face"
-            )))?;
+            ))
+        })?;
         out.push((font.trim().parse()?, face.trim().parse()?));
     }
     Ok(out)
@@ -771,7 +791,13 @@ fn run_rasterize(
         println!("rasterizer: experimental pure-Rust ab_glyph (does NOT byte-match the goldens)");
         let mut reports = Vec::with_capacity(targets.len());
         for &font in &targets {
-            reports.push(rasterize_one_native(pack_root, font, face_for(font), out_dir, groups)?);
+            reports.push(rasterize_one_native(
+                pack_root,
+                font,
+                face_for(font),
+                out_dir,
+                groups,
+            )?);
         }
         reports
     } else {
@@ -910,7 +936,10 @@ fn run_diff(a: u32, b: u32, pack_root: &Path, json: bool) -> Result<()> {
         );
         println!(
             "  glyph metric diffs: advance={} height={} y_offset={} (max |Δadvance|={})",
-            report.advance_diffs, report.height_diffs, report.yoffset_diffs, report.max_advance_delta
+            report.advance_diffs,
+            report.height_diffs,
+            report.yoffset_diffs,
+            report.max_advance_delta
         );
     }
     Ok(())

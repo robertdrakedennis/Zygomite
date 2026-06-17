@@ -4,6 +4,18 @@
 //!
 //! Moved verbatim from the former flat `overlay_plan.rs`.
 
+use super::manifest::{ArchiveMode, ArchiveRef, CacheOverlayManifest, OverlayRoots, RegionSpec};
+use super::plan_output::{
+    DependencyEdgeSample, OverlayBlockedIssue, OverlayPlanArchiveFiles, OverlayPlanArchiveGroups,
+    OverlayPlanAudit, OverlayPlanDb, OverlayPlanImports, OverlayPlanOutput, OverlayPlanProof,
+    OverlayPlanSelected, OverlayProofIssue, OverlayProofSummary, OverlaySemanticManifest,
+    OverlayWarning, Rs3CacheManifest,
+};
+use super::refs::{
+    ArchiveDef, ConfigSemanticIndex, ConfigTarget, PendingRef, RawGroupTarget, RefKind, RootKind,
+    SelectionMode, SemanticRefKey, normalize_graph_ref_kind, semantic_refs_file_name,
+};
+use super::{MAX_PLAN_WARNINGS, OVERLAY_PLAN_VERSION, ProofState};
 use crate::cache::FlatCache;
 use crate::config::{
     parse_bas, parse_dbrow, parse_dbtable, parse_enum, parse_loc, parse_material, parse_npc,
@@ -31,18 +43,6 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
-use super::{MAX_PLAN_WARNINGS, OVERLAY_PLAN_VERSION, ProofState};
-use super::manifest::{ArchiveMode, ArchiveRef, CacheOverlayManifest, OverlayRoots, RegionSpec};
-use super::plan_output::{
-    DependencyEdgeSample, OverlayBlockedIssue, OverlayPlanArchiveFiles, OverlayPlanArchiveGroups,
-    OverlayPlanAudit, OverlayPlanDb, OverlayPlanImports, OverlayPlanOutput, OverlayPlanProof,
-    OverlayProofIssue, OverlayProofSummary, OverlayPlanSelected, OverlaySemanticManifest,
-    OverlayWarning, Rs3CacheManifest,
-};
-use super::refs::{
-    ArchiveDef, ConfigSemanticIndex, ConfigTarget, PendingRef, RawGroupTarget, RefKind, RootKind,
-    SelectionMode, SemanticRefKey, normalize_graph_ref_kind, semantic_refs_file_name,
-};
 
 pub type ConfigGroupFileCache = HashMap<(RootKind, u32, u32), Option<BTreeMap<u32, Vec<u8>>>>;
 /// The `(loc_ids, npc_ids)` extracted from one donor map group, or `None` when the
@@ -96,7 +96,13 @@ pub struct PlanBuilder<'a> {
 }
 
 impl PlanBuilder<'_> {
-    pub fn queue(&mut self, kind: RefKind, id: u32, source: impl Into<String>, mode: SelectionMode) {
+    pub fn queue(
+        &mut self,
+        kind: RefKind,
+        id: u32,
+        source: impl Into<String>,
+        mode: SelectionMode,
+    ) {
         if self.seen_refs.insert((kind, id)) {
             self.pending.push_back(PendingRef {
                 kind,
@@ -489,7 +495,10 @@ pub fn process_map_groups(builder: &mut PlanBuilder<'_>, map_groups: &[u32]) -> 
     Ok(())
 }
 
-pub fn map_refs_cache_path(donor_manifest: &Rs3CacheManifest, map_groups: &[u32]) -> Option<PathBuf> {
+pub fn map_refs_cache_path(
+    donor_manifest: &Rs3CacheManifest,
+    map_groups: &[u32],
+) -> Option<PathBuf> {
     let home = std::env::var_os("HOME")?;
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     env!("CARGO_PKG_VERSION").hash(&mut hasher);
@@ -660,7 +669,10 @@ pub fn process_covered_ref_dependencies(
     }
 }
 
-pub fn ref_covered_by_full_archive(builder: &PlanBuilder<'_>, reference: &PendingRef) -> Result<bool> {
+pub fn ref_covered_by_full_archive(
+    builder: &PlanBuilder<'_>,
+    reference: &PendingRef,
+) -> Result<bool> {
     Ok(full_archive_for_ref(builder, reference)?
         .is_some_and(|archive| builder.full_archive_selections.contains(&archive.id)))
 }
@@ -717,7 +729,10 @@ pub fn process_config_ref(
     scan_config_dependencies(builder, semantic_kind, target.id, &reference.source)
 }
 
-pub fn process_shallow_config_ref(builder: &mut PlanBuilder<'_>, target: &ConfigTarget) -> Result<()> {
+pub fn process_shallow_config_ref(
+    builder: &mut PlanBuilder<'_>,
+    target: &ConfigTarget,
+) -> Result<()> {
     let state = compare_file(builder, &target.archive, target.group_id, target.file_id)?;
     if state == CompareState::MissingDonor {
         missing_config(builder, target);
@@ -2750,7 +2765,9 @@ pub fn selected_archive_ids(builder: &PlanBuilder<'_>) -> Vec<u32> {
     ids.into_iter().collect()
 }
 
-pub fn group_selections_for_report(builder: &PlanBuilder<'_>) -> Result<Vec<OverlayPlanArchiveGroups>> {
+pub fn group_selections_for_report(
+    builder: &PlanBuilder<'_>,
+) -> Result<Vec<OverlayPlanArchiveGroups>> {
     let mut rows = Vec::new();
     for (archive_id, groups) in &builder.group_selections {
         let archive = archive_for_id(*archive_id)?;
@@ -2765,7 +2782,9 @@ pub fn group_selections_for_report(builder: &PlanBuilder<'_>) -> Result<Vec<Over
     Ok(rows)
 }
 
-pub fn file_selections_for_report(builder: &PlanBuilder<'_>) -> Result<Vec<OverlayPlanArchiveFiles>> {
+pub fn file_selections_for_report(
+    builder: &PlanBuilder<'_>,
+) -> Result<Vec<OverlayPlanArchiveFiles>> {
     let mut rows = Vec::new();
     for ((archive_id, group_id), file_ids) in &builder.file_selections {
         let archive = archive_for_id(*archive_id)?;

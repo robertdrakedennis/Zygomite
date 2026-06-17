@@ -123,7 +123,10 @@ fn arity_drift_bridge(op: &str) -> Option<(Bridge, &'static str)> {
 /// lowering is registered for it.
 fn missing_op_bridge(op: &str) -> (Bridge, &'static str) {
     if op == "sub" {
-        return (Bridge::SubToAdd, "910 has no `sub`; rewrite `a - b` to `a + (-b)`");
+        return (
+            Bridge::SubToAdd,
+            "910 has no `sub`; rewrite `a - b` to `a + (-b)`",
+        );
     }
     if crate::port::lower::UNMAPPED_POP1_INT_OPS.contains(&op) {
         return (
@@ -131,7 +134,9 @@ fn missing_op_bridge(op: &str) -> (Bridge, &'static str) {
             "948-only single-int-pop component/stylesheet opcode; neutralise to pop_int_discard",
         );
     }
-    if op.starts_with("cc_radiogroup") || op == "cc_setondropdownselect" || op.starts_with("cc_list")
+    if op.starts_with("cc_radiogroup")
+        || op == "cc_setondropdownselect"
+        || op.starts_with("cc_list")
     {
         return (
             Bridge::ListToServerDriven,
@@ -147,7 +152,11 @@ fn missing_op_bridge(op: &str) -> (Bridge, &'static str) {
 /// Run the representability dry-run over a single decoded IR script against the
 /// target descriptor. `script_id` labels the findings.
 #[must_use]
-pub fn represent_script(ir: &Cs2Ir, script_id: Option<i32>, target: &BuildDescriptor) -> Vec<Finding> {
+pub fn represent_script(
+    ir: &Cs2Ir,
+    script_id: Option<i32>,
+    target: &BuildDescriptor,
+) -> Vec<Finding> {
     let mut findings = Vec::new();
     for (i, insn) in ir.code.iter().enumerate() {
         let op = insn.op.as_str();
@@ -161,7 +170,10 @@ pub fn represent_script(ir: &Cs2Ir, script_id: Option<i32>, target: &BuildDescri
                 script: script_id,
                 instr: Some(i),
                 kind: FindingKind::IdPackingDiff,
-                construct: format!("db_field t{} c{} tup{}", field.table, field.column, field.tuple),
+                construct: format!(
+                    "db_field t{} c{} tup{}",
+                    field.table, field.column, field.tuple
+                ),
                 bridge: Bridge::DbfieldRepack,
                 detail: format!(
                     "db-field re-packs from the 948 layout to the {} layout (encoder-intrinsic)",
@@ -414,7 +426,10 @@ mod tests {
                     name_bit: false,
                     header_tail: vec![],
                     body: Body::Composite {
-                        text: Some(TextPart { text: "Show Locked".into(), ..TextPart::default() }),
+                        text: Some(TextPart {
+                            text: "Show Locked".into(),
+                            ..TextPart::default()
+                        }),
                         raw_len: 58,
                     },
                     tail: vec![],

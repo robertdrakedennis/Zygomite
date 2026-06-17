@@ -173,7 +173,8 @@ fn monolith_top_candidate_is_interface_691_with_relic_evidence() {
         .first()
         .expect("there must be at least one candidate interface");
     assert_eq!(
-        top.interface, RELIC_INTERFACE,
+        top.interface,
+        RELIC_INTERFACE,
         "interface 691 must be the top candidate; full ranking: {:?}",
         explained
             .candidate_interfaces

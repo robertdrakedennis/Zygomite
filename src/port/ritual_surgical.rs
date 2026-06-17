@@ -266,9 +266,7 @@ fn surgical_17804(ir: &mut Cs2Ir) -> Result<()> {
         .map(|(i, _)| i)
         .collect();
     if add.len() != 1 || sel.len() != 2 {
-        bail!(
-            "script 17804: radiogroup op count changed (add={add:?}, sel={sel:?})"
-        );
+        bail!("script 17804: radiogroup op count changed (add={add:?}, sel={sel:?})");
     }
     let k = add[0];
     if k < 4 {
@@ -288,7 +286,9 @@ fn surgical_17804(ir: &mut Cs2Ir) -> Result<()> {
     if !(ir.code[guard].op == "branch_equals"
         && matches!(ir.code[guard].operand, Operand::Jump(t) if t == body_start as i32))
     {
-        bail!("script 17804: expected radiogroup entry guard `branch_equals {body_start}` at instr {guard}");
+        bail!(
+            "script 17804: expected radiogroup entry guard `branch_equals {body_start}` at instr {guard}"
+        );
     }
     // Retarget the guard to the exit (skip the dead body).
     ir.code[guard].operand = Operand::Jump(exit_target);

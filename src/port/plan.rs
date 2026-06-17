@@ -164,9 +164,9 @@ pub fn compute(opts: &PlanOptions<'_>) -> Result<PlanReport> {
         // donor-side opcodes are never ported. A construct seen in ANY emitted
         // script is a real delta (`in_port |= ...` upgrades a closure-only sighting).
         let in_port = transitive.missing_from_910.contains(&group);
-        let Ok(files) = opts
-            .donor_cache
-            .group_files_with_index(&index, ARCHIVE_CLIENTSCRIPTS, group)
+        let Ok(files) =
+            opts.donor_cache
+                .group_files_with_index(&index, ARCHIVE_CLIENTSCRIPTS, group)
         else {
             continue;
         };
@@ -180,7 +180,10 @@ pub fn compute(opts: &PlanOptions<'_>) -> Result<PlanReport> {
         for f in represent::represent_script(&ir, Some(group as i32), &d910) {
             seen.entry((f.kind, f.construct.clone()))
                 .and_modify(|sf| sf.in_port |= in_port)
-                .or_insert(ScopedFinding { finding: f, in_port });
+                .or_insert(ScopedFinding {
+                    finding: f,
+                    in_port,
+                });
         }
     }
     // Keep the deduped findings in a stable order: by kind then construct.
@@ -211,7 +214,10 @@ pub fn compute(opts: &PlanOptions<'_>) -> Result<PlanReport> {
 /// Decode the donor interface group's components (from the donor pack) and run
 /// [`represent::represent_interface`] over them. Returns `Ok(vec![])` when the
 /// donor pack does not hold the group (the interface delta is then simply empty).
-fn interface_component_findings(opts: &PlanOptions<'_>, d910: &BuildDescriptor) -> Result<Vec<Finding>> {
+fn interface_component_findings(
+    opts: &PlanOptions<'_>,
+    d910: &BuildDescriptor,
+) -> Result<Vec<Finding>> {
     let pack_path = opts.donor_pack_root.join("client.interfaces.js5");
     let pack = crate::js5pack::PackArchive::open(&pack_path)
         .with_context(|| format!("open donor interfaces pack {}", pack_path.display()))?;
@@ -259,7 +265,10 @@ fn render_human(report: &PlanReport) -> String {
         report.proc_collisions.len()
     );
 
-    let _ = writeln!(out, "\n  proc-id collisions (id present, DIFFERENT proc → remap via lower::proc_alloc):");
+    let _ = writeln!(
+        out,
+        "\n  proc-id collisions (id present, DIFFERENT proc → remap via lower::proc_alloc):"
+    );
     if report.proc_collisions.is_empty() {
         let _ = writeln!(out, "    (none)");
     } else {
@@ -275,7 +284,10 @@ fn render_human(report: &PlanReport) -> String {
         }
     }
 
-    let _ = writeln!(out, "\n  opcode-level deltas (►= in a ported script, a real delta · ·= elsewhere in closure, context; each with its named lowering or UNHANDLED):");
+    let _ = writeln!(
+        out,
+        "\n  opcode-level deltas (►= in a ported script, a real delta · ·= elsewhere in closure, context; each with its named lowering or UNHANDLED):"
+    );
     if report.op_findings.is_empty() {
         let _ = writeln!(out, "    (none)");
     } else {
@@ -296,7 +308,10 @@ fn render_human(report: &PlanReport) -> String {
         }
     }
 
-    let _ = writeln!(out, "\n  interface component deltas (composite widgets the target lacks a body for):");
+    let _ = writeln!(
+        out,
+        "\n  interface component deltas (composite widgets the target lacks a body for):"
+    );
     if report.interface_findings.is_empty() {
         let _ = writeln!(out, "    (none)");
     } else {
@@ -349,8 +364,16 @@ fn render_human(report: &PlanReport) -> String {
             BridgeClass::Unhandled => unhandled += 1,
         }
     }
-    let op_unhandled_total = report.op_findings.iter().filter(|sf| sf.finding.is_unhandled()).count();
-    let cap_unhandled = report.capability_findings.iter().filter(|f| f.is_unhandled()).count();
+    let op_unhandled_total = report
+        .op_findings
+        .iter()
+        .filter(|sf| sf.finding.is_unhandled())
+        .count();
+    let cap_unhandled = report
+        .capability_findings
+        .iter()
+        .filter(|f| f.is_unhandled())
+        .count();
     let _ = writeln!(
         out,
         "\nsummary: {} proc collisions · {} opcode deltas ({} closure-wide UNHANDLED) · {} interface deltas · {} capability gaps ({} UNHANDLED)",
@@ -373,7 +396,9 @@ fn render_human(report: &PlanReport) -> String {
         };
         format!("BLOCKED — {unhandled} in-port construct(s) with no lowering{extra}")
     } else if lossy > 0 {
-        format!("DEGRADED — encodes, but {lossy} in-port construct(s) go through a lossy stub (behaviour reduced; NOT a faithful port)")
+        format!(
+            "DEGRADED — encodes, but {lossy} in-port construct(s) go through a lossy stub (behaviour reduced; NOT a faithful port)"
+        )
     } else {
         format!("FAITHFUL — all {faithful} in-port delta(s) are semantics-preserving lowerings")
     };

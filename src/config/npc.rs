@@ -1,4 +1,4 @@
-use super::{parse_multi_variants_block, parse_param_ops, OpListEntry};
+use super::{OpListEntry, parse_multi_variants_block, parse_param_ops};
 use crate::cache_bail as bail;
 use crate::error::{Context, Result};
 use crate::packet::Packet;

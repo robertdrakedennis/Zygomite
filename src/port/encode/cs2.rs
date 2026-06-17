@@ -87,19 +87,14 @@ pub fn lower_to_compiled(
     target: &BuildDescriptor,
     alloc: &ProcAllocator,
 ) -> Result<CompiledScript> {
-    ir.to_compiled(
-        &|field| target.encode_db_field(field),
-        &|identity| Ok(alloc.resolve(identity)),
-    )
+    ir.to_compiled(&|field| target.encode_db_field(field), &|identity| {
+        Ok(alloc.resolve(identity))
+    })
 }
 
 /// Serialize IR to the reversible `@cs2` asm body (the IR's textual form). This is
 /// the byte-exact diff anchor against committed `.asm.ts` listings.
-pub fn ir_to_asm(
-    ir: &Cs2Ir,
-    target: &BuildDescriptor,
-    alloc: &ProcAllocator,
-) -> Result<String> {
+pub fn ir_to_asm(ir: &Cs2Ir, target: &BuildDescriptor, alloc: &ProcAllocator) -> Result<String> {
     let compiled = lower_to_compiled(ir, target, alloc)?;
     Ok(script_to_asm(&compiled))
 }
@@ -264,11 +259,7 @@ fn is_control_op(op: &str) -> bool {
 
 /// Encode IR to target bytecode, running the intrinsic invariants first and a
 /// byte-fidelity round-trip after. Returns the bytes the overlay would splice.
-pub fn encode_ir(
-    ir: &Cs2Ir,
-    target: &BuildDescriptor,
-    alloc: &ProcAllocator,
-) -> Result<Vec<u8>> {
+pub fn encode_ir(ir: &Cs2Ir, target: &BuildDescriptor, alloc: &ProcAllocator) -> Result<Vec<u8>> {
     let errors = validate_ir(ir, target);
     if !errors.is_empty() {
         let detail = errors

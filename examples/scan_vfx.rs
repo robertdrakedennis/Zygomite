@@ -7,14 +7,7 @@ fn main() -> anyhow::Result<()> {
     let cache_dir = std::env::args().nth(1).expect("usage: <cache-dir>");
     let cache = FlatCache::open(std::path::Path::new(&cache_dir))?;
     let mut groups: Vec<u32> = std::fs::read_dir(std::path::Path::new(&cache_dir).join("61"))?
-        .filter_map(|e| {
-            e.ok()?
-                .path()
-                .file_stem()?
-                .to_str()?
-                .parse::<u32>()
-                .ok()
-        })
+        .filter_map(|e| e.ok()?.path().file_stem()?.to_str()?.parse::<u32>().ok())
         .collect();
     groups.sort_unstable();
     let mut ok = 0u32;

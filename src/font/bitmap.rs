@@ -118,7 +118,10 @@ impl FontMetrics {
             ("y_offset", &self.y_offset),
         ] {
             if v.len() != GLYPH_COUNT {
-                cache_bail!("FontMetrics.{name} must have {GLYPH_COUNT} entries, got {}", v.len());
+                cache_bail!(
+                    "FontMetrics.{name} must have {GLYPH_COUNT} entries, got {}",
+                    v.len()
+                );
             }
         }
         if self.atlas_x.len() != GLYPH_COUNT || self.atlas_y.len() != GLYPH_COUNT {
@@ -165,9 +168,16 @@ impl GlyphAtlasSprite {
     pub fn from_alpha(width: u16, height: u16, alpha: Vec<u8>) -> Result<Self> {
         let expected = usize::from(width) * usize::from(height);
         if alpha.len() != expected {
-            cache_bail!("alpha buffer length {} != {width}x{height} = {expected}", alpha.len());
+            cache_bail!(
+                "alpha buffer length {} != {width}x{height} = {expected}",
+                alpha.len()
+            );
         }
-        Ok(Self { width, height, alpha })
+        Ok(Self {
+            width,
+            height,
+            alpha,
+        })
     }
 
     /// Encode as the single translucent paletted SpriteData (archive 8) the
@@ -238,11 +248,12 @@ impl GlyphAtlasSprite {
         let sub_w = dims.g2()?;
         let sub_h = dims.g2()?;
         if let Some((ew, eh)) = expect
-            && (canvas_w != ew || canvas_h != eh || sub_w != ew || sub_h != eh) {
-                cache_bail!(
-                    "sprite dims {canvas_w}x{canvas_h} sub {sub_w}x{sub_h} != expected {ew}x{eh}"
-                );
-            }
+            && (canvas_w != ew || canvas_h != eh || sub_w != ew || sub_h != eh)
+        {
+            cache_bail!(
+                "sprite dims {canvas_w}x{canvas_h} sub {sub_w}x{sub_h} != expected {ew}x{eh}"
+            );
+        }
         if canvas_w != sub_w || canvas_h != sub_h {
             cache_bail!(
                 "sprite sub-rect {sub_w}x{sub_h} != canvas {canvas_w}x{canvas_h} (atlas must fill canvas)"
@@ -262,6 +273,10 @@ impl GlyphAtlasSprite {
         px.set_pos(px.pos() + size)?;
         let alpha = px.gdata(size)?;
         let _ = pal_count;
-        Ok(Self { width: sub_w, height: sub_h, alpha })
+        Ok(Self {
+            width: sub_w,
+            height: sub_h,
+            alpha,
+        })
     }
 }

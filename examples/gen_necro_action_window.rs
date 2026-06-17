@@ -96,10 +96,11 @@ fn main() -> Result<()> {
         // Re-parent any layer ref that points at a cloned source component to its
         // destination (handles the root and any internal nesting generically).
         if component.layer >= 0
-            && let Some(&dst) = remap.get(&(component.layer as u32)) {
-                component.layer = i32::try_from(dst).expect("sub-id fits i32");
-                reparented += 1;
-            }
+            && let Some(&dst) = remap.get(&(component.layer as u32))
+        {
+            component.layer = i32::try_from(dst).expect("sub-id fits i32");
+            reparented += 1;
+        }
 
         // On the root, retarget the onload window-id arg ("Magic Book" 5 -> NECRO
         // 1039). The root keeps its parent (com50) and abs_right/abs_bottom docking.
@@ -108,10 +109,11 @@ fn main() -> Result<()> {
                 if hook.script == 8409 {
                     for arg in &mut hook.args {
                         if let HookArg::Int(v) = arg
-                            && *v == SRC_WINDOW_ID {
-                                *v = DST_WINDOW_ID;
-                                rewrote_onload = true;
-                            }
+                            && *v == SRC_WINDOW_ID
+                        {
+                            *v = DST_WINDOW_ID;
+                            rewrote_onload = true;
+                        }
                     }
                 }
             }

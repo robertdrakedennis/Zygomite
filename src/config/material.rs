@@ -1,4 +1,4 @@
-use super::{gfloat_be, yes_no, OpListEntry};
+use super::{OpListEntry, gfloat_be, yes_no};
 use crate::cache_bail as bail;
 use crate::error::Result;
 use crate::packet::Packet;
@@ -15,7 +15,11 @@ pub fn parse_material(id: u32, data: &[u8]) -> Result<OpListEntry> {
     }
 
     if !packet.is_done() {
-        bail!("material {id} did not consume full payload (pos {} of {})", packet.pos(), data.len());
+        bail!(
+            "material {id} did not consume full payload (pos {} of {})",
+            packet.pos(),
+            data.len()
+        );
     }
     Ok(OpListEntry { id, ops })
 }

@@ -1,4 +1,4 @@
-use super::{gfloat_be, yes_no, OpListEntry};
+use super::{OpListEntry, gfloat_be, yes_no};
 use crate::cache_bail as bail;
 use crate::error::Result;
 use crate::packet::Packet;

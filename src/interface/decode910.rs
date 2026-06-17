@@ -58,7 +58,10 @@ impl std::fmt::Display for Decode910Error {
             ),
             Self::UnexpectedEof(e) => write!(f, "unexpected end of component buffer: {e}"),
             Self::TrailingBytes { remaining } => {
-                write!(f, "910 decode left {remaining} trailing bytes (misalignment)")
+                write!(
+                    f,
+                    "910 decode left {remaining} trailing bytes (misalignment)"
+                )
             }
             Self::BadHookArg(t) => write!(f, "unhandled hook argument type {t}"),
         }

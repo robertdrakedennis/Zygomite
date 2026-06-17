@@ -116,8 +116,7 @@ pub fn parse_switch(source: &str, path: &Path) -> Result<SwitchParse> {
 
     // Extract the two parameter names from the signature so the switch header
     // (`<first>.index`) and the state argument (`<second>`) are not hardcoded.
-    let (command_param, state_param) =
-        parse_dispatch_signature(lines[sig_idx], path, sig_idx + 1)?;
+    let (command_param, state_param) = parse_dispatch_signature(lines[sig_idx], path, sig_idx + 1)?;
 
     let switch_idx = sig_idx + 1;
     let switch_line = lines.get(switch_idx).with_context(|| {
@@ -159,8 +158,8 @@ pub fn parse_switch(source: &str, path: &Path) -> Result<SwitchParse> {
             continue;
         }
 
-        let is_label = (trimmed.starts_with("case ") && trimmed.ends_with(':'))
-            || trimmed == "default:";
+        let is_label =
+            (trimmed.starts_with("case ") && trimmed.ends_with(':')) || trimmed == "default:";
 
         if !is_label {
             // Only non-label lines may carry braces (verified: no literals contain braces).
@@ -295,12 +294,7 @@ fn parse_dispatch_signature(
 
 /// Pull the identifier (last whitespace-separated token) out of `<Type> <name>`,
 /// asserting the declared type matches `expected_type`.
-fn param_name(
-    param: &str,
-    expected_type: &str,
-    path: &Path,
-    line_no: usize,
-) -> Result<String> {
+fn param_name(param: &str, expected_type: &str, path: &Path, line_no: usize) -> Result<String> {
     let trimmed = param.trim();
     let (ty, name) = trimmed.rsplit_once(char::is_whitespace).with_context(|| {
         format!(
@@ -532,14 +526,16 @@ fn parse_enum_field(
     path: &Path,
     line_no: usize,
 ) -> Result<EnumField> {
-    let (field, ctor) = rest.split_once(" = new ClientScriptCommand(").with_context(|| {
-        format!(
-            "{}:{}: malformed ClientScriptCommand field declaration: `{}`",
-            path.display(),
-            line_no,
-            rest
-        )
-    })?;
+    let (field, ctor) = rest
+        .split_once(" = new ClientScriptCommand(")
+        .with_context(|| {
+            format!(
+                "{}:{}: malformed ClientScriptCommand field declaration: `{}`",
+                path.display(),
+                line_no,
+                rest
+            )
+        })?;
     let args = ctor.strip_suffix(");").with_context(|| {
         format!(
             "{}:{}: ClientScriptCommand constructor missing `);`: `{}`",
@@ -631,10 +627,20 @@ fn parse_opcodes_910(path: &Path) -> Result<(BTreeMap<u16, String>, Vec<String>)
             continue;
         }
         let (name, id_text) = line.split_once(',').with_context(|| {
-            format!("{}:{}: expected `name,id`, found `{}`", path.display(), idx + 1, line)
+            format!(
+                "{}:{}: expected `name,id`, found `{}`",
+                path.display(),
+                idx + 1,
+                line
+            )
         })?;
         let id: u16 = id_text.trim().parse().with_context(|| {
-            format!("{}:{}: could not parse id from `{}`", path.display(), idx + 1, line)
+            format!(
+                "{}:{}: could not parse id from `{}`",
+                path.display(),
+                idx + 1,
+                line
+            )
         })?;
         let name = name.trim().to_owned();
         if !seen_names.insert(name.clone()) {
@@ -655,10 +661,20 @@ fn parse_opcodes_large_910(path: &Path) -> Result<BTreeMap<u16, bool>> {
             continue;
         }
         let (id_text, flag_text) = line.split_once(',').with_context(|| {
-            format!("{}:{}: expected `id,flag`, found `{}`", path.display(), idx + 1, line)
+            format!(
+                "{}:{}: expected `id,flag`, found `{}`",
+                path.display(),
+                idx + 1,
+                line
+            )
         })?;
         let id: u16 = id_text.trim().parse().with_context(|| {
-            format!("{}:{}: could not parse id from `{}`", path.display(), idx + 1, line)
+            format!(
+                "{}:{}: could not parse id from `{}`",
+                path.display(),
+                idx + 1,
+                line
+            )
         })?;
         let flag = match flag_text.trim() {
             "0" => false,
@@ -685,14 +701,24 @@ fn parse_opcodes_947(path: &Path) -> Result<HashMap<String, u32>> {
             continue;
         }
         let mut parts = line.split(',');
-        let name = parts.next().with_context(|| {
-            format!("{}:{}: empty 947 opcode row", path.display(), idx + 1)
-        })?;
+        let name = parts
+            .next()
+            .with_context(|| format!("{}:{}: empty 947 opcode row", path.display(), idx + 1))?;
         let id_text = parts.next().with_context(|| {
-            format!("{}:{}: 947 opcode row missing id: `{}`", path.display(), idx + 1, line)
+            format!(
+                "{}:{}: 947 opcode row missing id: `{}`",
+                path.display(),
+                idx + 1,
+                line
+            )
         })?;
         let id: u32 = id_text.trim().parse().with_context(|| {
-            format!("{}:{}: could not parse 947 id from `{}`", path.display(), idx + 1, line)
+            format!(
+                "{}:{}: could not parse 947 id from `{}`",
+                path.display(),
+                idx + 1,
+                line
+            )
         })?;
         // An optional third column (version gate) is tolerated and ignored here.
         if let Some(gate_text) = parts.next() {
@@ -728,9 +754,9 @@ fn parse_stack_effects(path: &Path) -> Result<HashMap<String, StackEffect>> {
             continue;
         }
         let mut parts = line.split_whitespace();
-        let name = parts.next().with_context(|| {
-            format!("{}:{}: empty stack-effect row", path.display(), idx + 1)
-        })?;
+        let name = parts
+            .next()
+            .with_context(|| format!("{}:{}: empty stack-effect row", path.display(), idx + 1))?;
         let mut next_num = |label: &str| -> Result<u32> {
             let token = parts.next().with_context(|| {
                 format!(
@@ -855,7 +881,13 @@ struct Finding {
 }
 
 impl Finding {
-    fn new(check: &str, severity: &str, id: Option<u16>, name: Option<String>, msg: String) -> Self {
+    fn new(
+        check: &str,
+        severity: &str,
+        id: Option<u16>,
+        name: Option<String>,
+        msg: String,
+    ) -> Self {
         Self {
             check: check.to_owned(),
             severity: severity.to_owned(),
@@ -925,8 +957,7 @@ pub fn run(opts: &Cs2RegistryOpts<'_>) -> Result<()> {
     let stack_effects = parse_stack_effects(&stack_effects_path)?;
     let aliases = parse_aliases_910(&aliases_910_path)?;
 
-    let enum_by_id: HashMap<u16, &EnumField> =
-        enums.fields.iter().map(|f| (f.id, f)).collect();
+    let enum_by_id: HashMap<u16, &EnumField> = enums.fields.iter().map(|f| (f.id, f)).collect();
 
     let mut findings: Vec<Finding> = Vec::new();
     let mut commands: Vec<Command> = Vec::new();
@@ -1110,7 +1141,8 @@ pub fn run(opts: &Cs2RegistryOpts<'_>) -> Result<()> {
 
     // C5b: stack-effects command name not in registry (after alias resolution).
     for name in stack_effects.keys() {
-        if registry_names.contains(name) || alias_matches_registry(name, &aliases, &registry_names) {
+        if registry_names.contains(name) || alias_matches_registry(name, &aliases, &registry_names)
+        {
             continue;
         }
         findings.push(Finding::new(
@@ -1200,7 +1232,8 @@ pub fn run(opts: &Cs2RegistryOpts<'_>) -> Result<()> {
             format!("unassigned (fall-through) id {id}"),
         ));
     }
-    if let (Some(&min), Some(&max)) = (registry_ids.iter().next(), registry_ids.iter().next_back()) {
+    if let (Some(&min), Some(&max)) = (registry_ids.iter().next(), registry_ids.iter().next_back())
+    {
         for id in min..=max {
             if !registry_ids.contains(&id) {
                 findings.push(Finding::new(
@@ -1345,8 +1378,8 @@ fn sort_findings(findings: &mut [Finding]) {
 
 /// Serialize `value` as pretty JSON to `path`.
 fn write_pretty_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
-    let file = fs::File::create(path)
-        .with_context(|| format!("failed to create {}", path.display()))?;
+    let file =
+        fs::File::create(path).with_context(|| format!("failed to create {}", path.display()))?;
     let mut writer = std::io::BufWriter::new(file);
     serde_json::to_writer_pretty(&mut writer, value)
         .with_context(|| format!("failed to serialize {}", path.display()))?;
@@ -1369,7 +1402,11 @@ fn print_summary(report: &Report, case_count: usize, out_file: &Path, report_fil
         report.summary.errors, report.summary.warnings, report.summary.infos
     );
     for check in order {
-        let matching: Vec<&Finding> = report.findings.iter().filter(|f| f.check == check).collect();
+        let matching: Vec<&Finding> = report
+            .findings
+            .iter()
+            .filter(|f| f.check == check)
+            .collect();
         println!("{check}: {} finding(s)", matching.len());
         for finding in matching.iter().take(20) {
             println!("  - {}", finding.message);
@@ -1487,7 +1524,10 @@ mod tests {
             }
         );
         // Final case without return
-        assert_eq!(parse.dispatches[&8].method.as_deref(), Some("cc_getparentlayer"));
+        assert_eq!(
+            parse.dispatches[&8].method.as_deref(),
+            Some("cc_getparentlayer")
+        );
         Ok(())
     }
 
@@ -1630,20 +1670,12 @@ public class ClientScriptCommand implements ScriptCommand {
         assert!(!large[&810]);
         assert!(large[&842]);
 
-        let p947 = write(
-            dir.path(),
-            "opcodes-947.txt",
-            "enum,1660\nadd,900,742\n",
-        )?;
+        let p947 = write(dir.path(), "opcodes-947.txt", "enum,1660\nadd,900,742\n")?;
         let ids = parse_opcodes_947(&p947)?;
         assert_eq!(ids["enum"], 1660);
         assert_eq!(ids["add"], 900); // optional 3rd column ignored, row kept
 
-        let p948 = write(
-            dir.path(),
-            "opcodes-948.txt",
-            "enum,2002\nadd,901\n",
-        )?;
+        let p948 = write(dir.path(), "opcodes-948.txt", "enum,2002\nadd,901\n")?;
         let ids948 = parse_opcodes_948(&p948)?;
         assert_eq!(ids948["enum"], 2002);
         assert_eq!(ids948["add"], 901);
@@ -1743,8 +1775,7 @@ public class ClientScriptCommand implements ScriptCommand {
             report_file: Some(&report_path),
         })?;
 
-        let report: serde_json::Value =
-            serde_json::from_str(&fs::read_to_string(&report_path)?)?;
+        let report: serde_json::Value = serde_json::from_str(&fs::read_to_string(&report_path)?)?;
         let findings = report["findings"].as_array().expect("findings array");
         let checks: BTreeSet<String> = findings
             .iter()
@@ -1754,7 +1785,10 @@ public class ClientScriptCommand implements ScriptCommand {
         for expected in [
             "C1", "C2", "C2b", "C3", "C3b", "C4", "C5", "C5b", "C6", "C6b", "C7", "C7b", "C9",
         ] {
-            assert!(checks.contains(expected), "missing finding {expected}: {checks:?}");
+            assert!(
+                checks.contains(expected),
+                "missing finding {expected}: {checks:?}"
+            );
         }
 
         // Determinism: a second run is byte identical.

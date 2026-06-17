@@ -198,7 +198,8 @@ fn replace_unique_int_const(ir: &mut Cs2Ir, from: i32, to: i32) -> Result<()> {
         .iter()
         .enumerate()
         .filter(|(_, l)| {
-            l.op == "push_constant_string" && matches!(l.operand, Operand::TypedIntConst(v) if v == from)
+            l.op == "push_constant_string"
+                && matches!(l.operand, Operand::TypedIntConst(v) if v == from)
         })
         .map(|(i, _)| i)
         .collect();
@@ -214,10 +215,9 @@ fn replace_unique_int_const(ir: &mut Cs2Ir, from: i32, to: i32) -> Result<()> {
 
 /// Render IR → reversible asm body through the target descriptor + allocator.
 fn render_asm(ir: &Cs2Ir, target: &BuildDescriptor, alloc: &ProcAllocator) -> Result<String> {
-    let compiled = ir.to_compiled(
-        &|field| target.encode_db_field(field),
-        &|identity| Ok(alloc.resolve(identity)),
-    )?;
+    let compiled = ir.to_compiled(&|field| target.encode_db_field(field), &|identity| {
+        Ok(alloc.resolve(identity))
+    })?;
     Ok(script_to_asm(&compiled))
 }
 
@@ -243,16 +243,12 @@ mod tests {
 
     #[test]
     fn relic_db_field_set_repacks_to_shift() {
-        let d948 = BuildDescriptor::load(
-            &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("data"),
-            948,
-        )
-        .unwrap();
-        let d910 = BuildDescriptor::load(
-            &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("data"),
-            910,
-        )
-        .unwrap();
+        let d948 =
+            BuildDescriptor::load(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("data"), 948)
+                .unwrap();
+        let d910 =
+            BuildDescriptor::load(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("data"), 910)
+                .unwrap();
         for &v in RELIC_DB_FIELDS {
             let f = d948.decode_db_field(v);
             assert_eq!(d910.encode_db_field(&f), v >> 4);

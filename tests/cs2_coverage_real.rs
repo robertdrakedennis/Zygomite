@@ -105,7 +105,10 @@ fn coverage_scan_runs_against_real_pack() {
     let mut sorted_ids = ids.clone();
     sorted_ids.sort_unstable();
     assert_eq!(ids, sorted_ids, "opcode_usage must be sorted by id");
-    assert_eq!(report.summary.distinct_opcodes_used, report.opcode_usage.len());
+    assert_eq!(
+        report.summary.distinct_opcodes_used,
+        report.opcode_usage.len()
+    );
 
     // The report round-trips as valid JSON with the expected schema.
     let json = serde_json::to_string_pretty(&report).expect("report serializes");

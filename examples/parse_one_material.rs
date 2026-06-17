@@ -8,7 +8,11 @@ fn main() -> anyhow::Result<()> {
     let cache = FlatCache::open(std::path::Path::new(&cache_dir))?;
     let files = cache.group_files(26, 0)?;
     let data = &files[&id];
-    println!("len={} first-bytes={:02x?}", data.len(), &data[..data.len().min(8)]);
+    println!(
+        "len={} first-bytes={:02x?}",
+        data.len(),
+        &data[..data.len().min(8)]
+    );
     match parse_material(id, data) {
         Ok(e) => println!("OK: {:?}", e.ops),
         Err(e) => println!("FAIL: {e}"),
