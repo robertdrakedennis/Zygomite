@@ -73,7 +73,6 @@ pub fn port_interface_group(
         .into_iter()
         .enumerate()
         .map(|(i, d)| {
-            #[allow(clippy::cast_possible_truncation)]
             (i as u32, d)
         })
         .collect();

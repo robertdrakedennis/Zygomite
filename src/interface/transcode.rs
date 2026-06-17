@@ -218,7 +218,6 @@ fn pack_group_files(files: &[Vec<u8>]) -> Vec<u8> {
     }
     let mut prev = 0_i32;
     for f in files {
-        #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
         let len = f.len() as i32;
         out.extend_from_slice(&(len - prev).to_be_bytes());
         prev = len;
@@ -241,9 +240,7 @@ fn build_raw_group(body: &[u8], version: u16) -> Result<Vec<u8>> {
     encoder.write_all(body).context("gzip-compress group body")?;
     let gz = encoder.finish().context("finish gzip stream")?;
 
-    #[allow(clippy::cast_possible_truncation)]
     let gz_len = gz.len() as u32;
-    #[allow(clippy::cast_possible_truncation)]
     let body_len = body.len() as u32;
     let mut out = Vec::with_capacity(9 + gz.len() + 2);
     out.push(2); // gzip compression
@@ -292,7 +289,6 @@ pub fn transcode_and_pack(
     let roster: Vec<u32> = components.keys().copied().collect();
     // Dense, contiguous from 0 — assert so the indexless re-decode recovers them.
     for (expected, &id) in roster.iter().enumerate() {
-        #[allow(clippy::cast_possible_truncation)]
         let expected = expected as u32;
         if id != expected {
             crate::cache_bail!(
@@ -363,10 +359,8 @@ fn psmart2or4null(w: &mut ByteWriter, value: i32) {
     if value == -1 {
         w.p2(0x7FFF);
     } else if value <= 0x7FFE {
-        #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
         w.p2(value as u16);
     } else {
-        #[allow(clippy::cast_sign_loss)]
         w.p4s(value | (1 << 31));
     }
 }
@@ -376,7 +370,6 @@ fn psmart2or4null(w: &mut ByteWriter, value: i32) {
 /// of [`super::parse_component`] but records offsets instead of formatting lines.
 /// `pub(crate)` so the port-layer interface front-end reuses this single donor
 /// field-walk (the decode source of truth).
-#[allow(clippy::too_many_lines)]
 pub(crate) fn segment(bytes: &[u8], build: u32) -> Result<Segments> {
     let mut p = Packet::new(bytes);
 

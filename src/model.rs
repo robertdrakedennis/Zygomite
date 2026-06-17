@@ -505,7 +505,6 @@ fn read_f32be_position_matrix(packet: &mut Packet<'_>, count: usize) -> Result<V
             if !v.is_finite() {
                 bail!("non-finite float vertex position");
             }
-            #[allow(clippy::cast_possible_truncation)]
             row.push(v.round().clamp(f32::from(i16::MIN), f32::from(i16::MAX)) as i16);
         }
         values.push(row);

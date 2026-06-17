@@ -85,7 +85,6 @@ pub fn encode_component(component: &Component, target: &BuildDescriptor) -> Resu
 }
 
 /// The wire byte for a `version` field (`-1` → `255`).
-#[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
 fn version_byte(version: i16) -> u8 {
     if version == -1 { 0xFF } else { version as u8 }
 }
@@ -96,7 +95,6 @@ fn version_byte(version: i16) -> u8 {
 pub fn encode_group(ir: &InterfaceIr, target: &BuildDescriptor, version: u16) -> Result<EncodedGroup> {
     let mut components = BTreeMap::new();
     for (id, component) in ir.components.iter().enumerate() {
-        #[allow(clippy::cast_possible_truncation)]
         let id = id as u32;
         let bytes = encode_component(component, target)
             .with_context(|| format!("encode component {id}"))?;
@@ -120,7 +118,6 @@ pub fn encode_group(ir: &InterfaceIr, target: &BuildDescriptor, version: u16) ->
     // Dense, contiguous from 0 — the 1-stripe packer needs it (matches the
     // interface archive's id space).
     for (expected, &id) in roster.iter().enumerate() {
-        #[allow(clippy::cast_possible_truncation)]
         let expected = expected as u32;
         if id != expected {
             bail!(

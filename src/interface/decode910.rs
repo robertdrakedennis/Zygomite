@@ -113,7 +113,6 @@ fn eof<T>(r: Result<T>) -> std::result::Result<T, Decode910Error> {
 /// Returns the recovered [`Decoded910`] on a clean, exactly-sized decode; returns
 /// a [`Decode910Error`] for the two misalignment shapes the transcoder must
 /// prevent.
-#[allow(clippy::too_many_lines)]
 pub fn decode_component_910(bytes: &[u8]) -> std::result::Result<Decoded910, Decode910Error> {
     let mut p = Packet::new(bytes);
     let mut out = Decoded910::default();

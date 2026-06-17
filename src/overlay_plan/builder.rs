@@ -2522,7 +2522,17 @@ pub fn config_target(kind: RefKind, id: u32) -> ConfigTarget {
             id,
             kind,
         },
-        _ => panic!("No config target for {}", kind.as_str()),
+        // Non-config archives (model/anim/material/sprite/seq-group/interface/script) have no
+        // config-archive target. Listed explicitly rather than via `_` so that adding a new
+        // `RefKind` fails to compile here until it is classified — instead of silently routing
+        // to this panic at runtime.
+        RefKind::Model
+        | RefKind::Anim
+        | RefKind::Material
+        | RefKind::Sprite
+        | RefKind::SeqGroup
+        | RefKind::Interface
+        | RefKind::Script => panic!("No config target for {}", kind.as_str()),
     }
 }
 

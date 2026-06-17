@@ -86,7 +86,6 @@ impl std::fmt::Display for Type {
 struct TypeData {
     name: &'static str,
     base: Option<BaseVarType>,
-    #[allow(dead_code)]
     alias: Option<Type>,
     array: Option<Type>,
     element: Option<Type>,

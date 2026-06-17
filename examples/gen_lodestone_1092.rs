@@ -58,7 +58,6 @@ const MAP_910_H: f64 = 294.0;
 fn scale_pos(x: i16, y: i16) -> (i16, i16) {
     let sx = (f64::from(x) * MAP_910_W / MAP_948_W).round();
     let sy = (f64::from(y) * MAP_910_H / MAP_948_H).round();
-    #[allow(clippy::cast_possible_truncation)]
     (sx as i16, sy as i16)
 }
 
