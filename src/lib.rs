@@ -10,6 +10,7 @@ pub mod audio;
 pub mod cache;
 pub mod cli;
 pub mod collision;
+pub mod commands;
 pub mod config;
 pub mod config_dump;
 pub mod config_refs;
