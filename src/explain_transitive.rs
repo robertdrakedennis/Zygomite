@@ -311,12 +311,6 @@ where
             sig_cache: std::cell::RefCell::new(BTreeMap::new()),
         }
     }
-
-    /// The number of script groups in the source roster.
-    #[must_use]
-    pub fn roster_len(&self) -> usize {
-        self.present.len()
-    }
 }
 
 impl<F, G> ScriptSource for MapScriptSource<F, G>

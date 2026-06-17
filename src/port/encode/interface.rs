@@ -21,7 +21,7 @@ use crate::cache_bail as bail;
 use crate::error::{Context, Result};
 use crate::packet::ByteWriter;
 use crate::port::book::BuildDescriptor;
-use crate::port::ir::interface::{Body, Component, ComponentKind, InterfaceIr};
+use crate::port::ir::interface::{Body, Component, InterfaceIr};
 
 /// The encoded 910 group: per-component bytes (dense id order), the decompressed
 /// group body, and the re-packed raw group `.dat`. The byte-stable artifact the
@@ -138,11 +138,4 @@ pub fn encode_group(
         dat,
         roster,
     })
-}
-
-/// Whether a component's kind is one a [`ComponentKind`] downcode would leave as a
-/// primitive — a small helper for the represent layer.
-#[must_use]
-pub fn is_representable(kind: ComponentKind, target: &BuildDescriptor) -> bool {
-    kind.is_primitive() || target.capabilities.cc_list
 }

@@ -29,7 +29,6 @@ pub mod renumber;
 
 use crate::cache_bail as bail;
 use crate::error::Result;
-use crate::port::book::BuildDescriptor;
 use crate::port::ir::cs2::{Cs2Ir, Insn, Operand};
 
 use renumber::Rebuilder;
@@ -243,21 +242,6 @@ pub fn sub_to_add(ir: &mut Cs2Ir) -> Result<()> {
     }
     ir.code = rb.finish();
     Ok(())
-}
-
-/// `dbfield_repack`: re-pack db-field constants through the target descriptor's
-/// packing. The IR carries packed db-field ints as [`Operand::DbFieldConst`]
-/// already (lifted at decode through the *source* descriptor), so this is applied
-/// structurally at encode (`to_compiled` packs through the target). This function
-/// exists to assert that every IR `DbFieldConst` round-trips through `target`'s
-/// packing — i.e. the pass is a no-op the encoder performs, recorded for
-/// `represent`. Returns the number of db-field constants the port will re-pack.
-#[must_use]
-pub fn dbfield_repack_count(ir: &Cs2Ir, _target: &BuildDescriptor) -> usize {
-    ir.code
-        .iter()
-        .filter(|insn| matches!(insn.operand, Operand::DbFieldConst(_)))
-        .count()
 }
 
 /// Whether `insn` is `push_constant_string` carrying the typed int constant `n`.

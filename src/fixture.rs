@@ -1,9 +1,6 @@
 use crate::cache::FlatCache;
 use crate::cache_bail as bail;
-use crate::constants::{
-    ARCHIVE_CLIENTSCRIPTS, ARCHIVE_CONFIG, ARCHIVE_INTERFACES, ARCHIVE_MODELS_RT7, ARCHIVE_VORBIS,
-    DEFAULT_CACHE_TAR,
-};
+use crate::constants::DEFAULT_CACHE_TAR;
 use crate::error::{Context, Result};
 use std::collections::BTreeSet;
 use std::fs;
@@ -92,19 +89,6 @@ pub fn ensure_archive_groups(
                 .context("cache directory has no parent")?,
             &needed,
         )?;
-    }
-    Ok(())
-}
-
-pub fn ensure_core_archives(cache_dir: &Path, tar_path: &Path) -> Result<()> {
-    for archive in [
-        ARCHIVE_CONFIG,
-        ARCHIVE_INTERFACES,
-        ARCHIVE_CLIENTSCRIPTS,
-        ARCHIVE_MODELS_RT7,
-        ARCHIVE_VORBIS,
-    ] {
-        ensure_archive_complete(cache_dir, tar_path, archive)?;
     }
     Ok(())
 }

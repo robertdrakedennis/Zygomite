@@ -525,27 +525,3 @@ pub struct BatchReport {
     pub total_errors: usize,
     pub results: Vec<ValidationReport>,
 }
-
-pub fn validate_scripts(ctx: &ResolverContext, script_ids: &[u32]) -> BatchReport {
-    let validator = Cs2Validator::new(ctx);
-    let mut results = Vec::new();
-    let mut scripts_with_errors = 0;
-    let mut total_errors = 0;
-
-    for &id in script_ids {
-        let report = validator.validate(id);
-        if !report.is_valid() {
-            scripts_with_errors += 1;
-        }
-        total_errors += report.errors.len();
-        results.push(report);
-    }
-
-    BatchReport {
-        build: ctx.build,
-        scripts_validated: results.len(),
-        scripts_with_errors,
-        total_errors,
-        results,
-    }
-}

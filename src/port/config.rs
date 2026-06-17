@@ -22,23 +22,11 @@ use std::path::Path;
 use crate::cache_bail as bail;
 use crate::error::{Context, Result};
 use crate::port::book::BuildDescriptor;
-use crate::port::ir::config::DbTable;
 
 pub use crate::config_transcode::{
     CONFIG_ARCHIVE, DBTABLETYPE_GROUP, REENCODE_TABLES, RELIC_TABLE, SERVER_ONLY_TABLES,
     TranscodeInputs, TranscodedDbGroup,
 };
-
-/// Re-encode one decoded donor schema (any input opcode) to the TARGET DBTABLETYPE
-/// wire form, through the config IR. A typed restatement of
-/// [`crate::config_transcode::encode_dbtable_schema`]: decode → [`DbTable`] →
-/// `.encode(target)`. This is the single re-encode the relic port applies to the
-/// client-read tables 90/92/94.
-pub fn reencode_table(bytes: &[u8], table_id: u32, target: &BuildDescriptor) -> Result<Vec<u8>> {
-    let decoded = crate::config::parse_dbtable(table_id, bytes)
-        .with_context(|| format!("decode donor schema for table {table_id}"))?;
-    DbTable::from_entry(&decoded).encode(target)
-}
 
 /// Port the relic DB groups (Config group 40 + DbTableIndex group 94) through the
 /// config IR, reproducing the committed relic bodies. The IR-routed equivalent of

@@ -21,7 +21,7 @@
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde::Deserialize;
 
@@ -873,20 +873,4 @@ fn render_human(opts: &TranscodeOptions<'_>, out: &TranscodedDbGroup) -> String 
         s.push_str("  wrote config/40-948.dat(+metadata) and dbtableindex/94.dat(+metadata)\n");
     }
     s
-}
-
-/// Convenience default paths for the CLI dispatch.
-#[must_use]
-pub fn default_donor_semantic() -> PathBuf {
-    PathBuf::from(DEFAULT_DONOR_SEMANTIC)
-}
-/// Default donor raw-flat root.
-#[must_use]
-pub fn default_donor_raw() -> PathBuf {
-    PathBuf::from(DEFAULT_DONOR_RAW)
-}
-/// Default base raw-flat root.
-#[must_use]
-pub fn default_base_raw() -> PathBuf {
-    PathBuf::from(DEFAULT_BASE_RAW)
 }

@@ -188,12 +188,6 @@ impl InterfaceCaps {
         wire_version: 11,
         body_types: &[0, 3, 4, 5, 6, 9, 10, 11, 12, 13, 15, 16, 26],
     };
-
-    /// Whether the build's `Component.decode` has a body for component `type_id`.
-    #[must_use]
-    pub fn has_body_for(&self, type_id: u8) -> bool {
-        self.body_types.contains(&type_id)
-    }
 }
 
 /// A build's complete typed descriptor: opcode table, stack effects, db-field

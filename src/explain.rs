@@ -125,12 +125,6 @@ pub fn explain_with_note(
     }
 }
 
-/// Resolve the interfaces pack path for a root (for diagnostics / callers).
-#[must_use]
-pub fn interfaces_pack_path(root: &Path) -> PathBuf {
-    root.join(INTERFACES_PACK)
-}
-
 /// Load the 910-base script roster from a `.js5` scripts pack — the canonical
 /// group ids present, each with its declared arg signature (for collision
 /// detection). The signature is read book-free from each script's header (see

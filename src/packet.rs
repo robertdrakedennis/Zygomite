@@ -313,10 +313,6 @@ impl ByteWriter {
         self.data.extend_from_slice(&value.to_be_bytes());
     }
 
-    pub fn p2_le(&mut self, value: u16) {
-        self.data.extend_from_slice(&value.to_le_bytes());
-    }
-
     pub fn p3(&mut self, value: u32) {
         let bytes = value.to_be_bytes();
         self.data.push(bytes[1]);
@@ -334,10 +330,6 @@ impl ByteWriter {
 
     pub fn p8s(&mut self, value: i64) {
         self.data.extend_from_slice(&value.to_be_bytes());
-    }
-
-    pub fn pfloat_le(&mut self, value: f32) {
-        self.p4s_le(value.to_bits() as i32);
     }
 
     pub fn pdata(&mut self, bytes: &[u8]) {

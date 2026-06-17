@@ -165,20 +165,6 @@ impl CollisionMap {
         }
     }
 
-    /// Seed border tiles fully-blocked and interior with the EDGE/INSIDE bit,
-    /// matching NXT `Reset` (`border = 0xFFFFFF`, `interior = 0x1000000`). Only
-    /// meaningful for a fully-padded region; a bare square keeps the default
-    /// clear init so squares can be merged.
-    pub fn reset_nxt(&mut self) {
-        let n = self.size;
-        for x in 0..n {
-            for z in 0..n {
-                let interior = x != 0 && z != 0 && x < n - 5 && z < n - 5;
-                self.flags[x * n + z] = if interior { EDGE_INSIDE } else { 0x00ff_ffff };
-            }
-        }
-    }
-
     /// OR a walk-lane mask into a tile, plus its projectile-lane mirror when `block_proj`.
     fn mark(&mut self, x: i32, z: i32, walk_mask: i32, block_proj: bool) {
         self.add(x, z, walk_mask);
@@ -403,13 +389,6 @@ where
 #[must_use]
 pub fn line_of_walk(grid: &CollisionMap, x0: i32, z0: i32, x1: i32, z1: i32) -> bool {
     trace_line(grid, x0, z0, x1, z1, false)
-}
-
-/// `LineOfSight` — projectile/LOS trace, consulting the projectile-lane masks
-/// (NXT §4.4).
-#[must_use]
-pub fn line_of_sight(grid: &CollisionMap, x0: i32, z0: i32, x1: i32, z1: i32) -> bool {
-    trace_line(grid, x0, z0, x1, z1, true)
 }
 
 /// Dominant-axis line trace (the RS LOS/LOW algorithm): step the major axis a
