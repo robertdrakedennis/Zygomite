@@ -1,3 +1,9 @@
+//! The `overlay-plan` planning algorithm (concern 4): `PlanBuilder` and its
+//! `&mut self` driver methods, the ref-walk/selection/proof free functions, and
+//! the archive descriptors + binary scanners they use.
+//!
+//! Moved verbatim from the former flat `overlay_plan.rs`.
+
 use crate::cache::FlatCache;
 use crate::config::{
     parse_bas, parse_dbrow, parse_dbtable, parse_enum, parse_loc, parse_material, parse_npc,
@@ -19,967 +25,78 @@ use crate::overlay_deps::DependencySite;
 use crate::packet::Packet;
 use anyhow::{Context, Result, ensure};
 use rayon::prelude::*;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
+use super::{MAX_PLAN_WARNINGS, OVERLAY_PLAN_VERSION, ProofState};
+use super::manifest::{ArchiveMode, ArchiveRef, CacheOverlayManifest, OverlayRoots, RegionSpec};
+use super::plan_output::{
+    DependencyEdgeSample, OverlayBlockedIssue, OverlayPlanArchiveFiles, OverlayPlanArchiveGroups,
+    OverlayPlanAudit, OverlayPlanDb, OverlayPlanImports, OverlayPlanOutput, OverlayPlanProof,
+    OverlayProofIssue, OverlayProofSummary, OverlayPlanSelected, OverlaySemanticManifest,
+    OverlayWarning, Rs3CacheManifest,
+};
+use super::refs::{
+    ArchiveDef, ConfigSemanticIndex, ConfigTarget, PendingRef, RawGroupTarget, RefKind, RootKind,
+    SelectionMode, SemanticRefKey, normalize_graph_ref_kind, semantic_refs_file_name,
+};
 
-pub const OVERLAY_PLAN_VERSION: u32 = 2;
-
-const MAX_PLAN_WARNINGS: usize = 2048;
-const MAX_EDGE_SAMPLES: usize = 256;
-type SemanticRefBuckets = HashMap<u32, HashMap<SemanticRefKey, Vec<u32>>>;
-type ConfigGroupFileCache = HashMap<(RootKind, u32, u32), Option<BTreeMap<u32, Vec<u8>>>>;
+pub type ConfigGroupFileCache = HashMap<(RootKind, u32, u32), Option<BTreeMap<u32, Vec<u8>>>>;
 /// The `(loc_ids, npc_ids)` extracted from one donor map group, or `None` when the
 /// group is absent.
-type MapGroupLocNpcIds = Option<(Vec<u32>, Vec<u32>)>;
+pub type MapGroupLocNpcIds = Option<(Vec<u32>, Vec<u32>)>;
 /// One scanned map group: its id paired with its extracted ids.
-type MapGroupRef = (u32, MapGroupLocNpcIds);
-type MapGroupRefs = Vec<MapGroupRef>;
+pub type MapGroupRef = (u32, MapGroupLocNpcIds);
+pub type MapGroupRefs = Vec<MapGroupRef>;
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct CacheOverlayManifest {
-    #[serde(default)]
-    roots: OverlayRootOverrides,
-    #[serde(default)]
-    base_raw_root: Option<PathBuf>,
-    #[serde(default)]
-    donor_raw_root: Option<PathBuf>,
-    #[serde(default)]
-    base_semantic_root: Option<PathBuf>,
-    #[serde(default)]
-    donor_semantic_root: Option<PathBuf>,
-    #[serde(default)]
-    base_pack_root: Option<PathBuf>,
-    #[serde(default)]
-    output_pack_root: Option<PathBuf>,
-    #[serde(default)]
-    client_output_pack_root: Option<PathBuf>,
-    #[serde(default)]
-    imports: OverlayImports,
-    #[serde(default)]
-    archive_modes: BTreeMap<String, ArchiveMode>,
-    #[serde(default)]
-    conflict_policy: Option<String>,
-    #[serde(default)]
-    allow: OverlayAllow,
-}
-
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
-#[expect(
-    clippy::struct_field_names,
-    reason = "overlay manifest JSON contract uses *_root field names"
-)]
-struct OverlayRootOverrides {
-    #[serde(default)]
-    base_raw_root: Option<PathBuf>,
-    #[serde(default)]
-    donor_raw_root: Option<PathBuf>,
-    #[serde(default)]
-    base_semantic_root: Option<PathBuf>,
-    #[serde(default)]
-    donor_semantic_root: Option<PathBuf>,
-    #[serde(default)]
-    base_pack_root: Option<PathBuf>,
-    #[serde(default)]
-    output_pack_root: Option<PathBuf>,
-    #[serde(default)]
-    client_output_pack_root: Option<PathBuf>,
-}
-
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct OverlayImports {
-    #[serde(default)]
-    map_archive: Option<String>,
-    #[serde(default)]
-    full_archives: Vec<ArchiveRef>,
-    #[serde(default)]
-    config_groups: Vec<u32>,
-    #[serde(default)]
-    maps: Vec<u32>,
-    #[serde(default)]
-    regions: Vec<RegionSpec>,
-    #[serde(default)]
-    objs: Vec<u32>,
-    #[serde(default)]
-    npcs: Vec<u32>,
-    #[serde(default)]
-    locs: Vec<u32>,
-    #[serde(default)]
-    seqs: Vec<u32>,
-    #[serde(default)]
-    bas: Vec<u32>,
-    #[serde(default)]
-    spots: Vec<u32>,
-    #[serde(default)]
-    structs: Vec<u32>,
-    #[serde(default)]
-    quests: Vec<u32>,
-    #[serde(default)]
-    enums: Vec<u32>,
-    #[serde(default)]
-    varbits: Vec<u32>,
-    #[serde(default)]
-    varps: Vec<u32>,
-    #[serde(default)]
-    db_tables: Vec<u32>,
-    #[serde(default)]
-    db_rows: Vec<u32>,
-    #[serde(default)]
-    interfaces: Vec<u32>,
-    #[serde(default)]
-    scripts: Vec<u32>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(untagged)]
-enum ArchiveRef {
-    Name(String),
-    Id(u32),
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(untagged)]
-enum RegionSpec {
-    Id(u32),
-    Text(String),
-    Coord { x: u32, z: u32 },
-}
-
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
-enum ArchiveMode {
-    Auto,
-    Patch,
-    HardSwap,
-}
-
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct OverlayAllow {
-    #[serde(default)]
-    db_table_schema_changes: Vec<u32>,
-    #[serde(default)]
-    enum_ids: Vec<u32>,
-    #[serde(default)]
-    varbit_ids: Vec<u32>,
-    #[serde(default)]
-    varp_ids: Vec<u32>,
-    #[serde(default)]
-    varbit_conflict_ids: Vec<u32>,
-    #[serde(default)]
-    varp_conflict_ids: Vec<u32>,
-    #[serde(default)]
-    hard_swap_archives: Vec<ArchiveRef>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-#[expect(
-    clippy::struct_field_names,
-    reason = "overlay plan JSON contract uses *_root field names"
-)]
-struct OverlayRoots {
-    base_raw_root: String,
-    donor_raw_root: String,
-    base_semantic_root: String,
-    donor_semantic_root: String,
-    base_pack_root: String,
-    output_pack_root: String,
-    client_output_pack_root: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct OverlayPlanOutput {
-    roots: OverlayRoots,
-    conflict_policy: String,
-    hard_swap_archives: Vec<String>,
-    patch_archives: Vec<String>,
-    selected: OverlayPlanSelected,
-    imports: OverlayPlanImports,
-    dependencies: BTreeMap<String, Vec<u32>>,
-    db: OverlayPlanDb,
-    blocked_conflicts: Vec<OverlayBlockedIssue>,
-    warnings: Vec<OverlayWarning>,
-    semantic_source: &'static str,
-    semantic_manifest: OverlaySemanticManifest,
-    dependency_edges_sample: Vec<DependencyEdgeSample>,
-    plan_version: u32,
-    planner_fingerprint: String,
-    proof: OverlayPlanProof,
-    audit: OverlayPlanAudit,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct OverlayPlanSelected {
-    groups: Vec<OverlayPlanArchiveGroups>,
-    files: Vec<OverlayPlanArchiveFiles>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct OverlayPlanArchiveGroups {
-    archive: String,
-    archive_id: u32,
-    mode: &'static str,
-    groups: Vec<u32>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct OverlayPlanArchiveFiles {
-    archive: String,
-    archive_id: u32,
-    mode: &'static str,
-    group_id: u32,
-    file_ids: Vec<u32>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct OverlayPlanImports {
-    config_groups: Vec<u32>,
-    maps: Vec<u32>,
-    objs: Vec<u32>,
-    npcs: Vec<u32>,
-    locs: Vec<u32>,
-    structs: Vec<u32>,
-    enums: Vec<u32>,
-    varbits: Vec<u32>,
-    varps: Vec<u32>,
-    db_tables: Vec<u32>,
-    db_rows: Vec<u32>,
-    interfaces: Vec<u32>,
-    scripts: Vec<u32>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct OverlayPlanDb {
-    tables: Vec<u32>,
-    rows: Vec<u32>,
-    index_groups: Vec<u32>,
-    schema_changes: Vec<u32>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct OverlaySemanticManifest {
-    path: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    donor_fingerprint: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    base_fingerprint: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "snake_case")]
-struct Rs3CacheManifest {
-    tool_version: String,
-    build: u32,
-    subbuild: u32,
-    cache_fingerprint: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct OverlayWarning {
-    kind: String,
-    message: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    archive: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    id: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    ref_kind: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct OverlayBlockedIssue {
-    kind: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    archive: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    archive_id: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    group_id: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    file_id: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    id: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    ref_kind: Option<String>,
-    message: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct OverlayPlanProof {
-    status: &'static str,
-    strict: bool,
-    unsupported_site_count: usize,
-    heuristic_site_count: usize,
-    script_summary: OverlayProofSummary,
-    component_summary: OverlayProofSummary,
-    next_actions: Vec<String>,
-    blockers: Vec<OverlayProofIssue>,
-}
-
-#[derive(Debug, Clone, Default, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct OverlayProofSummary {
-    checked: usize,
-    blocked: usize,
-    valid: usize,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct OverlayProofIssue {
-    kind: &'static str,
-    location: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    ref_kind: Option<String>,
-    message: String,
-}
-
-#[derive(Debug, Clone, Default, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct OverlayPlanAudit {
-    relative_paths: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct DependencyEdgeSample {
-    from: String,
-    to: String,
-    kind: String,
-    reason: &'static str,
-}
-
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
-enum RefKind {
-    Model,
-    Anim,
-    Seq,
-    Bas,
-    Spot,
-    Material,
-    Struct,
-    Enum,
-    VarBit,
-    Varp,
-    Obj,
-    Npc,
-    Loc,
-    Quest,
-    DbRow,
-    DbTable,
-    Sprite,
-    SeqGroup,
-    Interface,
-    Script,
-}
-
-impl RefKind {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Model => "model",
-            Self::Anim => "anim",
-            Self::Seq => "seq",
-            Self::Bas => "bas",
-            Self::Spot => "spot",
-            Self::Material => "material",
-            Self::Struct => "struct",
-            Self::Enum => "enum",
-            Self::VarBit => "varbit",
-            Self::Varp => "varp",
-            Self::Obj => "obj",
-            Self::Npc => "npc",
-            Self::Loc => "loc",
-            Self::Quest => "quest",
-            Self::DbRow => "dbrow",
-            Self::DbTable => "dbtable",
-            Self::Sprite => "sprite",
-            Self::SeqGroup => "seqgroup",
-            Self::Interface => "interface",
-            Self::Script => "script",
-        }
-    }
-
-    fn from_entity_type(entity_type: &str) -> Option<Self> {
-        Some(match entity_type {
-            "script" => Self::Script,
-            "interface" => Self::Interface,
-            "obj" => Self::Obj,
-            "npc" => Self::Npc,
-            "loc" => Self::Loc,
-            "seq" => Self::Seq,
-            "bas" => Self::Bas,
-            "spot" => Self::Spot,
-            "struct" => Self::Struct,
-            "enum" => Self::Enum,
-            "varbit" => Self::VarBit,
-            "varplayer" => Self::Varp,
-            "quest" => Self::Quest,
-            "dbtable" => Self::DbTable,
-            "dbrow" => Self::DbRow,
-            "model" => Self::Model,
-            "anim" => Self::Anim,
-            "material" => Self::Material,
-            "seqgroup" => Self::SeqGroup,
-            _ => return None,
-        })
-    }
-}
-
-#[derive(Debug, Clone)]
-struct ArchiveDef {
-    id: u32,
-    donor_id: u32,
-    name: &'static str,
-}
-
-#[derive(Debug, Clone)]
-struct ConfigTarget {
-    archive: ArchiveDef,
-    group_id: u32,
-    file_id: u32,
-    id: u32,
-    kind: RefKind,
-}
-
-#[derive(Debug, Clone)]
-struct RawGroupTarget {
-    archive: ArchiveDef,
-    group_id: u32,
-    id: u32,
-    kind: RefKind,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SelectionMode {
-    Primary,
-    Dependency,
-}
-
-#[derive(Debug, Clone)]
-struct PendingRef {
-    kind: RefKind,
-    id: u32,
-    source: String,
-    mode: SelectionMode,
-}
-
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
-enum RootKind {
-    Base,
-    Donor,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
-enum SemanticRefKey {
-    Anim,
-    Bas,
-    Cursor,
-    DbRow,
-    DbTable,
-    Enum,
-    Graphic,
-    Interface,
-    Loc,
-    Material,
-    Model,
-    Msi,
-    MultivarVarbit,
-    MultivarVarp,
-    Npc,
-    Obj,
-    Param,
-    Quest,
-    Script,
-    Seq,
-    SeqGroup,
-    Spot,
-    Spotanim,
-    Sprite,
-    Struct,
-    VarBit,
-    Varp,
-    VarpClan,
-    VarpClanSetting,
-    VarpClient,
-    VarpController,
-    VarpNpc,
-    VarpObject,
-    VarpPlayer,
-    VarpRegion,
-    VarpWorld,
-    Vfx,
-    Other(Box<str>),
-}
-
-impl SemanticRefKey {
-    fn from_label(label: &str) -> Self {
-        match label {
-            "anim" => Self::Anim,
-            "bas" => Self::Bas,
-            "cursor" => Self::Cursor,
-            "dbrow" => Self::DbRow,
-            "dbtable" => Self::DbTable,
-            "enum" => Self::Enum,
-            "graphic" => Self::Graphic,
-            "interface" => Self::Interface,
-            "loc" => Self::Loc,
-            "material" => Self::Material,
-            "model" => Self::Model,
-            "msi" => Self::Msi,
-            "multivar_varbit" => Self::MultivarVarbit,
-            "multivar_varp" => Self::MultivarVarp,
-            "npc" => Self::Npc,
-            "obj" => Self::Obj,
-            "param" => Self::Param,
-            "quest" => Self::Quest,
-            "script" => Self::Script,
-            "seq" => Self::Seq,
-            "seqgroup" => Self::SeqGroup,
-            "spot" => Self::Spot,
-            "spotanim" => Self::Spotanim,
-            "sprite" => Self::Sprite,
-            "struct" => Self::Struct,
-            "varbit" => Self::VarBit,
-            "varp" => Self::Varp,
-            "varp_clan" => Self::VarpClan,
-            "varp_clan_setting" => Self::VarpClanSetting,
-            "varp_client" => Self::VarpClient,
-            "varp_controller" => Self::VarpController,
-            "varp_npc" => Self::VarpNpc,
-            "varp_object" => Self::VarpObject,
-            "varp_player" => Self::VarpPlayer,
-            "varp_region" => Self::VarpRegion,
-            "varp_world" => Self::VarpWorld,
-            "vfx" => Self::Vfx,
-            other => Self::Other(other.into()),
-        }
-    }
-
-    fn as_label(&self) -> &str {
-        match self {
-            Self::Anim => "anim",
-            Self::Bas => "bas",
-            Self::Cursor => "cursor",
-            Self::DbRow => "dbrow",
-            Self::DbTable => "dbtable",
-            Self::Enum => "enum",
-            Self::Graphic => "graphic",
-            Self::Interface => "interface",
-            Self::Loc => "loc",
-            Self::Material => "material",
-            Self::Model => "model",
-            Self::Msi => "msi",
-            Self::MultivarVarbit => "multivar_varbit",
-            Self::MultivarVarp => "multivar_varp",
-            Self::Npc => "npc",
-            Self::Obj => "obj",
-            Self::Param => "param",
-            Self::Quest => "quest",
-            Self::Script => "script",
-            Self::Seq => "seq",
-            Self::SeqGroup => "seqgroup",
-            Self::Spot => "spot",
-            Self::Spotanim => "spotanim",
-            Self::Sprite => "sprite",
-            Self::Struct => "struct",
-            Self::VarBit => "varbit",
-            Self::Varp => "varp",
-            Self::VarpClan => "varp_clan",
-            Self::VarpClanSetting => "varp_clan_setting",
-            Self::VarpClient => "varp_client",
-            Self::VarpController => "varp_controller",
-            Self::VarpNpc => "varp_npc",
-            Self::VarpObject => "varp_object",
-            Self::VarpPlayer => "varp_player",
-            Self::VarpRegion => "varp_region",
-            Self::VarpWorld => "varp_world",
-            Self::Vfx => "vfx",
-            Self::Other(other) => other.as_ref(),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-struct RefGraphRepository {
-    graphs: HashMap<String, HashMap<u32, HashMap<SemanticRefKey, Vec<u32>>>>,
-}
-
-#[derive(Debug, Clone)]
-struct ConfigSemanticIndex {
-    ref_graph: RefGraphRepository,
-    dependency_edges_sample: Vec<DependencyEdgeSample>,
-    edge_sample_overflow: usize,
-    missing_refs_kinds_logged: HashSet<String>,
-    partial_refs_kinds_logged: HashSet<String>,
-}
-
-#[derive(Debug, Clone)]
-struct ProofState {
-    script_checked: usize,
-    script_blocked: usize,
-    script_valid: usize,
-    component_checked: usize,
-    component_blocked: usize,
-    component_valid: usize,
-    blockers: Vec<OverlayProofIssue>,
-}
-
-struct PlanBuilder<'a> {
-    manifest: CacheOverlayManifest,
-    roots: OverlayRoots,
-    base_cache: FlatCache,
-    donor_cache: FlatCache,
-    data_dir: &'a Path,
-    base_build: u32,
-    donor_build: u32,
-    base_subbuild: u32,
-    donor_subbuild: u32,
-    group_selections: BTreeMap<u32, BTreeSet<u32>>,
-    file_selections: BTreeMap<(u32, u32), BTreeSet<u32>>,
-    primary_maps: BTreeSet<u32>,
-    primary_objs: BTreeSet<u32>,
-    primary_npcs: BTreeSet<u32>,
-    primary_locs: BTreeSet<u32>,
-    primary_structs: BTreeSet<u32>,
-    primary_enums: BTreeSet<u32>,
-    primary_varbits: BTreeSet<u32>,
-    primary_varps: BTreeSet<u32>,
-    primary_db_tables: BTreeSet<u32>,
-    primary_db_rows: BTreeSet<u32>,
-    primary_interfaces: BTreeSet<u32>,
-    primary_scripts: BTreeSet<u32>,
-    dependencies: BTreeMap<RefKind, BTreeSet<u32>>,
-    warnings: Vec<OverlayWarning>,
-    blocked: Vec<OverlayBlockedIssue>,
-    pending: VecDeque<PendingRef>,
-    seen_refs: HashSet<(RefKind, u32)>,
-    indexes: HashMap<(RootKind, u32), Option<ArchiveIndex>>,
-    config_group_files: ConfigGroupFileCache,
-    full_archive_selections: BTreeSet<u32>,
-    auto_allowed_missing_varbits: BTreeSet<u32>,
-    auto_allowed_missing_varps: BTreeSet<u32>,
-    semantic_index: ConfigSemanticIndex,
-    db_schema_changes: BTreeSet<u32>,
-    warning_overflow: usize,
-    proof: ProofState,
-    analyzer: Option<MigrationAnalyzer>,
-    base_manifest: Rs3CacheManifest,
-    donor_manifest: Rs3CacheManifest,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct OverlayPlanCommandOptions<'a> {
-    pub manifest: &'a Path,
-    pub out_file: Option<&'a Path>,
-    pub audit_dir: Option<&'a Path>,
-    pub allow_heuristic_sites: bool,
+pub struct PlanBuilder<'a> {
+    pub manifest: CacheOverlayManifest,
+    pub roots: OverlayRoots,
+    pub base_cache: FlatCache,
+    pub donor_cache: FlatCache,
     pub data_dir: &'a Path,
     pub base_build: u32,
     pub donor_build: u32,
     pub base_subbuild: u32,
     pub donor_subbuild: u32,
-}
-
-pub fn run_overlay_plan_command(options: OverlayPlanCommandOptions<'_>) -> Result<()> {
-    let OverlayPlanCommandOptions {
-        manifest,
-        out_file,
-        audit_dir,
-        allow_heuristic_sites,
-        data_dir,
-        base_build,
-        donor_build,
-        base_subbuild,
-        donor_subbuild,
-    } = options;
-    ensure!(
-        donor_build == 947 || donor_build == 948,
-        "native overlay-plan supports donor builds 947 and 948 only"
-    );
-    let manifest_bytes =
-        fs::read(manifest).with_context(|| format!("reading {}", manifest.display()))?;
-    let manifest_value: CacheOverlayManifest = serde_json::from_slice(&manifest_bytes)
-        .with_context(|| format!("decoding overlay manifest {}", manifest.display()))?;
-    let roots = resolve_roots(&manifest_value)?;
-    let donor_manifest = read_semantic_manifest(&PathBuf::from(&roots.donor_semantic_root))?;
-    let base_manifest = read_semantic_manifest(&PathBuf::from(&roots.base_semantic_root))?;
-    ensure!(
-        donor_manifest.build == donor_build && donor_manifest.subbuild == donor_subbuild,
-        "donor semantic tree build mismatch: expected {}.{}, found {}.{}",
-        donor_build,
-        donor_subbuild,
-        donor_manifest.build,
-        donor_manifest.subbuild
-    );
-    ensure!(
-        base_manifest.build == base_build && base_manifest.subbuild == base_subbuild,
-        "base semantic tree build mismatch: expected {}.{}, found {}.{}",
-        base_build,
-        base_subbuild,
-        base_manifest.build,
-        base_manifest.subbuild
-    );
-    let cache_path = if audit_dir.is_none() {
-        overlay_plan_cache_path(
-            &manifest_bytes,
-            &donor_manifest,
-            &base_manifest,
-            allow_heuristic_sites,
-        )
-    } else {
-        None
-    };
-    if let Some(cache_path) = cache_path.as_ref().filter(|path| path.is_file()) {
-        if let Some(path) = out_file {
-            fs::copy(cache_path, path)
-                .with_context(|| format!("copying cached overlay plan to {}", path.display()))?;
-        } else {
-            print!("{}", fs::read_to_string(cache_path)?);
-        }
-        eprintln!("overlay plan: cached");
-        return Ok(());
-    }
-
-    let semantic_index = ConfigSemanticIndex::new(Path::new(&roots.donor_semantic_root))?;
-    let mut builder = PlanBuilder {
-        manifest: manifest_value,
-        roots: roots.clone(),
-        base_cache: FlatCache::open(&roots.base_raw_root)?,
-        donor_cache: FlatCache::open(&roots.donor_raw_root)?,
-        data_dir,
-        base_build,
-        donor_build,
-        base_subbuild,
-        donor_subbuild,
-        group_selections: BTreeMap::new(),
-        file_selections: BTreeMap::new(),
-        primary_maps: BTreeSet::new(),
-        primary_objs: BTreeSet::new(),
-        primary_npcs: BTreeSet::new(),
-        primary_locs: BTreeSet::new(),
-        primary_structs: BTreeSet::new(),
-        primary_enums: BTreeSet::new(),
-        primary_varbits: BTreeSet::new(),
-        primary_varps: BTreeSet::new(),
-        primary_db_tables: BTreeSet::new(),
-        primary_db_rows: BTreeSet::new(),
-        primary_interfaces: BTreeSet::new(),
-        primary_scripts: BTreeSet::new(),
-        dependencies: BTreeMap::new(),
-        warnings: Vec::new(),
-        blocked: Vec::new(),
-        pending: VecDeque::new(),
-        seen_refs: HashSet::new(),
-        indexes: HashMap::new(),
-        config_group_files: HashMap::new(),
-        full_archive_selections: BTreeSet::new(),
-        auto_allowed_missing_varbits: BTreeSet::new(),
-        auto_allowed_missing_varps: BTreeSet::new(),
-        semantic_index,
-        db_schema_changes: BTreeSet::new(),
-        warning_overflow: 0,
-        proof: ProofState {
-            script_checked: 0,
-            script_blocked: 0,
-            script_valid: 0,
-            component_checked: 0,
-            component_blocked: 0,
-            component_valid: 0,
-            blockers: Vec::new(),
-        },
-        analyzer: None,
-        donor_manifest,
-        base_manifest,
-    };
-
-    seed_imports(&mut builder)?;
-    build_selections(&mut builder, allow_heuristic_sites)?;
-    let mut plan = finalize_plan(builder, allow_heuristic_sites)?;
-    if let Some(dir) = audit_dir {
-        plan.audit = write_overlay_plan_audit(dir, &plan.proof, &plan.blocked_conflicts)?;
-    }
-
-    if let Some(path) = out_file {
-        write_json(path, &serde_json::to_value(&plan)?)?;
-        if let Some(cache_path) = cache_path {
-            if let Some(parent) = cache_path.parent() {
-                fs::create_dir_all(parent)
-                    .with_context(|| format!("creating {}", parent.display()))?;
-            }
-            fs::copy(path, &cache_path)
-                .with_context(|| format!("writing overlay plan cache {}", cache_path.display()))?;
-        }
-    } else {
-        print_json(&serde_json::to_value(&plan)?)?;
-    }
-
-    eprintln!(
-        "overlay plan: {} blocked conflicts, {} unsupported proof gap(s), {} heuristic proof gap(s)",
-        plan.blocked_conflicts.len(),
-        plan.proof.unsupported_site_count,
-        plan.proof.heuristic_site_count
-    );
-    Ok(())
-}
-
-fn overlay_plan_cache_path(
-    manifest_bytes: &[u8],
-    donor_manifest: &Rs3CacheManifest,
-    base_manifest: &Rs3CacheManifest,
-    allow_heuristic_sites: bool,
-) -> Option<PathBuf> {
-    let home = std::env::var_os("HOME")?;
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    env!("CARGO_PKG_VERSION").hash(&mut hasher);
-    OVERLAY_PLAN_VERSION.hash(&mut hasher);
-    allow_heuristic_sites.hash(&mut hasher);
-    manifest_bytes.hash(&mut hasher);
-    manifest_fingerprint(donor_manifest).hash(&mut hasher);
-    manifest_fingerprint(base_manifest).hash(&mut hasher);
-    Some(
-        PathBuf::from(home)
-            .join(".cache/alerion/rs3-cache-rs-overlay-plans")
-            .join(format!("{:016x}.json", hasher.finish())),
-    )
-}
-
-impl ConfigSemanticIndex {
-    fn new(semantic_root: &Path) -> Result<Self> {
-        Ok(Self {
-            ref_graph: RefGraphRepository::new(semantic_root)?,
-            dependency_edges_sample: Vec::new(),
-            edge_sample_overflow: 0,
-            missing_refs_kinds_logged: HashSet::new(),
-            partial_refs_kinds_logged: HashSet::new(),
-        })
-    }
-
-    fn record_dependency_edge(&mut self, edge: DependencyEdgeSample) {
-        if self.dependency_edges_sample.len() < MAX_EDGE_SAMPLES {
-            self.dependency_edges_sample.push(edge);
-        } else {
-            self.edge_sample_overflow += 1;
-        }
-    }
-
-    fn edge_sample_warning(&self) -> Option<OverlayWarning> {
-        if self.edge_sample_overflow == 0 {
-            return None;
-        }
-        Some(OverlayWarning {
-            kind: "risk".to_string(),
-            archive: None,
-            id: None,
-            ref_kind: None,
-            message: format!(
-                "{} additional dependency edge(s) omitted from plan sample after first {}.",
-                self.edge_sample_overflow, MAX_EDGE_SAMPLES
-            ),
-        })
-    }
-}
-
-impl RefGraphRepository {
-    fn new(semantic_root: &Path) -> Result<Self> {
-        let refs_dir = semantic_root.join("refs");
-        let parsed = [
-            "obj", "npc", "loc", "spot", "seq", "bas", "enum", "struct", "dbtable", "dbrow",
-            "varbit", "varp", "param", "seqgroup",
-        ]
-        .par_iter()
-        .map(|kind| -> Result<Option<(String, SemanticRefBuckets)>> {
-            let file_path = refs_dir.join(format!("{kind}.json"));
-            if !file_path.is_file() {
-                return Ok(None);
-            }
-            let bytes =
-                fs::read(&file_path).with_context(|| format!("reading {}", file_path.display()))?;
-            let mut by_id = HashMap::new();
-            if *kind == "varp" {
-                let parsed: HashMap<String, HashMap<u32, HashMap<String, Vec<u32>>>> =
-                    serde_json::from_slice(&bytes)
-                        .with_context(|| format!("decoding {}", file_path.display()))?;
-                for (_, domain_entries) in parsed {
-                    for (id, edges) in domain_entries {
-                        let mapped = by_id.entry(id).or_insert_with(HashMap::new);
-                        for (ref_kind, ids) in edges {
-                            if ids.is_empty() {
-                                continue;
-                            }
-                            mapped
-                                .entry(SemanticRefKey::from_label(&ref_kind))
-                                .or_insert_with(Vec::new)
-                                .extend(ids);
-                        }
-                    }
-                }
-            } else {
-                let parsed: HashMap<u32, HashMap<String, Vec<u32>>> =
-                    serde_json::from_slice(&bytes)
-                        .with_context(|| format!("decoding {}", file_path.display()))?;
-                for (id, edges) in parsed {
-                    let mut mapped = HashMap::new();
-                    for (ref_kind, ids) in edges {
-                        if !ids.is_empty() {
-                            mapped.insert(SemanticRefKey::from_label(&ref_kind), ids);
-                        }
-                    }
-                    by_id.insert(id, mapped);
-                }
-            }
-            if by_id.is_empty() {
-                return Ok(None);
-            }
-            Ok(Some(((*kind).to_string(), by_id)))
-        })
-        .collect::<Vec<_>>();
-        let mut graphs = HashMap::new();
-        for result in parsed {
-            if let Some((kind, graph)) = result? {
-                graphs.insert(kind, graph);
-            }
-        }
-        Ok(Self { graphs })
-    }
-
-    fn has_kind(&self, kind: &str) -> bool {
-        self.graphs.contains_key(semantic_refs_file_name(kind))
-    }
-
-    fn get_refs(&self, kind: &str, id: u32) -> Option<&HashMap<SemanticRefKey, Vec<u32>>> {
-        // Semantic kinds and refs file names differ for spotanims ("spotanim" config kind,
-        // refs/spot.json); normalise so spot configs get dependency closure instead of a
-        // missing-refs heuristic gap.
-        self.graphs.get(semantic_refs_file_name(kind))?.get(&id)
-    }
-
-    fn get_dbrow_table_id(&self, row_id: u32) -> Option<u32> {
-        self.get_refs("dbrow", row_id)?
-            .get(&SemanticRefKey::DbTable)?
-            .first()
-            .copied()
-    }
+    pub group_selections: BTreeMap<u32, BTreeSet<u32>>,
+    pub file_selections: BTreeMap<(u32, u32), BTreeSet<u32>>,
+    pub primary_maps: BTreeSet<u32>,
+    pub primary_objs: BTreeSet<u32>,
+    pub primary_npcs: BTreeSet<u32>,
+    pub primary_locs: BTreeSet<u32>,
+    pub primary_structs: BTreeSet<u32>,
+    pub primary_enums: BTreeSet<u32>,
+    pub primary_varbits: BTreeSet<u32>,
+    pub primary_varps: BTreeSet<u32>,
+    pub primary_db_tables: BTreeSet<u32>,
+    pub primary_db_rows: BTreeSet<u32>,
+    pub primary_interfaces: BTreeSet<u32>,
+    pub primary_scripts: BTreeSet<u32>,
+    pub dependencies: BTreeMap<RefKind, BTreeSet<u32>>,
+    pub warnings: Vec<OverlayWarning>,
+    pub blocked: Vec<OverlayBlockedIssue>,
+    pub pending: VecDeque<PendingRef>,
+    pub seen_refs: HashSet<(RefKind, u32)>,
+    pub indexes: HashMap<(RootKind, u32), Option<ArchiveIndex>>,
+    pub config_group_files: ConfigGroupFileCache,
+    pub full_archive_selections: BTreeSet<u32>,
+    pub auto_allowed_missing_varbits: BTreeSet<u32>,
+    pub auto_allowed_missing_varps: BTreeSet<u32>,
+    pub semantic_index: ConfigSemanticIndex,
+    pub db_schema_changes: BTreeSet<u32>,
+    pub warning_overflow: usize,
+    pub proof: ProofState,
+    pub analyzer: Option<MigrationAnalyzer>,
+    pub base_manifest: Rs3CacheManifest,
+    pub donor_manifest: Rs3CacheManifest,
 }
 
 impl PlanBuilder<'_> {
-    fn queue(&mut self, kind: RefKind, id: u32, source: impl Into<String>, mode: SelectionMode) {
+    pub fn queue(&mut self, kind: RefKind, id: u32, source: impl Into<String>, mode: SelectionMode) {
         if self.seen_refs.insert((kind, id)) {
             self.pending.push_back(PendingRef {
                 kind,
@@ -990,25 +107,25 @@ impl PlanBuilder<'_> {
         }
     }
 
-    fn add_dependency(&mut self, kind: RefKind, id: u32) {
+    pub fn add_dependency(&mut self, kind: RefKind, id: u32) {
         self.dependencies.entry(kind).or_default().insert(id);
     }
 
-    fn add_group(&mut self, archive: &ArchiveDef, group_id: u32) {
+    pub fn add_group(&mut self, archive: &ArchiveDef, group_id: u32) {
         self.group_selections
             .entry(archive.id)
             .or_default()
             .insert(group_id);
     }
 
-    fn add_file(&mut self, archive: &ArchiveDef, group_id: u32, file_id: u32) {
+    pub fn add_file(&mut self, archive: &ArchiveDef, group_id: u32, file_id: u32) {
         self.file_selections
             .entry((archive.id, group_id))
             .or_default()
             .insert(file_id);
     }
 
-    fn add_warning(&mut self, warning: OverlayWarning) {
+    pub fn add_warning(&mut self, warning: OverlayWarning) {
         if self.warnings.iter().any(|existing| {
             existing.kind == warning.kind
                 && existing.archive == warning.archive
@@ -1025,7 +142,7 @@ impl PlanBuilder<'_> {
         self.warnings.push(warning);
     }
 
-    fn add_blocked(&mut self, issue: OverlayBlockedIssue) {
+    pub fn add_blocked(&mut self, issue: OverlayBlockedIssue) {
         if self.blocked.iter().any(|existing| {
             existing.kind == issue.kind
                 && existing.archive_id == issue.archive_id
@@ -1039,11 +156,11 @@ impl PlanBuilder<'_> {
         self.blocked.push(issue);
     }
 
-    fn semantic_donor_root(&self) -> &Path {
+    pub fn semantic_donor_root(&self) -> &Path {
         Path::new(&self.roots.donor_semantic_root)
     }
 
-    fn get_index(
+    pub fn get_index(
         &mut self,
         root_kind: RootKind,
         archive: &ArchiveDef,
@@ -1068,7 +185,7 @@ impl PlanBuilder<'_> {
         Ok(index)
     }
 
-    fn read_raw_group(
+    pub fn read_raw_group(
         &self,
         root_kind: RootKind,
         archive: &ArchiveDef,
@@ -1085,7 +202,7 @@ impl PlanBuilder<'_> {
         Ok(cache.get(archive_id, group_id)?)
     }
 
-    fn read_group_files(
+    pub fn read_group_files(
         &mut self,
         root_kind: RootKind,
         archive: &ArchiveDef,
@@ -1113,7 +230,7 @@ impl PlanBuilder<'_> {
         Ok(self.config_group_files.get(&key).and_then(Option::as_ref))
     }
 
-    fn cached_file_bytes(
+    pub fn cached_file_bytes(
         &self,
         root_kind: RootKind,
         archive: &ArchiveDef,
@@ -1127,7 +244,7 @@ impl PlanBuilder<'_> {
             .map(Vec::as_slice)
     }
 
-    fn read_file_bytes(
+    pub fn read_file_bytes(
         &mut self,
         root_kind: RootKind,
         archive: &ArchiveDef,
@@ -1140,7 +257,7 @@ impl PlanBuilder<'_> {
         Ok(files.get(&file_id).map(Vec::as_slice))
     }
 
-    fn analyzer(&mut self) -> Result<&MigrationAnalyzer> {
+    pub fn analyzer(&mut self) -> Result<&MigrationAnalyzer> {
         if self.analyzer.is_none() {
             let donor_tar = default_tar_path();
             let base_tar = default_tar_path();
@@ -1164,7 +281,7 @@ impl PlanBuilder<'_> {
     }
 }
 
-fn seed_imports(builder: &mut PlanBuilder<'_>) -> Result<()> {
+pub fn seed_imports(builder: &mut PlanBuilder<'_>) -> Result<()> {
     if builder.manifest.imports.map_archive.as_deref() == Some("full") {
         builder.full_archive_selections.insert(archive_maps().id);
         let donor_index = builder
@@ -1266,7 +383,7 @@ fn seed_imports(builder: &mut PlanBuilder<'_>) -> Result<()> {
     Ok(())
 }
 
-fn seed_full_archive_selection(
+pub fn seed_full_archive_selection(
     builder: &mut PlanBuilder<'_>,
     archive_ref: &ArchiveRef,
 ) -> Result<()> {
@@ -1288,7 +405,7 @@ fn seed_full_archive_selection(
     Ok(())
 }
 
-fn build_selections(builder: &mut PlanBuilder<'_>, allow_heuristic_sites: bool) -> Result<()> {
+pub fn build_selections(builder: &mut PlanBuilder<'_>, allow_heuristic_sites: bool) -> Result<()> {
     let map_groups = builder.primary_maps.iter().copied().collect::<Vec<_>>();
     if !map_groups.is_empty() {
         process_map_groups(builder, &map_groups)?;
@@ -1299,7 +416,7 @@ fn build_selections(builder: &mut PlanBuilder<'_>, allow_heuristic_sites: bool) 
     Ok(())
 }
 
-fn process_map_groups(builder: &mut PlanBuilder<'_>, map_groups: &[u32]) -> Result<()> {
+pub fn process_map_groups(builder: &mut PlanBuilder<'_>, map_groups: &[u32]) -> Result<()> {
     let archive = archive_maps();
     let donor_index = builder
         .get_index(RootKind::Donor, &archive)?
@@ -1372,7 +489,7 @@ fn process_map_groups(builder: &mut PlanBuilder<'_>, map_groups: &[u32]) -> Resu
     Ok(())
 }
 
-fn map_refs_cache_path(donor_manifest: &Rs3CacheManifest, map_groups: &[u32]) -> Option<PathBuf> {
+pub fn map_refs_cache_path(donor_manifest: &Rs3CacheManifest, map_groups: &[u32]) -> Option<PathBuf> {
     let home = std::env::var_os("HOME")?;
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     env!("CARGO_PKG_VERSION").hash(&mut hasher);
@@ -1386,7 +503,7 @@ fn map_refs_cache_path(donor_manifest: &Rs3CacheManifest, map_groups: &[u32]) ->
     )
 }
 
-fn scan_map_group_refs(
+pub fn scan_map_group_refs(
     donor_cache: &FlatCache,
     donor_index: &ArchiveIndex,
     archive: &ArchiveDef,
@@ -1409,7 +526,7 @@ fn scan_map_group_refs(
     Ok((group_id, Some((loc_ids, npc_ids))))
 }
 
-fn process_ref(
+pub fn process_ref(
     builder: &mut PlanBuilder<'_>,
     reference: &PendingRef,
     allow_heuristic_sites: bool,
@@ -1519,7 +636,7 @@ fn process_ref(
     Ok(())
 }
 
-fn process_covered_ref_dependencies(
+pub fn process_covered_ref_dependencies(
     builder: &mut PlanBuilder<'_>,
     reference: &PendingRef,
 ) -> Result<()> {
@@ -1543,12 +660,12 @@ fn process_covered_ref_dependencies(
     }
 }
 
-fn ref_covered_by_full_archive(builder: &PlanBuilder<'_>, reference: &PendingRef) -> Result<bool> {
+pub fn ref_covered_by_full_archive(builder: &PlanBuilder<'_>, reference: &PendingRef) -> Result<bool> {
     Ok(full_archive_for_ref(builder, reference)?
         .is_some_and(|archive| builder.full_archive_selections.contains(&archive.id)))
 }
 
-fn full_archive_for_ref(
+pub fn full_archive_for_ref(
     builder: &PlanBuilder<'_>,
     reference: &PendingRef,
 ) -> Result<Option<ArchiveDef>> {
@@ -1563,7 +680,7 @@ fn full_archive_for_ref(
     }))
 }
 
-fn process_config_ref(
+pub fn process_config_ref(
     builder: &mut PlanBuilder<'_>,
     reference: &PendingRef,
     target: &ConfigTarget,
@@ -1600,7 +717,7 @@ fn process_config_ref(
     scan_config_dependencies(builder, semantic_kind, target.id, &reference.source)
 }
 
-fn process_shallow_config_ref(builder: &mut PlanBuilder<'_>, target: &ConfigTarget) -> Result<()> {
+pub fn process_shallow_config_ref(builder: &mut PlanBuilder<'_>, target: &ConfigTarget) -> Result<()> {
     let state = compare_file(builder, &target.archive, target.group_id, target.file_id)?;
     if state == CompareState::MissingDonor {
         missing_config(builder, target);
@@ -1632,7 +749,7 @@ fn process_shallow_config_ref(builder: &mut PlanBuilder<'_>, target: &ConfigTarg
     Ok(())
 }
 
-fn process_gated_config_ref(
+pub fn process_gated_config_ref(
     builder: &mut PlanBuilder<'_>,
     reference: &PendingRef,
     target: &ConfigTarget,
@@ -1697,7 +814,7 @@ fn process_gated_config_ref(
     scan_config_dependencies(builder, semantic_kind, target.id, &reference.source)
 }
 
-fn process_struct_ref(
+pub fn process_struct_ref(
     builder: &mut PlanBuilder<'_>,
     reference: &PendingRef,
     target: &ConfigTarget,
@@ -1716,7 +833,7 @@ fn process_struct_ref(
     Ok(())
 }
 
-fn process_raw_group_ref(builder: &mut PlanBuilder<'_>, target: &RawGroupTarget) -> Result<()> {
+pub fn process_raw_group_ref(builder: &mut PlanBuilder<'_>, target: &RawGroupTarget) -> Result<()> {
     let Some(donor_raw) =
         builder.read_raw_group(RootKind::Donor, &target.archive, target.group_id)?
     else {
@@ -1760,7 +877,7 @@ fn process_raw_group_ref(builder: &mut PlanBuilder<'_>, target: &RawGroupTarget)
     Ok(())
 }
 
-fn scan_raw_group_dependencies(
+pub fn scan_raw_group_dependencies(
     builder: &mut PlanBuilder<'_>,
     target: &RawGroupTarget,
     donor_raw: &[u8],
@@ -1825,7 +942,7 @@ fn scan_raw_group_dependencies(
     Ok(())
 }
 
-fn process_dbtable_ref(builder: &mut PlanBuilder<'_>, table_id: u32) -> Result<()> {
+pub fn process_dbtable_ref(builder: &mut PlanBuilder<'_>, table_id: u32) -> Result<()> {
     let target = config_target(RefKind::DbTable, table_id);
     let state = compare_file(builder, &target.archive, target.group_id, target.file_id)?;
     if state == CompareState::MissingDonor {
@@ -1872,7 +989,7 @@ fn process_dbtable_ref(builder: &mut PlanBuilder<'_>, table_id: u32) -> Result<(
     )
 }
 
-fn process_dbrow_ref(builder: &mut PlanBuilder<'_>, row_id: u32) -> Result<()> {
+pub fn process_dbrow_ref(builder: &mut PlanBuilder<'_>, row_id: u32) -> Result<()> {
     let target = config_target(RefKind::DbRow, row_id);
     let state = compare_file(builder, &target.archive, target.group_id, target.file_id)?;
     if state == CompareState::MissingDonor {
@@ -1904,7 +1021,7 @@ fn process_dbrow_ref(builder: &mut PlanBuilder<'_>, row_id: u32) -> Result<()> {
     Ok(())
 }
 
-fn scan_dbrow_dependencies(builder: &mut PlanBuilder<'_>, row_id: u32) {
+pub fn scan_dbrow_dependencies(builder: &mut PlanBuilder<'_>, row_id: u32) {
     let table_id = builder
         .semantic_index
         .ref_graph
@@ -1920,7 +1037,7 @@ fn scan_dbrow_dependencies(builder: &mut PlanBuilder<'_>, row_id: u32) {
     );
 }
 
-fn scan_config_dependencies(
+pub fn scan_config_dependencies(
     builder: &mut PlanBuilder<'_>,
     semantic_kind: &str,
     id: u32,
@@ -1962,7 +1079,7 @@ fn scan_config_dependencies(
     }
 }
 
-fn scan_refs_for_kind(
+pub fn scan_refs_for_kind(
     builder: &mut PlanBuilder<'_>,
     semantic_kind: &str,
     id: u32,
@@ -2083,7 +1200,7 @@ fn scan_refs_for_kind(
     }
 }
 
-fn semantic_kind_allows_ref_kind(semantic_kind: &str, kind: RefKind) -> bool {
+pub fn semantic_kind_allows_ref_kind(semantic_kind: &str, kind: RefKind) -> bool {
     match semantic_kind {
         "obj" => matches!(
             kind,
@@ -2116,7 +1233,7 @@ fn semantic_kind_allows_ref_kind(semantic_kind: &str, kind: RefKind) -> bool {
     }
 }
 
-fn scan_binary_multivar_dependencies(
+pub fn scan_binary_multivar_dependencies(
     builder: &mut PlanBuilder<'_>,
     kind: &str,
     id: u32,
@@ -2189,7 +1306,7 @@ fn scan_binary_multivar_dependencies(
     Ok(scanned_varbit || scanned_varp)
 }
 
-fn compare_file(
+pub fn compare_file(
     builder: &mut PlanBuilder<'_>,
     archive: &ArchiveDef,
     group_id: u32,
@@ -2210,7 +1327,7 @@ fn compare_file(
     })
 }
 
-fn validate_donor_config_decodes(
+pub fn validate_donor_config_decodes(
     builder: &mut PlanBuilder<'_>,
     target: &ConfigTarget,
 ) -> Result<bool> {
@@ -2266,7 +1383,7 @@ fn validate_donor_config_decodes(
     }
 }
 
-fn queue_varbit_base_varp_dependency(
+pub fn queue_varbit_base_varp_dependency(
     builder: &mut PlanBuilder<'_>,
     target: &ConfigTarget,
     source: &str,
@@ -2298,7 +1415,7 @@ fn queue_varbit_base_varp_dependency(
     Ok(())
 }
 
-fn is_allowed_missing_target_id(builder: &PlanBuilder<'_>, kind: RefKind, id: u32) -> bool {
+pub fn is_allowed_missing_target_id(builder: &PlanBuilder<'_>, kind: RefKind, id: u32) -> bool {
     match kind {
         RefKind::Enum => builder.manifest.allow.enum_ids.contains(&id),
         RefKind::VarBit => {
@@ -2313,7 +1430,7 @@ fn is_allowed_missing_target_id(builder: &PlanBuilder<'_>, kind: RefKind, id: u3
     }
 }
 
-fn is_allowed_conflict_id(builder: &PlanBuilder<'_>, kind: RefKind, id: u32) -> bool {
+pub fn is_allowed_conflict_id(builder: &PlanBuilder<'_>, kind: RefKind, id: u32) -> bool {
     match kind {
         RefKind::Enum => builder.manifest.allow.enum_ids.contains(&id),
         RefKind::VarBit => builder.manifest.allow.varbit_conflict_ids.contains(&id),
@@ -2322,7 +1439,7 @@ fn is_allowed_conflict_id(builder: &PlanBuilder<'_>, kind: RefKind, id: u32) -> 
     }
 }
 
-fn prove_script_ref(
+pub fn prove_script_ref(
     builder: &mut PlanBuilder<'_>,
     script_id: u32,
     allow_heuristic_sites: bool,
@@ -2343,7 +1460,7 @@ fn prove_script_ref(
     Ok(())
 }
 
-fn prove_interface_ref(
+pub fn prove_interface_ref(
     builder: &mut PlanBuilder<'_>,
     interface_id: u32,
     allow_heuristic_sites: bool,
@@ -2369,7 +1486,7 @@ fn prove_interface_ref(
     Ok(())
 }
 
-fn script_validation_issue(
+pub fn script_validation_issue(
     script_id: u32,
     validation: &TargetValidationReport,
 ) -> Option<OverlayProofIssue> {
@@ -2421,7 +1538,7 @@ fn script_validation_issue(
     None
 }
 
-fn interface_validation_issue(
+pub fn interface_validation_issue(
     interface_id: u32,
     validation: &TargetValidationReport,
 ) -> Option<OverlayProofIssue> {
@@ -2471,7 +1588,7 @@ fn interface_validation_issue(
     None
 }
 
-fn select_script_bytes(
+pub fn select_script_bytes(
     builder: &mut PlanBuilder<'_>,
     script_id: u32,
     validation: &TargetValidationReport,
@@ -2513,7 +1630,7 @@ fn select_script_bytes(
     Ok(())
 }
 
-fn select_interface_group(builder: &mut PlanBuilder<'_>, interface_id: u32) -> Result<()> {
+pub fn select_interface_group(builder: &mut PlanBuilder<'_>, interface_id: u32) -> Result<()> {
     let archive = archive_interfaces();
     let donor = builder.read_raw_group(RootKind::Donor, &archive, interface_id)?;
     let Some(donor) = donor else {
@@ -2546,7 +1663,7 @@ fn select_interface_group(builder: &mut PlanBuilder<'_>, interface_id: u32) -> R
     Ok(())
 }
 
-fn queue_supported_report_entities(
+pub fn queue_supported_report_entities(
     builder: &mut PlanBuilder<'_>,
     entities: &[ConflictEntry],
     source: &str,
@@ -2591,14 +1708,14 @@ fn queue_supported_report_entities(
     }
 }
 
-fn is_supported_proof_entity(entity_type: &str) -> bool {
+pub fn is_supported_proof_entity(entity_type: &str) -> bool {
     matches!(
         entity_type,
         "varplayer" | "component" | "param" | "config" | "inv"
     )
 }
 
-fn finalize_plan(
+pub fn finalize_plan(
     mut builder: PlanBuilder<'_>,
     allow_heuristic_sites: bool,
 ) -> Result<OverlayPlanOutput> {
@@ -2709,7 +1826,7 @@ fn finalize_plan(
     Ok(plan)
 }
 
-fn build_overlay_proof(
+pub fn build_overlay_proof(
     warnings: &[OverlayWarning],
     blocked_conflicts: &[OverlayBlockedIssue],
     proof_state: ProofState,
@@ -2772,7 +1889,7 @@ fn build_overlay_proof(
     }
 }
 
-fn classify_warning_issue(index: usize, warning: &OverlayWarning) -> Option<OverlayProofIssue> {
+pub fn classify_warning_issue(index: usize, warning: &OverlayWarning) -> Option<OverlayProofIssue> {
     if warning.kind != "risk" {
         return None;
     }
@@ -2792,7 +1909,7 @@ fn classify_warning_issue(index: usize, warning: &OverlayWarning) -> Option<Over
     None
 }
 
-fn write_overlay_plan_audit(
+pub fn write_overlay_plan_audit(
     audit_dir: &Path,
     proof: &OverlayPlanProof,
     blocked_conflicts: &[OverlayBlockedIssue],
@@ -2855,7 +1972,7 @@ fn write_overlay_plan_audit(
     })
 }
 
-fn write_json(path: &Path, value: &Value) -> Result<()> {
+pub fn write_json(path: &Path, value: &Value) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
     }
@@ -2863,7 +1980,7 @@ fn write_json(path: &Path, value: &Value) -> Result<()> {
     fs::write(path, encoded).with_context(|| format!("writing {}", path.display()))
 }
 
-fn write_jsonl<T: Serialize>(path: &Path, rows: &[T]) -> Result<()> {
+pub fn write_jsonl<T: Serialize>(path: &Path, rows: &[T]) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
     }
@@ -2875,12 +1992,12 @@ fn write_jsonl<T: Serialize>(path: &Path, rows: &[T]) -> Result<()> {
     fs::write(path, out).with_context(|| format!("writing {}", path.display()))
 }
 
-fn print_json(value: &Value) -> Result<()> {
+pub fn print_json(value: &Value) -> Result<()> {
     println!("{}", serde_json::to_string_pretty(value)?);
     Ok(())
 }
 
-fn resolve_roots(manifest: &CacheOverlayManifest) -> Result<OverlayRoots> {
+pub fn resolve_roots(manifest: &CacheOverlayManifest) -> Result<OverlayRoots> {
     Ok(OverlayRoots {
         base_raw_root: absolutize(
             manifest
@@ -2947,27 +2064,27 @@ fn resolve_roots(manifest: &CacheOverlayManifest) -> Result<OverlayRoots> {
     })
 }
 
-fn absolutize(path: &Path) -> Result<String> {
+pub fn absolutize(path: &Path) -> Result<String> {
     if path.is_absolute() {
         return Ok(path.display().to_string());
     }
     Ok(std::env::current_dir()?.join(path).display().to_string())
 }
 
-fn read_semantic_manifest(root: &Path) -> Result<Rs3CacheManifest> {
+pub fn read_semantic_manifest(root: &Path) -> Result<Rs3CacheManifest> {
     let path = root.join(".rs3-cache-manifest.json");
     serde_json::from_slice(&fs::read(&path).with_context(|| format!("reading {}", path.display()))?)
         .with_context(|| format!("decoding {}", path.display()))
 }
 
-fn manifest_fingerprint(manifest: &Rs3CacheManifest) -> String {
+pub fn manifest_fingerprint(manifest: &Rs3CacheManifest) -> String {
     format!(
         "{}.{}:{}:{}",
         manifest.build, manifest.subbuild, manifest.cache_fingerprint, manifest.tool_version
     )
 }
 
-fn compare_mode(mode: ArchiveMode) -> &'static str {
+pub fn compare_mode(mode: ArchiveMode) -> &'static str {
     match mode {
         ArchiveMode::Auto => "patch",
         ArchiveMode::Patch => "patch",
@@ -2975,7 +2092,7 @@ fn compare_mode(mode: ArchiveMode) -> &'static str {
     }
 }
 
-fn resolve_archive_mode(manifest: &CacheOverlayManifest, archive: &ArchiveDef) -> &'static str {
+pub fn resolve_archive_mode(manifest: &CacheOverlayManifest, archive: &ArchiveDef) -> &'static str {
     if let Some(mode) = lookup_archive_mode(&manifest.archive_modes, archive)
         && mode != ArchiveMode::Auto
     {
@@ -2999,7 +2116,7 @@ fn resolve_archive_mode(manifest: &CacheOverlayManifest, archive: &ArchiveDef) -
     }
 }
 
-fn lookup_archive_mode(
+pub fn lookup_archive_mode(
     modes: &BTreeMap<String, ArchiveMode>,
     archive: &ArchiveDef,
 ) -> Option<ArchiveMode> {
@@ -3015,7 +2132,7 @@ fn lookup_archive_mode(
     None
 }
 
-fn normalize_archive_key(value: &str) -> String {
+pub fn normalize_archive_key(value: &str) -> String {
     value
         .trim()
         .to_ascii_lowercase()
@@ -3024,21 +2141,21 @@ fn normalize_archive_key(value: &str) -> String {
         .collect::<String>()
 }
 
-fn archive_ref_key(archive_ref: &ArchiveRef) -> String {
+pub fn archive_ref_key(archive_ref: &ArchiveRef) -> String {
     match archive_ref {
         ArchiveRef::Name(name) => normalize_archive_key(name),
         ArchiveRef::Id(id) => id.to_string(),
     }
 }
 
-fn archive_for_manifest_ref(value: &ArchiveRef) -> Result<ArchiveDef> {
+pub fn archive_for_manifest_ref(value: &ArchiveRef) -> Result<ArchiveDef> {
     match value {
         ArchiveRef::Id(id) => archive_for_id(*id),
         ArchiveRef::Name(name) => archive_for_name(name),
     }
 }
 
-fn archive_for_name(name: &str) -> Result<ArchiveDef> {
+pub fn archive_for_name(name: &str) -> Result<ArchiveDef> {
     let normalized = normalize_archive_key(name);
     all_archives()
         .into_iter()
@@ -3049,14 +2166,14 @@ fn archive_for_name(name: &str) -> Result<ArchiveDef> {
         .with_context(|| format!("Unsupported archive reference {name}."))
 }
 
-fn archive_for_id(id: u32) -> Result<ArchiveDef> {
+pub fn archive_for_id(id: u32) -> Result<ArchiveDef> {
     all_archives()
         .into_iter()
         .find(|archive| archive.id == id)
         .with_context(|| format!("Unsupported archive id {id}."))
 }
 
-fn all_archives() -> Vec<ArchiveDef> {
+pub fn all_archives() -> Vec<ArchiveDef> {
     vec![
         ArchiveDef {
             id: 0,
@@ -3204,91 +2321,91 @@ fn all_archives() -> Vec<ArchiveDef> {
     ]
 }
 
-fn archive_config() -> ArchiveDef {
+pub fn archive_config() -> ArchiveDef {
     ArchiveDef {
         id: ARCHIVE_CONFIG,
         donor_id: ARCHIVE_CONFIG,
         name: "config",
     }
 }
-fn archive_interfaces() -> ArchiveDef {
+pub fn archive_interfaces() -> ArchiveDef {
     ArchiveDef {
         id: ARCHIVE_INTERFACES,
         donor_id: ARCHIVE_INTERFACES,
         name: "interfaces",
     }
 }
-fn archive_maps() -> ArchiveDef {
+pub fn archive_maps() -> ArchiveDef {
     ArchiveDef {
         id: 5,
         donor_id: 5,
         name: "mapsv2",
     }
 }
-fn archive_sprites() -> ArchiveDef {
+pub fn archive_sprites() -> ArchiveDef {
     ArchiveDef {
         id: 8,
         donor_id: 8,
         name: "sprites",
     }
 }
-fn archive_clientscripts() -> ArchiveDef {
+pub fn archive_clientscripts() -> ArchiveDef {
     ArchiveDef {
         id: ARCHIVE_CLIENTSCRIPTS,
         donor_id: ARCHIVE_CLIENTSCRIPTS,
         name: "scripts",
     }
 }
-fn archive_loc_config() -> ArchiveDef {
+pub fn archive_loc_config() -> ArchiveDef {
     ArchiveDef {
         id: ARCHIVE_LOC_CONFIG,
         donor_id: ARCHIVE_LOC_CONFIG,
         name: "loc.config",
     }
 }
-fn archive_npc_config() -> ArchiveDef {
+pub fn archive_npc_config() -> ArchiveDef {
     ArchiveDef {
         id: ARCHIVE_NPC_CONFIG,
         donor_id: ARCHIVE_NPC_CONFIG,
         name: "npc.config",
     }
 }
-fn archive_obj_config() -> ArchiveDef {
+pub fn archive_obj_config() -> ArchiveDef {
     ArchiveDef {
         id: ARCHIVE_OBJ_CONFIG,
         donor_id: ARCHIVE_OBJ_CONFIG,
         name: "obj.config",
     }
 }
-fn archive_materials() -> ArchiveDef {
+pub fn archive_materials() -> ArchiveDef {
     ArchiveDef {
         id: ARCHIVE_MATERIALS,
         donor_id: ARCHIVE_MATERIALS,
         name: "materials",
     }
 }
-fn archive_models_rt7() -> ArchiveDef {
+pub fn archive_models_rt7() -> ArchiveDef {
     ArchiveDef {
         id: ARCHIVE_MODELS_RT7,
         donor_id: ARCHIVE_MODELS_RT7,
         name: "modelsrt7",
     }
 }
-fn archive_anims_rt7() -> ArchiveDef {
+pub fn archive_anims_rt7() -> ArchiveDef {
     ArchiveDef {
         id: 48,
         donor_id: 48,
         name: "animsrt7",
     }
 }
-fn archive_dbtable_index() -> ArchiveDef {
+pub fn archive_dbtable_index() -> ArchiveDef {
     ArchiveDef {
         id: 49,
         donor_id: 49,
         name: "dbtableindex",
     }
 }
-fn archive_anim_keyframes() -> ArchiveDef {
+pub fn archive_anim_keyframes() -> ArchiveDef {
     ArchiveDef {
         id: 56,
         donor_id: 56,
@@ -3296,7 +2413,7 @@ fn archive_anim_keyframes() -> ArchiveDef {
     }
 }
 
-fn config_target(kind: RefKind, id: u32) -> ConfigTarget {
+pub fn config_target(kind: RefKind, id: u32) -> ConfigTarget {
     match kind {
         RefKind::Loc => ConfigTarget {
             archive: archive_loc_config(),
@@ -3409,7 +2526,7 @@ fn config_target(kind: RefKind, id: u32) -> ConfigTarget {
     }
 }
 
-fn resolve_model_target(builder: &PlanBuilder<'_>, id: u32) -> RawGroupTarget {
+pub fn resolve_model_target(builder: &PlanBuilder<'_>, id: u32) -> RawGroupTarget {
     let rt7_path = Path::new(&builder.roots.donor_raw_root).join(format!(
         "{}/{}.dat",
         archive_models_rt7().donor_id,
@@ -3441,14 +2558,14 @@ fn resolve_model_target(builder: &PlanBuilder<'_>, id: u32) -> RawGroupTarget {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CompareState {
+pub enum CompareState {
     MissingDonor,
     MissingTarget,
     Same,
     Conflict,
 }
 
-fn missing_config(builder: &mut PlanBuilder<'_>, target: &ConfigTarget) {
+pub fn missing_config(builder: &mut PlanBuilder<'_>, target: &ConfigTarget) {
     builder.add_blocked(OverlayBlockedIssue {
         kind: "missing".to_string(),
         archive: Some(target.archive.name.to_string()),
@@ -3461,11 +2578,11 @@ fn missing_config(builder: &mut PlanBuilder<'_>, target: &ConfigTarget) {
     });
 }
 
-fn is_group_present(index: &ArchiveIndex, group_id: u32) -> bool {
+pub fn is_group_present(index: &ArchiveIndex, group_id: u32) -> bool {
     index.group_id.binary_search(&group_id).is_ok()
 }
 
-fn parse_loc_ids(data: &[u8]) -> Result<Vec<u32>> {
+pub fn parse_loc_ids(data: &[u8]) -> Result<Vec<u32>> {
     let mut ids = Vec::new();
     let mut buf = Packet::new(data);
     let mut loc_id = -1_i32;
@@ -3511,7 +2628,7 @@ fn parse_loc_ids(data: &[u8]) -> Result<Vec<u32>> {
     Ok(ids)
 }
 
-fn parse_npc_ids(data: &[u8]) -> Result<Vec<u32>> {
+pub fn parse_npc_ids(data: &[u8]) -> Result<Vec<u32>> {
     let mut ids = Vec::new();
     let mut buf = Packet::new(data);
     while buf.len().saturating_sub(buf.pos()) >= 4 {
@@ -3521,7 +2638,7 @@ fn parse_npc_ids(data: &[u8]) -> Result<Vec<u32>> {
     Ok(ids)
 }
 
-fn skip_packet(buf: &mut Packet<'_>, count: usize) -> Result<()> {
+pub fn skip_packet(buf: &mut Packet<'_>, count: usize) -> Result<()> {
     let next = buf
         .pos()
         .checked_add(count)
@@ -3530,12 +2647,12 @@ fn skip_packet(buf: &mut Packet<'_>, count: usize) -> Result<()> {
 }
 
 #[derive(Default)]
-struct MultivarRefs {
-    varbit: Option<u32>,
-    varp: Option<u32>,
+pub struct MultivarRefs {
+    pub varbit: Option<u32>,
+    pub varp: Option<u32>,
 }
 
-fn scan_multivar_refs(ops: &[String]) -> MultivarRefs {
+pub fn scan_multivar_refs(ops: &[String]) -> MultivarRefs {
     let mut refs = MultivarRefs::default();
     for op in ops {
         if let Some(rest) = op.strip_prefix("multivar=varbit:")
@@ -3552,46 +2669,14 @@ fn scan_multivar_refs(ops: &[String]) -> MultivarRefs {
     refs
 }
 
-fn parse_first_u32(input: &str) -> Option<u32> {
+pub fn parse_first_u32(input: &str) -> Option<u32> {
     input
         .split([',', ' '])
         .next()
         .and_then(|value| value.parse::<u32>().ok())
 }
 
-fn normalize_graph_ref_kind(kind: &SemanticRefKey) -> Option<RefKind> {
-    Some(match kind {
-        SemanticRefKey::Graphic | SemanticRefKey::Spotanim | SemanticRefKey::Spot => RefKind::Spot,
-        SemanticRefKey::MultivarVarbit => RefKind::VarBit,
-        SemanticRefKey::MultivarVarp => RefKind::Varp,
-        SemanticRefKey::Anim => RefKind::Anim,
-        SemanticRefKey::Material => RefKind::Material,
-        SemanticRefKey::Model => RefKind::Model,
-        SemanticRefKey::Sprite => RefKind::Sprite,
-        SemanticRefKey::SeqGroup => RefKind::SeqGroup,
-        SemanticRefKey::Interface => RefKind::Interface,
-        SemanticRefKey::Script => RefKind::Script,
-        SemanticRefKey::Obj => RefKind::Obj,
-        SemanticRefKey::Npc => RefKind::Npc,
-        SemanticRefKey::Loc => RefKind::Loc,
-        SemanticRefKey::Seq => RefKind::Seq,
-        SemanticRefKey::Bas => RefKind::Bas,
-        SemanticRefKey::Enum => RefKind::Enum,
-        SemanticRefKey::Struct => RefKind::Struct,
-        SemanticRefKey::DbTable => RefKind::DbTable,
-        SemanticRefKey::DbRow => RefKind::DbRow,
-        SemanticRefKey::Varp => RefKind::Varp,
-        SemanticRefKey::VarBit => RefKind::VarBit,
-        SemanticRefKey::Quest => RefKind::Quest,
-        _ => return None,
-    })
-}
-
-fn semantic_refs_file_name(kind: &str) -> &str {
-    if kind == "spotanim" { "spot" } else { kind }
-}
-
-fn semantic_kind_to_ref_kind(kind: &str) -> RefKind {
+pub fn semantic_kind_to_ref_kind(kind: &str) -> RefKind {
     if kind == "spotanim" {
         RefKind::Spot
     } else {
@@ -3599,7 +2684,7 @@ fn semantic_kind_to_ref_kind(kind: &str) -> RefKind {
     }
 }
 
-fn db_row_dependency_kinds(table_id: u32) -> HashSet<RefKind> {
+pub fn db_row_dependency_kinds(table_id: u32) -> HashSet<RefKind> {
     match table_id {
         74 => HashSet::from([RefKind::Obj, RefKind::Npc, RefKind::Loc]),
         88 => HashSet::from([RefKind::Obj, RefKind::DbRow]),
@@ -3619,7 +2704,7 @@ fn db_row_dependency_kinds(table_id: u32) -> HashSet<RefKind> {
     }
 }
 
-fn normalize_region(region: RegionSpec) -> Result<u32> {
+pub fn normalize_region(region: RegionSpec) -> Result<u32> {
     match region {
         RegionSpec::Id(id) => Ok(id),
         RegionSpec::Text(text) => {
@@ -3639,11 +2724,11 @@ fn normalize_region(region: RegionSpec) -> Result<u32> {
     }
 }
 
-fn pack_map_square_group_id(region_x: u32, region_z: u32) -> u32 {
+pub fn pack_map_square_group_id(region_x: u32, region_z: u32) -> u32 {
     region_x | (region_z << 7)
 }
 
-fn selected_archive_ids(builder: &PlanBuilder<'_>) -> Vec<u32> {
+pub fn selected_archive_ids(builder: &PlanBuilder<'_>) -> Vec<u32> {
     let mut ids = BTreeSet::new();
     ids.extend(builder.group_selections.keys().copied());
     ids.extend(
@@ -3655,7 +2740,7 @@ fn selected_archive_ids(builder: &PlanBuilder<'_>) -> Vec<u32> {
     ids.into_iter().collect()
 }
 
-fn group_selections_for_report(builder: &PlanBuilder<'_>) -> Result<Vec<OverlayPlanArchiveGroups>> {
+pub fn group_selections_for_report(builder: &PlanBuilder<'_>) -> Result<Vec<OverlayPlanArchiveGroups>> {
     let mut rows = Vec::new();
     for (archive_id, groups) in &builder.group_selections {
         let archive = archive_for_id(*archive_id)?;
@@ -3670,7 +2755,7 @@ fn group_selections_for_report(builder: &PlanBuilder<'_>) -> Result<Vec<OverlayP
     Ok(rows)
 }
 
-fn file_selections_for_report(builder: &PlanBuilder<'_>) -> Result<Vec<OverlayPlanArchiveFiles>> {
+pub fn file_selections_for_report(builder: &PlanBuilder<'_>) -> Result<Vec<OverlayPlanArchiveFiles>> {
     let mut rows = Vec::new();
     for ((archive_id, group_id), file_ids) in &builder.file_selections {
         let archive = archive_for_id(*archive_id)?;
@@ -3686,7 +2771,7 @@ fn file_selections_for_report(builder: &PlanBuilder<'_>) -> Result<Vec<OverlayPl
     Ok(rows)
 }
 
-fn dependencies_for_report(builder: &PlanBuilder<'_>) -> BTreeMap<String, Vec<u32>> {
+pub fn dependencies_for_report(builder: &PlanBuilder<'_>) -> BTreeMap<String, Vec<u32>> {
     let mut out = BTreeMap::new();
     for (kind, ids) in &builder.dependencies {
         out.insert(kind.as_str().to_string(), ids.iter().copied().collect());
@@ -3694,19 +2779,19 @@ fn dependencies_for_report(builder: &PlanBuilder<'_>) -> BTreeMap<String, Vec<u3
     out
 }
 
-fn sorted_set(values: Option<&BTreeSet<u32>>) -> Vec<u32> {
+pub fn sorted_set(values: Option<&BTreeSet<u32>>) -> Vec<u32> {
     values
         .map(|set| set.iter().copied().collect())
         .unwrap_or_default()
 }
 
-fn sorted_iter(values: impl Iterator<Item = u32>) -> Vec<u32> {
+pub fn sorted_iter(values: impl Iterator<Item = u32>) -> Vec<u32> {
     let mut out = values.collect::<Vec<_>>();
     out.sort_unstable();
     out
 }
 
-fn dependency_site_label(site: &DependencySite) -> String {
+pub fn dependency_site_label(site: &DependencySite) -> String {
     format!(
         "{}_{} at {}",
         site.entity_type.as_label(),
@@ -3715,7 +2800,7 @@ fn dependency_site_label(site: &DependencySite) -> String {
     )
 }
 
-fn scan_rt7_model_material_ids(data: &[u8]) -> Result<Vec<u32>> {
+pub fn scan_rt7_model_material_ids(data: &[u8]) -> Result<Vec<u32>> {
     if data.is_empty() || data[0] != 2 {
         return Ok(Vec::new());
     }
@@ -3749,7 +2834,7 @@ fn scan_rt7_model_material_ids(data: &[u8]) -> Result<Vec<u32>> {
     Ok(material_ids.into_iter().collect())
 }
 
-fn scan_rt7_legacy_meshes(
+pub fn scan_rt7_legacy_meshes(
     data: &[u8],
     pos: &mut usize,
     mesh_count: usize,
@@ -3806,7 +2891,7 @@ fn scan_rt7_legacy_meshes(
     Ok(())
 }
 
-fn scan_rt7_shared_mesh(
+pub fn scan_rt7_shared_mesh(
     data: &[u8],
     pos: &mut usize,
     mesh_count: usize,
@@ -3864,13 +2949,13 @@ fn scan_rt7_shared_mesh(
     Ok(())
 }
 
-fn add_rt7_material_id(material_ids: &mut BTreeSet<u32>, material_argument: u16) {
+pub fn add_rt7_material_id(material_ids: &mut BTreeSet<u32>, material_argument: u16) {
     if material_argument > 0 {
         material_ids.insert(u32::from(material_argument - 1));
     }
 }
 
-fn rt7_g1(data: &[u8], pos: &mut usize, field: &str) -> Result<u8> {
+pub fn rt7_g1(data: &[u8], pos: &mut usize, field: &str) -> Result<u8> {
     ensure!(
         *pos < data.len(),
         "{field} exceeds RT7 model length at {pos} >= {}",
@@ -3881,7 +2966,7 @@ fn rt7_g1(data: &[u8], pos: &mut usize, field: &str) -> Result<u8> {
     Ok(value)
 }
 
-fn rt7_g2le(data: &[u8], pos: &mut usize, field: &str) -> Result<u16> {
+pub fn rt7_g2le(data: &[u8], pos: &mut usize, field: &str) -> Result<u16> {
     ensure!(
         pos.saturating_add(2) <= data.len(),
         "{field} exceeds RT7 model length at {} + 2 > {}",
@@ -3893,7 +2978,7 @@ fn rt7_g2le(data: &[u8], pos: &mut usize, field: &str) -> Result<u16> {
     Ok(value)
 }
 
-fn rt7_g4le(data: &[u8], pos: &mut usize, field: &str) -> Result<u32> {
+pub fn rt7_g4le(data: &[u8], pos: &mut usize, field: &str) -> Result<u32> {
     ensure!(
         pos.saturating_add(4) <= data.len(),
         "{field} exceeds RT7 model length at {} + 4 > {}",
@@ -3905,7 +2990,7 @@ fn rt7_g4le(data: &[u8], pos: &mut usize, field: &str) -> Result<u32> {
     Ok(value)
 }
 
-fn rt7_skip(data: &[u8], pos: &mut usize, count: usize, field: &str) -> Result<()> {
+pub fn rt7_skip(data: &[u8], pos: &mut usize, count: usize, field: &str) -> Result<()> {
     ensure!(
         pos.saturating_add(count) <= data.len(),
         "{field} exceeds RT7 model length at {} + {} > {}",
@@ -3915,188 +3000,4 @@ fn rt7_skip(data: &[u8], pos: &mut usize, count: usize, field: &str) -> Result<(
     );
     *pos += count;
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{
-        OverlayBlockedIssue, OverlayWarning, RefGraphRepository, build_overlay_proof,
-        classify_warning_issue, normalize_archive_key, write_overlay_plan_audit,
-    };
-    use std::fs;
-
-    #[test]
-    fn normalizes_archive_key() {
-        assert_eq!(
-            normalize_archive_key("textures.png.mipped"),
-            "texturespngmipped"
-        );
-        assert_eq!(normalize_archive_key("vfx2"), "vfx2");
-    }
-
-    #[test]
-    fn fallback_warning_is_heuristic_gap() {
-        let issue = classify_warning_issue(
-            1,
-            &OverlayWarning {
-                kind: "risk".to_string(),
-                message:
-                    "refs/loc.json has no entry for loc_1; falling back to donor binary dependency scan where supported."
-                        .to_string(),
-                ref_kind: Some("loc".to_string()),
-                archive: None,
-                id: None,
-            },
-        )
-        .expect("proof issue");
-        assert_eq!(issue.kind, "heuristic");
-        assert_eq!(issue.location, "warning[1]");
-    }
-
-    #[test]
-    fn heuristic_gap_blocks_when_not_allowed() {
-        let proof = build_overlay_proof(
-            &[OverlayWarning {
-                kind: "risk".to_string(),
-                message: "refs/loc.json missing under semantic root; run cache:semantic:sync-947."
-                    .to_string(),
-                ref_kind: Some("loc".to_string()),
-                archive: None,
-                id: None,
-            }],
-            &[],
-            super::ProofState {
-                script_checked: 0,
-                script_blocked: 0,
-                script_valid: 0,
-                component_checked: 0,
-                component_blocked: 0,
-                component_valid: 0,
-                blockers: Vec::new(),
-            },
-            false,
-            910,
-            947,
-        );
-        assert_eq!(proof.status, "blocked");
-        assert_eq!(proof.heuristic_site_count, 1);
-    }
-
-    #[test]
-    fn heuristic_gap_is_allowed_when_enabled() {
-        let proof = build_overlay_proof(
-            &[OverlayWarning {
-                kind: "risk".to_string(),
-                message: "refs/loc.json missing under semantic root; run cache:semantic:sync-947."
-                    .to_string(),
-                ref_kind: Some("loc".to_string()),
-                archive: None,
-                id: None,
-            }],
-            &[],
-            super::ProofState {
-                script_checked: 0,
-                script_blocked: 0,
-                script_valid: 0,
-                component_checked: 0,
-                component_blocked: 0,
-                component_valid: 0,
-                blockers: Vec::new(),
-            },
-            true,
-            910,
-            947,
-        );
-        assert_eq!(proof.status, "ok");
-        assert_eq!(proof.heuristic_site_count, 1);
-        assert!(!proof.strict);
-    }
-
-    #[test]
-    fn audit_writes_expected_files() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let proof = build_overlay_proof(
-            &[],
-            &[OverlayBlockedIssue {
-                kind: "conflict".to_string(),
-                archive: None,
-                archive_id: None,
-                group_id: None,
-                file_id: None,
-                id: Some(7),
-                ref_kind: Some("varbit".to_string()),
-                message: "varbit_7 differs".to_string(),
-            }],
-            super::ProofState {
-                script_checked: 1,
-                script_blocked: 1,
-                script_valid: 0,
-                component_checked: 0,
-                component_blocked: 0,
-                component_valid: 0,
-                blockers: vec![super::OverlayProofIssue {
-                    kind: "unsupported",
-                    location: "script_42".to_string(),
-                    ref_kind: Some("script".to_string()),
-                    message: "script_42 target validation failed".to_string(),
-                }],
-            },
-            false,
-            910,
-            947,
-        );
-
-        let audit = write_overlay_plan_audit(temp.path(), &proof, &[]).expect("write audit");
-        assert!(audit.relative_paths.contains(&"summary.json".to_string()));
-        assert!(temp.path().join("summary.json").is_file());
-        assert!(temp.path().join("unsupported_sites.jsonl").is_file());
-        assert!(temp.path().join("scripts_failed.jsonl").is_file());
-    }
-
-    #[test]
-    fn manifest_deserializes_script_and_interface_imports() {
-        let manifest: super::CacheOverlayManifest = serde_json::from_value(serde_json::json!({
-            "roots": {
-                "baseRawRoot": "/tmp/base-raw",
-                "donorRawRoot": "/tmp/donor-raw",
-                "baseSemanticRoot": "/tmp/base-semantic",
-                "donorSemanticRoot": "/tmp/donor-semantic",
-                "basePackRoot": "/tmp/base-pack",
-                "outputPackRoot": "/tmp/output-pack",
-                "clientOutputPackRoot": "/tmp/client-pack"
-            },
-            "imports": {
-                "interfaces": [1213, 1218],
-                "scripts": [548, 5690]
-            }
-        }))
-        .expect("manifest");
-
-        assert_eq!(manifest.imports.interfaces, vec![1213, 1218]);
-        assert_eq!(manifest.imports.scripts, vec![548, 5690]);
-    }
-
-    #[test]
-    fn ref_repository_keeps_empty_entries_and_loads_varp_kind() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let refs = temp.path().join("refs");
-        fs::create_dir_all(&refs).expect("refs dir");
-        fs::write(refs.join("bas.json"), "{\n  \"1159\": {}\n}\n").expect("bas refs");
-        fs::write(
-            refs.join("varp.json"),
-            "{\n  \"player\": {\n    \"42\": {\"varbit\": [7]}\n  }\n}\n",
-        )
-        .expect("varp refs");
-
-        let repo = RefGraphRepository::new(temp.path()).expect("repo");
-        assert!(repo.has_kind("bas"));
-        assert!(repo.get_refs("bas", 1159).is_some());
-        assert!(repo.has_kind("varp"));
-        assert_eq!(
-            repo.get_refs("varp", 42)
-                .and_then(|refs| refs.get(&super::SemanticRefKey::VarBit))
-                .expect("varp refs"),
-            &vec![7]
-        );
-    }
 }
