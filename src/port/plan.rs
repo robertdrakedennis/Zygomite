@@ -122,6 +122,7 @@ pub fn compute(opts: &PlanOptions<'_>) -> Result<PlanReport> {
         source: InterfaceSource::Pack(opts.donor_pack_root),
         json: false,
         transitive: None,
+        data_closure: false,
     })?;
     let transitive = explain::compute_transitive(
         &explained.requires.scripts,

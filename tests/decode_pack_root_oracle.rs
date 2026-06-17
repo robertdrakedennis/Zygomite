@@ -262,6 +262,7 @@ fn live_explain_interface_falls_back_to_donor() {
         source: InterfaceSource::Pack(&runtime),
         json: false,
         transitive: None,
+        data_closure: false,
     })
     .unwrap_or_else(|e| panic!("explain donor-only interface {group} via fallback: {e}"));
 

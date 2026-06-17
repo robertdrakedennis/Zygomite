@@ -882,6 +882,258 @@ fn read_locals(
     }
 }
 
+// ── data-closure simulation (gap #2) ─────────────────────────────────────────
+//
+// [`simulate`] is a leaner, observer-driven sibling of [`generate`]: it replays a
+// script over the SAME three-stack model and reuses the SAME private helpers
+// ([`Stacks`]/[`Slot`]/[`stack_of`]/[`is_hook_command`]/[`hook`]/[`block_boundaries`]),
+// but tracks only per-slot literal *constants* instead of type-variable nodes, so it
+// needs no [`TypeInfer`]. It powers `explain-interface --data-closure`
+// ([`crate::data_closure`]): surfacing which config ids a script's commands consume.
+//
+// Unlike [`generate`] (which bails the whole script on the first unmodellable
+// instruction), [`simulate`] is robust: an opaque instruction marks the model
+// unreliable and clears the stacks, suppressing observer callbacks only until the
+// next basic-block boundary restores the (CS2-guaranteed) empty stack. A single
+// opaque op therefore costs at most the refs in its basic block, never the script.
+
+/// A literal constant occupying an operand-stack slot, recovered by [`simulate`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConstArg {
+    Int(i32),
+    Str(String),
+}
+
+/// Observer for [`simulate`]. Callbacks fire only while the stack model is reliable
+/// (see the module note above), so a recorded reference is always correctly aligned.
+pub trait SimObserver {
+    /// Whether `on_typed_arg` should fire for this argument type. Defaults to `false`
+    /// so an observer pays nothing for argument types it does not care about.
+    fn interested_in(&self, _ty: Type) -> bool {
+        false
+    }
+    /// A typed command argument of semantic type `ty`, supplied by `value` (`Some`
+    /// when it was a push-constant literal, `None` when computed / a local / a call
+    /// result). Fired only for types where [`Self::interested_in`] returned `true`.
+    fn on_typed_arg(&mut self, _ty: Type, _value: Option<ConstArg>) {}
+    /// A `return` reached with `int`/`obj`/`long` values live on the three stacks —
+    /// the script's return arity at this point.
+    fn on_return(&mut self, _int: usize, _obj: usize, _long: usize) {}
+}
+
+/// A throwaway stack-slot node for [`simulate`], which never inspects `Slot::node`
+/// (it reads only the literal). Any node value is correct.
+fn dummy_node() -> Node {
+    Node::Expr(0, 0)
+}
+
+/// Replay `script` over the constant-tracking three-stack model, driving `obs`.
+/// `callee` supplies a gosub target's `(arg, return)` arities (the data-closure
+/// driver derives these by a local fixed point). Never panics or aborts the walk;
+/// see the module note for the reliability/degradation contract.
+// The `degrade!` macro's `continue` is load-bearing where it expands mid-arm (inside
+// `pop!`, to abort the rest of the instruction); clippy only sees it as redundant in
+// the tail-position expansions. One uniform macro is clearer than splitting it.
+#[allow(clippy::needless_continue)]
+pub fn simulate(
+    script: &CompiledScript,
+    sigs: &SignatureTable,
+    callee: &dyn Fn(i32) -> Option<CalleeSig>,
+    obs: &mut dyn SimObserver,
+) {
+    let boundaries = block_boundaries(script);
+    let mut stacks = Stacks::default();
+    // `reliable` is false between an unmodellable instruction and the next block
+    // boundary; callbacks are suppressed and pops can't underflow-bail in that window.
+    let mut reliable = true;
+
+    macro_rules! degrade {
+        () => {{
+            reliable = false;
+            stacks.clear();
+            continue;
+        }};
+    }
+    macro_rules! pop {
+        ($stk:expr) => {
+            match stacks.pop($stk) {
+                Some(node) => node,
+                None => degrade!(),
+            }
+        };
+    }
+
+    for (i, ins) in script.code.iter().enumerate() {
+        // A branch/switch target: the CS2 stack is empty here, so reset and trust.
+        if boundaries.contains(&i) {
+            stacks.clear();
+            reliable = true;
+        }
+        if !reliable {
+            continue;
+        }
+        match ins.command.as_str() {
+            // ── constants (literal retained on the slot) ──
+            "push_constant_int" => {
+                let lit = if let Operand::Int(v) = ins.operand {
+                    Some(v)
+                } else {
+                    None
+                };
+                stacks.push_const(Stack::Int, dummy_node(), lit, None);
+            }
+            "push_constant_string" => match &ins.operand {
+                Operand::Str(s) => {
+                    stacks.push_const(Stack::Obj, dummy_node(), None, Some(s.clone()));
+                }
+                other => {
+                    let lit = if let Operand::Int(v) = other {
+                        Some(*v)
+                    } else {
+                        None
+                    };
+                    stacks.push_const(Stack::Int, dummy_node(), lit, None);
+                }
+            },
+            "push_long_constant" => stacks.push(Stack::Long, dummy_node()),
+
+            // ── locals / vars / varbits (non-constant slots) ──
+            "push_int_local" | "push_var" | "push_varbit" => stacks.push(Stack::Int, dummy_node()),
+            "push_string_local" => stacks.push(Stack::Obj, dummy_node()),
+            "push_long_local" => stacks.push(Stack::Long, dummy_node()),
+            "pop_int_local" | "pop_int_discard" | "pop_var" | "pop_varbit" => {
+                pop!(Stack::Int);
+            }
+            "pop_string_local" | "pop_string_discard" => {
+                pop!(Stack::Obj);
+            }
+            "pop_long_local" | "pop_long_discard" => {
+                pop!(Stack::Long);
+            }
+
+            // ── control flow ──
+            "branch" => {}
+            "branch_if_true" | "branch_if_false" => {
+                pop!(Stack::Int);
+            }
+            "branch_not"
+            | "branch_equals"
+            | "branch_less_than"
+            | "branch_greater_than"
+            | "branch_less_than_or_equals"
+            | "branch_greater_than_or_equals" => {
+                pop!(Stack::Int);
+                pop!(Stack::Int);
+            }
+            "long_branch_not"
+            | "long_branch_equals"
+            | "long_branch_less_than"
+            | "long_branch_greater_than"
+            | "long_branch_less_than_or_equals"
+            | "long_branch_greater_than_or_equals" => {
+                pop!(Stack::Long);
+                pop!(Stack::Long);
+            }
+            "switch" | "text_switch" | "worldlist_switch" => {
+                pop!(Stack::Int);
+            }
+            "return" => {
+                obs.on_return(stacks.int.len(), stacks.obj.len(), stacks.long.len());
+                stacks.clear();
+            }
+
+            // ── variadic string join ──
+            "join_string" => {
+                let count = match ins.operand {
+                    Operand::Count(n) | Operand::Int(n) => usize::try_from(n).unwrap_or(0),
+                    _ => degrade!(),
+                };
+                for _ in 0..count {
+                    pop!(Stack::Obj);
+                }
+                stacks.push(Stack::Obj, dummy_node());
+            }
+
+            // ── calls ──
+            "gosub_with_params" => {
+                let Operand::Script(target) = ins.operand else {
+                    degrade!();
+                };
+                let Some(sig) = callee(target) else {
+                    degrade!();
+                };
+                for _ in 0..sig.arg_long {
+                    pop!(Stack::Long);
+                }
+                for _ in 0..sig.arg_obj {
+                    pop!(Stack::Obj);
+                }
+                for _ in 0..sig.arg_int {
+                    pop!(Stack::Int);
+                }
+                for _ in 0..sig.ret_int {
+                    stacks.push(Stack::Int, dummy_node());
+                }
+                for _ in 0..sig.ret_obj {
+                    stacks.push(Stack::Obj, dummy_node());
+                }
+                for _ in 0..sig.ret_long {
+                    stacks.push(Stack::Long, dummy_node());
+                }
+            }
+
+            // ── variadic UI hooks (reuse generate's descriptor-driven pop) ──
+            cmd if is_hook_command(cmd) => {
+                if hook(cmd, &mut stacks).is_err() {
+                    degrade!();
+                }
+            }
+
+            // ── generic command: typed signature (records refs), else counts ──
+            cmd => {
+                if let Some(sig) = sigs.typed.get(cmd) {
+                    for arg_ty in sig.args.iter().rev() {
+                        let Some(slot) = stacks.pop_slot(stack_of(*arg_ty)) else {
+                            degrade!();
+                        };
+                        if obs.interested_in(*arg_ty) {
+                            let value = slot
+                                .int_lit
+                                .map(ConstArg::Int)
+                                .or_else(|| slot.str_lit.map(ConstArg::Str));
+                            obs.on_typed_arg(*arg_ty, value);
+                        }
+                    }
+                    for res_ty in &sig.results {
+                        stacks.push(stack_of(*res_ty), dummy_node());
+                    }
+                } else if let Some(c) = sigs.counts.get(cmd) {
+                    for _ in 0..c.long_pops {
+                        pop!(Stack::Long);
+                    }
+                    for _ in 0..c.obj_pops {
+                        pop!(Stack::Obj);
+                    }
+                    for _ in 0..c.int_pops {
+                        pop!(Stack::Int);
+                    }
+                    for _ in 0..(c.int_pushes) {
+                        stacks.push(Stack::Int, dummy_node());
+                    }
+                    for _ in 0..c.obj_pushes {
+                        stacks.push(Stack::Obj, dummy_node());
+                    }
+                    for _ in 0..c.long_pushes {
+                        stacks.push(Stack::Long, dummy_node());
+                    }
+                } else {
+                    degrade!();
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

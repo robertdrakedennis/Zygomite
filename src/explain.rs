@@ -25,7 +25,9 @@ use crate::interface::component::{
     ExplainedInterface, decode_interface_group_raw, explain_interface_group,
 };
 use crate::js5pack::PackArchive;
-use crate::script::{OpcodeBook, ScriptArgSignature, decode_script, decode_script_arg_signature};
+use crate::script::{
+    CompiledScript, OpcodeBook, ScriptArgSignature, decode_script, decode_script_arg_signature,
+};
 
 /// Default runtime pack root (the 910-base / 948-overlay pack the client runs).
 /// Relative to the crate working directory, mirroring the `font` subcommand.
@@ -63,6 +65,11 @@ pub struct ExplainInterfaceOptions<'a> {
     /// closure of the interface's component-bound scripts and the count missing
     /// from the 910 base (the splice burden). Sourced from [`Self::transitive`].
     pub transitive: Option<TransitiveOptions<'a>>,
+    /// When set, additionally compute and report the transitive DATA/state closure
+    /// (gap #2): the config ids (varbit / var / enum / struct / dbtable / param / …)
+    /// the whole script closure reads. Requires [`Self::transitive`] sourcing (it
+    /// runs over the same closure); the CLI enables transitive whenever this is set.
+    pub data_closure: bool,
 }
 
 /// Where `--transitive` sources its script call graph and 910-base roster.
@@ -234,6 +241,37 @@ pub fn compute_transitive(
     Ok(transitive_script_closure(seeds, &source, &base))
 }
 
+/// Decode every script in a transitive closure (by canonical group id) from the
+/// donor flat cache, for the `--data-closure` pass. Each clientscripts group ships
+/// one script (its min file). Groups that fail to decode are skipped (the pass is
+/// best-effort over what decodes); the returned ids are the bare group ids.
+pub fn decode_closure_scripts(
+    closure: &BTreeSet<u32>,
+    opts: &TransitiveOptions<'_>,
+) -> Result<Vec<(i32, CompiledScript)>> {
+    let cache = FlatCache::open(opts.scripts_cache).with_context(|| {
+        format!(
+            "open donor scripts cache {} for data closure",
+            opts.scripts_cache.display()
+        )
+    })?;
+    let opcode_book = OpcodeBook::load(opts.data_dir, opts.scripts_build, opts.scripts_subbuild)
+        .context("load opcode book for data-closure script decode")?;
+    let index = cache
+        .archive_index(ARCHIVE_CLIENTSCRIPTS)
+        .context("read clientscripts archive index for data closure")?;
+    let mut out = Vec::with_capacity(closure.len());
+    for &group in closure {
+        let files = cache.group_files_with_index(&index, ARCHIVE_CLIENTSCRIPTS, group)?;
+        if let Some((_, data)) = files.into_iter().min_by_key(|(file, _)| *file)
+            && let Ok(script) = decode_script(&data, &opcode_book, opts.scripts_build)
+        {
+            out.push((group as i32, script));
+        }
+    }
+    Ok(out)
+}
+
 /// Run the command: decode, then print either JSON or the human table. When
 /// `--transitive` is set, also compute and append the transitive closure block.
 pub fn run(opts: &ExplainInterfaceOptions<'_>) -> Result<()> {
@@ -247,8 +285,20 @@ pub fn run(opts: &ExplainInterfaceOptions<'_>) -> Result<()> {
         .map(|t| compute_transitive(&explained.requires.scripts, t))
         .transpose()?;
 
+    // The data closure runs over the same transitive closure (gap #2). The CLI only
+    // sets `data_closure` together with `transitive` sourcing, so both are present.
+    let data_closure = match (opts.data_closure, &opts.transitive, &transitive) {
+        (true, Some(t), Some(transitive)) => {
+            let scripts = decode_closure_scripts(&transitive.closure, t)?;
+            let refs: Vec<(i32, &CompiledScript)> =
+                scripts.iter().map(|(id, s)| (*id, s)).collect();
+            Some(crate::data_closure::compute(&refs, t.scripts_build))
+        }
+        _ => None,
+    };
+
     if opts.json {
-        let value = build_json(&explained, transitive.as_ref())?;
+        let value = build_json(&explained, transitive.as_ref(), data_closure.as_ref())?;
         println!(
             "{}",
             serde_json::to_string_pretty(&value).context("encode explain JSON")?
@@ -257,6 +307,9 @@ pub fn run(opts: &ExplainInterfaceOptions<'_>) -> Result<()> {
         print!("{}", render_human(&explained));
         if let Some(transitive) = &transitive {
             print!("{}", render_transitive_human(&explained, transitive));
+        }
+        if let Some(dc) = &data_closure {
+            print!("{}", crate::data_closure::render_human(dc, 12));
         }
     }
     Ok(())
@@ -268,8 +321,18 @@ pub fn run(opts: &ExplainInterfaceOptions<'_>) -> Result<()> {
 fn build_json(
     explained: &ExplainedInterface,
     transitive: Option<&TransitiveScripts>,
+    data_closure: Option<&crate::data_closure::DataClosure>,
 ) -> Result<serde_json::Value> {
     let mut value = serde_json::to_value(explained).context("encode explained interface")?;
+    if let Some(dc) = data_closure {
+        let obj = value
+            .as_object_mut()
+            .context("explained interface JSON must be an object")?;
+        obj.insert(
+            "data_closure".to_string(),
+            serde_json::to_value(dc).context("encode data closure")?,
+        );
+    }
     if let Some(transitive) = transitive {
         let obj = value
             .as_object_mut()

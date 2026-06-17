@@ -82,6 +82,12 @@ pub enum Command {
         /// compares against the 910-base roster at `--base-pack-root`.
         #[arg(long)]
         transitive: bool,
+        /// Also report the transitive DATA/state closure (gap #2): the config ids
+        /// (varbit / var / enum / struct / dbtable / param / …) the whole script
+        /// closure reads, via a constant-tracking stack simulation. Runs over the
+        /// same closure as `--transitive` (which it enables), sourced identically.
+        #[arg(long)]
+        data_closure: bool,
         /// Flat cache dir holding the donor clientscripts (archive 12) to walk for
         /// `--transitive`. Defaults to the global `--cache-dir`.
         #[arg(long)]
@@ -94,6 +100,27 @@ pub enum Command {
         /// to compute the splice burden for `--transitive`. READ-ONLY.
         #[arg(long, default_value = crate::explain::DEFAULT_BASE_PACK_ROOT)]
         base_pack_root: PathBuf,
+    },
+    /// Find a feature in the cache by text, and flag what is NEW between builds —
+    /// discovery as a command instead of an ad-hoc `grep` + `comm`. `--query`
+    /// case-insensitively searches interface component text/names/ops and (unless
+    /// `--no-scripts`) CS2 string constants; `--against-cache` tags each hit `NEW`
+    /// when its id is absent from that baseline build (and, with no `--query`, lists
+    /// every new interface/script id). Searches the global `--cache-dir`/`--build`.
+    Discover {
+        /// Case-insensitive search term. Omit to list ids new vs `--against-cache`.
+        #[arg(long)]
+        query: Option<String>,
+        /// Baseline flat cache (the "from" build, e.g. `cache/unpacked/910`) to tag
+        /// hits NEW against / diff for new ids.
+        #[arg(long)]
+        against_cache: Option<PathBuf>,
+        /// Skip scanning CS2 script string constants (search interfaces only).
+        #[arg(long)]
+        no_scripts: bool,
+        /// Emit the result as JSON instead of the human report.
+        #[arg(long)]
+        json: bool,
     },
     /// Interface-group tooling. `interface transcode` downcodes a donor (948)
     /// interface group's components to the 910 client wire format so a
@@ -1467,6 +1494,7 @@ pub fn run(cli: Cli) -> Result<()> {
         raw_dat,
         decode_build,
         transitive,
+        data_closure,
         scripts_cache,
         scripts_build,
         base_pack_root,
@@ -1480,17 +1508,19 @@ pub fn run(cli: Cli) -> Result<()> {
         // (defaulting to the global `--cache-dir`/`--build`) and scores it against
         // the 910-base roster. The donor cache holds the un-down-coded bodies, so
         // it — not the runtime overlay pack — is the source of the splice burden.
+        // `--data-closure` runs over the same closure, so it enables the same walk.
         let scripts_cache_path = scripts_cache
             .as_deref()
             .or(cli.cache_dir.as_deref())
             .unwrap_or_else(|| Path::new("../../cache/unpacked/948"));
-        let transitive_opts = transitive.then(|| crate::explain::TransitiveOptions {
-            scripts_cache: scripts_cache_path,
-            scripts_build: scripts_build.unwrap_or(cli.build),
-            scripts_subbuild: cli.subbuild,
-            data_dir: cli.data_dir.as_path(),
-            base_pack_root: base_pack_root.as_path(),
-        });
+        let transitive_opts =
+            (*transitive || *data_closure).then(|| crate::explain::TransitiveOptions {
+                scripts_cache: scripts_cache_path,
+                scripts_build: scripts_build.unwrap_or(cli.build),
+                scripts_subbuild: cli.subbuild,
+                data_dir: cli.data_dir.as_path(),
+                base_pack_root: base_pack_root.as_path(),
+            });
         return Ok(crate::explain::run(
             &crate::explain::ExplainInterfaceOptions {
                 interface: *id,
@@ -1498,8 +1528,31 @@ pub fn run(cli: Cli) -> Result<()> {
                 source,
                 json: *json,
                 transitive: transitive_opts,
+                data_closure: *data_closure,
             },
         )?);
+    }
+    if let Command::Discover {
+        query,
+        against_cache,
+        no_scripts,
+        json,
+    } = &cli.command
+    {
+        let cache_dir = cli
+            .cache_dir
+            .as_deref()
+            .unwrap_or_else(|| Path::new("../../cache/unpacked/948"));
+        return Ok(crate::discover::run(&crate::discover::DiscoverOptions {
+            query: query.clone(),
+            build: cli.build,
+            subbuild: cli.subbuild,
+            data_dir: cli.data_dir.as_path(),
+            cache_dir,
+            against_cache: against_cache.as_deref(),
+            search_scripts: !no_scripts,
+            json: *json,
+        })?);
     }
     if let Command::Decode {
         archive,
@@ -1990,6 +2043,7 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::ExplainInterface { .. } => unreachable!("handled before cache open"),
         Command::Interface { .. } => unreachable!("handled before cache open"),
         Command::Decode { .. } => unreachable!("handled before cache open"),
+        Command::Discover { .. } => unreachable!("handled before cache open"),
         Command::ExtractCs2Registry { .. } => unreachable!("handled before cache open"),
         Command::GenerateCs2Java { .. } => unreachable!("handled before cache open"),
         Command::ExtractProtocol { .. } => unreachable!("handled before cache open"),
