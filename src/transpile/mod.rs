@@ -32,7 +32,7 @@ pub use reversible_format::{
 };
 pub use rs_parse::parse_runescript;
 pub use runescript::{RuneScriptContext, render_runescript};
-pub use scope::{LocalType, Scope, Scopes, Symbol, SymbolKind, SymbolTable};
+pub use scope::SymbolTable;
 pub use structured::{AssignmentTarget, StructuredScript, StructuredStmt, SwitchCaseStmt};
 pub use structured_writer::{BuiltStructuredScript, StructuredWriter};
 pub use ts_lower::{ReverseCompileContext, lower_structured_script};
@@ -688,24 +688,6 @@ impl Transpiler {
         self
     }
 
-    /// Fill script names from archive group name hashes (`names/scripts.txt`).
-    pub fn with_script_group_names(
-        mut self,
-        scripts: &BTreeMap<u32, Vec<u8>>,
-        group_names: &HashMap<u32, String>,
-    ) -> Self {
-        for &script_id_raw in scripts.keys() {
-            let group = script_id_raw >> 16;
-            if let Some(name) = group_names.get(&group) {
-                self.symbol_table
-                    .script_names
-                    .entry(ScriptId(script_id_raw as i32))
-                    .or_insert_with(|| name.clone());
-            }
-        }
-        self
-    }
-
     pub fn with_components(
         mut self,
         parsed_components: &BTreeMap<u32, BTreeMap<u32, crate::interface::ComponentDeps>>,
@@ -783,11 +765,6 @@ impl Transpiler {
         self.script_signatures.insert(script_id, signature);
     }
 
-    /// Get a script's signature for cross-script call typing.
-    pub fn script_signature(&self, id: ScriptId) -> Option<&ScriptSignature> {
-        resolve_script_signature(&self.script_catalog, &self.script_signatures, id)
-    }
-
     pub fn script_signatures(&self) -> &HashMap<ScriptId, ScriptSignature> {
         &self.script_signatures
     }
@@ -828,11 +805,6 @@ impl Transpiler {
             script: writer.build_linear_script(decl),
             control_flow_fallback_reason: Some("forced_reversible".to_string()),
         })
-    }
-
-    pub fn transpile_to_ast(&self, script: &CompiledScript, script_id: ScriptId) -> Declaration {
-        let codegen = CodeGen::new(&self.symbol_table);
-        codegen.generate(script, script_id)
     }
 
     pub fn transpile_structured(

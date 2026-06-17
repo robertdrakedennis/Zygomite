@@ -21,8 +21,7 @@ use std::collections::HashSet;
 use std::collections::VecDeque;
 
 /// The four local-variable storage classes a script allocates (mirrors zwyz's
-/// `Command.LocalDomain`). Distinct from [`super::scope::LocalType`], which is the
-/// coarse render-time annotation.
+/// `Command.LocalDomain`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LocalDomain {
     Integer,
@@ -143,12 +142,6 @@ impl TypeInfer {
     pub fn equal(&mut self, a: Node, b: Node) {
         self.assign(a, b);
         self.assign(b, a);
-    }
-
-    /// `a == b` to a fixed type.
-    pub fn equal_type(&mut self, a: Node, ty: Type) {
-        let b = self.constant(ty);
-        self.equal(a, b);
     }
 
     /// Symmetric comparison constraint.

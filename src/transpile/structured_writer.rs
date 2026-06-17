@@ -119,10 +119,6 @@ impl<'a> StructuredWriter<'a> {
         }
     }
 
-    pub fn write_declaration(&self, decl: &Declaration) -> String {
-        self.build_script(decl).render()
-    }
-
     fn collect_imports(&self, decl: &Declaration) -> Vec<ImportStatement> {
         let mut index_imports = BTreeSet::new();
         let mut enum_imports = BTreeSet::new();

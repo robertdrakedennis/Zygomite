@@ -155,12 +155,6 @@ impl Diagnostics {
         self.push(Diagnostic::note_at(span, msg));
     }
 
-    pub fn has_errors(&self) -> bool {
-        self.diagnostics
-            .iter()
-            .any(|d| d.severity == Severity::Error)
-    }
-
     pub fn is_empty(&self) -> bool {
         self.diagnostics.is_empty()
     }
