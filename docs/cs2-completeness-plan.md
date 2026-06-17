@@ -141,7 +141,8 @@ assorted small order/length diffs, operand-evaluation-order swaps (`push_int_loc
 largest blocker** — control-flow structuring, a different bucket.
 
 **Foundation: client-extracted opcode stack-effect table.** Rather than hand-model opcodes one at a
-time, `scripts/extract-stack-effects.py` parses every handler in the client `ScriptRunner` into
+time, the `extract-stack-effects` subcommand parses every handler across the client clientscript
+package (`ScriptRunner.java` + the `*Ops.java` classes) into
 `data/stack-effects.txt` (1,097 commands, build independent: pops, pushes, pushed type). The recovery
 (`stack_effect`) consults it for pop/push counts after the hand-verified arms; the lowerer types
 generic command results from it. **947 +531, 910 +449; residual_pop 2314->1529 (947), ~halved (910).**

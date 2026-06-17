@@ -616,6 +616,69 @@ pub enum Command {
         #[arg(long)]
         out_dir: Option<PathBuf>,
     },
+    /// Extract the CS2 opcode stack-effect table from the client's clientscript
+    /// handler sources.
+    ///
+    /// Globs every `*.java` in the clientscript package (`ScriptRunner.java` plus
+    /// the `*Ops.java` handler classes), parses each `NAME(ClientScriptState
+    /// arg0)` handler's net `isp`/`osp`/`lsp` pops/pushes, keeps the ones whose
+    /// name is a known opcode with a non-zero effect, and writes the sorted table
+    /// to `data/stack-effects.txt`. Build independent; read-only over the client
+    /// tree.
+    ///
+    /// Example:
+    /// ```bash
+    /// cd tools/rs3-cache-rs
+    /// cargo run --release -- extract-stack-effects
+    /// ```
+    #[command(name = "extract-stack-effects")]
+    ExtractStackEffects {
+        /// Clientscript package dir globbed for `*.java` handler sources.
+        #[arg(long, default_value = crate::stack_effects::DEFAULT_CLIENTSCRIPT_DIR)]
+        clientscript_dir: PathBuf,
+        /// Opcode-name books (repeatable); a handler is kept only when its name
+        /// appears in one. Defaults to `opcodes-947.txt` + `opcodes-910.txt`.
+        #[arg(long)]
+        opcodes: Vec<PathBuf>,
+        /// Output path (default: `<data-dir>/stack-effects.txt`).
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
+    /// Derive a NEW build's CS2 opcode book from an OLD build's by cross-cache
+    /// script alignment.
+    ///
+    /// Opcodes are rescrambled every build, but unchanged scripts keep identical
+    /// instruction structure. For every clientscripts group present in both
+    /// caches with the same instruction count, decode the OLD script with the OLD
+    /// book, walk the NEW script's bytecode in lockstep (operand widths reused
+    /// from `script.rs`), and vote `old command → new opcode`. The votes give the
+    /// new book (old-book order, then extras sorted). Reuses `js5::decompress`.
+    ///
+    /// Example:
+    /// ```bash
+    /// cd tools/rs3-cache-rs
+    /// cargo run --release -- derive-opcode-book \
+    ///   --old-cache ../../cache/unpacked/947 --old-book data/opcodes-947.txt \
+    ///   --new-cache ../../cache/unpacked/948 --out data/opcodes-948.txt
+    /// ```
+    #[command(name = "derive-opcode-book")]
+    DeriveOpcodeBook {
+        /// OLD build flat cache dir (its `<archive>/*.dat` groups).
+        #[arg(long)]
+        old_cache: PathBuf,
+        /// NEW build flat cache dir.
+        #[arg(long)]
+        new_cache: PathBuf,
+        /// OLD build's opcode book (`name,id` per line).
+        #[arg(long)]
+        old_book: PathBuf,
+        /// Output path for the derived NEW book.
+        #[arg(long)]
+        out: PathBuf,
+        /// Cache archive holding the clientscripts groups (default `12`).
+        #[arg(long, default_value_t = 12)]
+        archive: u32,
+    },
     /// Dump config text files (config/dump.{type}) for `CacheOverlay` compatibility.
     #[command(name = "dump-configs")]
     DumpConfigs {
@@ -1335,6 +1398,52 @@ pub fn run(cli: Cli) -> Result<()> {
         })?;
         return Ok(());
     }
+    // `extract-stack-effects` parses the client clientscript Java sources + the
+    // opcode books; it needs no flat cache, so intercept it before `open_cache`
+    // (like `extract-protocol` / `survey-payloads`).
+    if let Command::ExtractStackEffects {
+        clientscript_dir,
+        opcodes,
+        out,
+    } = &cli.command
+    {
+        let default_opcodes: Vec<PathBuf> = crate::stack_effects::DEFAULT_OPCODE_FILES
+            .iter()
+            .map(|rel| cli.data_dir.join(rel.trim_start_matches("data/")))
+            .collect();
+        let opcode_files = if opcodes.is_empty() {
+            default_opcodes.as_slice()
+        } else {
+            opcodes.as_slice()
+        };
+        let default_out = cli.data_dir.join("stack-effects.txt");
+        crate::stack_effects::run(&crate::stack_effects::ExtractStackEffectsOpts {
+            clientscript_dir,
+            opcode_files,
+            out: out.as_deref().unwrap_or(&default_out),
+        })?;
+        return Ok(());
+    }
+    // `derive-opcode-book` reads two flat caches' archive-12 `.dat` groups + the
+    // old book directly (via `js5::decompress` + the `script.rs` width model); it
+    // does not open the global cache, so intercept it before `open_cache`.
+    if let Command::DeriveOpcodeBook {
+        old_cache,
+        new_cache,
+        old_book,
+        out,
+        archive,
+    } = &cli.command
+    {
+        crate::opcode_book::run(&crate::opcode_book::DeriveOpcodeBookOpts {
+            old_cache,
+            new_cache,
+            old_book,
+            out,
+            archive: *archive,
+        })?;
+        return Ok(());
+    }
     if let Command::AssembleScriptBatch { manifest, out_dir } = &cli.command {
         return crate::commands::assemble::run_batch(
             &cli.data_dir,
@@ -1886,6 +1995,8 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::ExtractProtocol { .. } => unreachable!("handled before cache open"),
         Command::GenerateProtocol { .. } => unreachable!("handled before cache open"),
         Command::SurveyPayloads { .. } => unreachable!("handled before cache open"),
+        Command::ExtractStackEffects { .. } => unreachable!("handled before cache open"),
+        Command::DeriveOpcodeBook { .. } => unreachable!("handled before cache open"),
         Command::GenerateCs2Data { .. } => unreachable!("handled before cache open"),
         Command::Cs2Coverage { .. } => unreachable!("handled before cache open"),
         Command::GenerateTsIds { .. } => unreachable!("handled before cache open"),

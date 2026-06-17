@@ -604,8 +604,8 @@ impl OpcodeStackEffect {
     }
 }
 
-/// The client-extracted opcode stack-effect table (see
-/// `scripts/extract-stack-effects.py` and `data/stack-effects.txt`). Keyed by
+/// The client-extracted opcode stack-effect table (see the
+/// `extract-stack-effects` subcommand and `data/stack-effects.txt`). Keyed by
 /// command name; build independent.
 pub fn opcode_stack_effect(command: &str) -> Option<OpcodeStackEffect> {
     manual_opcode_stack_effect(command).or_else(|| opcode_stack_effect_full().get(command).copied())

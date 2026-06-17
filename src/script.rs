@@ -780,6 +780,75 @@ fn decode_operand(
     }
 }
 
+/// Geometry of a compiled script's regions: `(code_start, header_pos,
+/// code_len)`. `code_start` is the byte position the instruction stream begins
+/// at (just past the leading `gjstrnull` name); `header_pos` is where the code
+/// region ends and the trailer header begins; `code_len` is the declared
+/// instruction count.
+///
+/// This shares the exact header-size arithmetic and name-skip that
+/// [`decode_script`] performs, exposed for the cross-cache lockstep walk in
+/// `opcode_book.rs` (deriving a new build's opcode book) without re-deriving the
+/// bytecode layout.
+pub(crate) fn script_header_geometry(data: &[u8], version: u32) -> Result<(usize, usize, usize)> {
+    let mut packet = Packet::new(data);
+    let mut header_size = 12_usize;
+    if version >= 642 {
+        header_size = header_size.checked_add(4).context("header size overflow")?;
+    }
+    if version >= 488 {
+        packet.set_pos(data.len().saturating_sub(2))?;
+        let trailer_size = usize::from(packet.g2()?);
+        header_size = header_size
+            .checked_add(2)
+            .and_then(|v| v.checked_add(trailer_size))
+            .context("header size overflow")?;
+    }
+    let header_pos = data
+        .len()
+        .checked_sub(header_size)
+        .context("invalid script header size")?;
+
+    packet.set_pos(header_pos)?;
+    let code_len = usize::try_from(packet.g4s()?).context("negative script code length")?;
+
+    // The name is a `gjstrnull` from position 0; the instruction stream starts
+    // immediately after it.
+    packet.set_pos(0)?;
+    if version >= 459 {
+        let _name = packet.gjstrnull()?;
+    }
+    Ok((packet.pos(), header_pos, code_len))
+}
+
+/// Advance `packet` past a single instruction's operand for `command`, without
+/// materializing the value or consulting the switch tables. The width decisions
+/// mirror [`decode_operand`] exactly (the single source of truth for operand
+/// widths per command), so the lockstep walk in `opcode_book.rs` stays in step
+/// with the real decoder. `switch` consumes only its 4-byte table index — the
+/// same bytes [`decode_operand`] reads before the (in-stream-free) table lookup.
+pub(crate) fn skip_operand_bytes(
+    command: &str,
+    packet: &mut Packet<'_>,
+    version: u32,
+) -> Result<()> {
+    // `switch` is the one command whose [`decode_operand`] arm reads from the
+    // switch tables; the lockstep walk supplies none, so advance past its bare
+    // 4-byte table index directly (the only bytes the stream holds here, and all
+    // the walk needs). Every other command's operand is self-contained in the
+    // stream, so the real decoder advances it correctly with empty tables.
+    if command == "switch" {
+        let _table_index = packet.g4s()?;
+        return Ok(());
+    }
+    let no_switch: &[Vec<i32>] = &[];
+    let _operand = decode_operand(
+        command, /* is_large_operand */ false, packet, version, /* index */ 0, no_switch,
+        no_switch,
+    )?;
+    Ok(())
+}
+
 // ── Encoder ──
 
 /// Information about a switch instruction that needs patching.

@@ -15,7 +15,7 @@ Supported native base revisions:
 1. Decompress the OpenRS2 tar into `../../cache/static-caches/`, extract flat
    to `../../cache/unpacked/<build>/` (`tar -xf ... --strip-components=1`).
 2. Derive the CS2 opcode book — opcodes are fully rescrambled every build:
-   `python3 scripts/derive-opcode-book.py --old-cache .../unpacked/947
+   `cargo run --release -- derive-opcode-book --old-cache .../unpacked/947
    --new-cache .../unpacked/<build> --old-book data/opcodes-947.txt
    --out data/opcodes-<build>.txt` (aligns unchanged scripts across caches;
    948: 20,416 scripts aligned, 1,230 commands, 0 conflicts, all 20,621
