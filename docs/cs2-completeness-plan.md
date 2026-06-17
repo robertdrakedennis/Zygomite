@@ -1,5 +1,17 @@
 # CS2 Decompiler / Compiler / Transpiler — Completeness Plan
 
+> **STATUS (2026-06-15) — this grind is essentially done; read the baselines below as history.**
+> Both reversible surfaces now recompile byte-identically across the full corpus on the current
+> builds: the RuneScript byte gate (`RS3_RUNESCRIPT_GATE`) is **0 failures on 910 (14,313 editable
+> scripts) and 948 (20,621)**, and the TypeScript surface was already byte-exact. `editable_structured`
+> now holds for ~100% of the corpus — the 8.7% / 12.2% "editable" figures below are the historical
+> 2026 starting point (947 / 910), kept for the record; §P1b already records the climb to 100%. The
+> only open axis is **quality, not fidelity or editability**: ~69% structure to clean nested control
+> flow, ~25% fall back to a still-byte-exact, still-editable linear-goto form, ~2% to stack pseudo-ops
+> (the `branch:operand` / `switch:operand` tail). Current state + mechanisms: the
+> `cs2-transpiler-real-state` memory and `plans/tooling/cs2-runescript-decompiler.md`. (Note: the donor
+> build is now 948, not 947 — the 947 columns below are historical.)
+
 Goal: move the toolchain from "lossless byte round-trip + best-effort structured
 decompile" to "high-coverage, editable, recompilable structured TypeScript across
 the full corpus on both builds (910 + 947)".

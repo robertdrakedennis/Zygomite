@@ -45,6 +45,7 @@ they only matter if future scripts use them.
 - Decode varps and varbits
 - Decode and decompile CS2 scripts; dependency trees for interfaces, scripts, varps, varbits, and configs (`dep-tree-*`)
 - Transpile CS2 to reversible TypeScript (`--output-style high-ts|reversible`) and assemble it back to CS2 (`assemble-script`, batch via `assemble-script-batch`)
+- Render the same CS2 IR as **byte-exact RuneScript** — a second reversible surface (`render_runescript` / `parse_runescript`) validated by the `RS3_RUNESCRIPT_GATE` round-trip (0 failures on 910 + 948); proven, not yet the default editing surface
 - Validate donor `947 -> 910` script/interface slices with migration audit (`migrate-check`, `migrate-script`)
 - Build native overlay plan JSON for Bun `cacheoverlay` wrapper (`overlay-plan`), plus the overlay's semantic-tree inputs (`prepare-overlay`, `dump-raw-flat`, `dump-refs`, `dump-configs`)
 - Decode RT7 models, maps (`verify-map-archive`), and build the NXT-model clip-flag collision grid per map square (`build-collision`)
