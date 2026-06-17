@@ -288,3 +288,20 @@ pub fn emit_expr(expr: &Expr) -> String {
         Expr::Bin(l, op, r) => format!("{} {op} {}", emit_expr(l), emit_expr(r)),
     }
 }
+
+/// Emit an expression in the survey's canonical schema form: identical to
+/// [`emit_expr`] except array accesses carry **no** trailing `!`
+/// (`name[idx]`, not `name[idx]!`).
+///
+/// This mirrors the Python survey's `_ExprParser` re-emission, which is what the
+/// `payloads.json` `arg` field stores. The strict-tsc `!` is a generator-only
+/// concern ([`emit_expr`]) and must not leak into the survey output.
+pub fn emit_schema(expr: &Expr) -> String {
+    match expr {
+        Expr::Ident(name) => name.clone(),
+        Expr::Int(v) => v.clone(),
+        Expr::Index(name, idx) => format!("{name}[{idx}]"),
+        Expr::Paren(inner) => format!("({})", emit_schema(inner)),
+        Expr::Bin(l, op, r) => format!("{} {op} {}", emit_schema(l), emit_schema(r)),
+    }
+}

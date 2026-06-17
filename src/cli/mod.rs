@@ -590,6 +590,32 @@ pub enum Command {
         #[arg(long)]
         check: bool,
     },
+    /// Survey the protocol payloads: classify every packet + emit the schema tranche.
+    ///
+    /// Parses every hand-written `ServerProt.<NAME>.encode` body in the server's
+    /// `ServerProt.ts` and the matching `Client.java` decode branch, classifies
+    /// each end simple/complex per the DSL v1/v2 rules, and writes
+    /// `payload-classification.json` (all packets) + `payloads.json` (the
+    /// simple+v2 tranche). Read-only over both source trees; errors (non-zero
+    /// exit) before writing if a required tranche member is missing.
+    ///
+    /// Example:
+    /// ```bash
+    /// cd tools/rs3-cache-rs
+    /// cargo run --release -- --data-dir data survey-payloads
+    /// ```
+    #[command(name = "survey-payloads")]
+    SurveyPayloads {
+        /// Root of the client checkout (holds `client/src/main/java/...`).
+        #[arg(long, default_value = "../../client")]
+        client_root: PathBuf,
+        /// Root of the server checkout (holds `src/jagex/network/protocol/...`).
+        #[arg(long, default_value = "../../server")]
+        server_root: PathBuf,
+        /// Output directory (default: `<data-dir>/protocol/910`).
+        #[arg(long)]
+        out_dir: Option<PathBuf>,
+    },
     /// Dump config text files (config/dump.{type}) for `CacheOverlay` compatibility.
     #[command(name = "dump-configs")]
     DumpConfigs {
@@ -1295,6 +1321,20 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         return Ok(());
     }
+    if let Command::SurveyPayloads {
+        client_root,
+        server_root,
+        out_dir,
+    } = &cli.command
+    {
+        let default_out = cli.data_dir.join("protocol").join("910");
+        crate::protocol_registry::run_survey(&crate::protocol_registry::SurveyPayloadsOpts {
+            client_root,
+            server_root,
+            out_dir: out_dir.as_deref().unwrap_or(&default_out),
+        })?;
+        return Ok(());
+    }
     if let Command::AssembleScriptBatch { manifest, out_dir } = &cli.command {
         return crate::commands::assemble::run_batch(
             &cli.data_dir,
@@ -1845,6 +1885,7 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::GenerateCs2Java { .. } => unreachable!("handled before cache open"),
         Command::ExtractProtocol { .. } => unreachable!("handled before cache open"),
         Command::GenerateProtocol { .. } => unreachable!("handled before cache open"),
+        Command::SurveyPayloads { .. } => unreachable!("handled before cache open"),
         Command::GenerateCs2Data { .. } => unreachable!("handled before cache open"),
         Command::Cs2Coverage { .. } => unreachable!("handled before cache open"),
         Command::GenerateTsIds { .. } => unreachable!("handled before cache open"),

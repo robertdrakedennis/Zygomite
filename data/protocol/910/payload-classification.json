@@ -333,7 +333,7 @@
   },
   "MAP_ANIM": {
     "client": "complex:no-reads",
-    "server": "complex:no_encode_override"
+    "server": "complex:non-v1-codec:p2s"
   },
   "MAP_PROJANIM": {
     "client": "complex:no-reads",

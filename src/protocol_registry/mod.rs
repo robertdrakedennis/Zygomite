@@ -22,15 +22,24 @@
 //! cargo run --release -- --data-dir data generate-protocol --check
 //! ```
 //!
+//! `survey-payloads` is a third command (ported from the retired
+//! `scripts/protocol-payload-survey.py`): it parses the server's hand-written
+//! `ServerProt.ts` encode bodies and the client's `Client.java` decode branches,
+//! classifies each end simple/complex per the DSL rules, and emits
+//! `payload-classification.json` + `payloads.json` (the simple+v2 tranche). It is
+//! read-only over both source trees.
+//!
 //! The implementation is split by concern: [`types`] (the schema data model),
 //! [`parse`] (Java/TS source parsing), [`extract`] (the `extract-protocol`
 //! command + cross-diff), [`expr`] (the payload size-expression mini-language),
-//! and [`generate`] (the `generate-protocol` command + payload/encoder codegen).
+//! [`generate`] (the `generate-protocol` command + payload/encoder codegen), and
+//! [`survey`] (the `survey-payloads` classification + schema audit).
 
 mod expr;
 mod extract;
 mod generate;
 mod parse;
+mod survey;
 mod types;
 
 pub use extract::{ExtractOutput, ExtractProtocolOpts, extract, run_extract};
@@ -39,6 +48,7 @@ pub use generate::{
     generate, run_generate,
 };
 pub use parse::{parse_java, parse_ts};
+pub use survey::{SurveyOutput, SurveyPayloadsOpts, run_survey, survey};
 pub use types::{
     Divergence, DivergenceBaseline, Finding, JavaPacket, JavaParse, Prot, Schema, SchemaPacket,
     TsPacket,
